@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="OpponentPlanningStub" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Planning/OpponentPlanningStub.gd" id="1_stub"]
+[ext_resource type="Script" path="res://Scripts/Planning/OpponentPlacementEntry.gd" id="2_entry"]
+[ext_resource type="Resource" path="res://Champions/AzealeaBorealis.tres" id="3_champ"]
+
+[sub_resource type="Resource" id="placement_1"]
+script = ExtResource("2_entry")
+champion = ExtResource("3_champ")
+square = Vector2i(1, 2)
+
+[resource]
+script = ExtResource("1_stub")
+placements = Array[ExtResource("2_entry")]([SubResource("placement_1")])

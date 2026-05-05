@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="ChampionData" load_steps=5 format=3 uid="uid://bqxv8n7championaze"]
+
+[ext_resource type="Script" uid="uid://ch4mp10nd4t01" path="res://Scripts/Domain/ChampionData.gd" id="1_chdata"]
+[ext_resource type="Script" uid="uid://c0m8t5t4t5t01" path="res://Scripts/Domain/CombatStats.gd" id="2_cstats"]
+[ext_resource type="Texture2D" uid="uid://cchjmuhoqhqnt" path="res://Dragon.png" id="3_portrait"]
+
+[sub_resource type="Resource" id="sub_stats"]
+script = ExtResource("2_cstats")
+max_health = 20
+current_health = 20
+attack = 1
+defense = 2
+speed = 0
+
+[resource]
+script = ExtResource("1_chdata")
+definition_id = &"azealea_borealis"
+display_name = "Azealea Borealis"
+portrait = ExtResource("3_portrait")
+base_stats = SubResource("sub_stats")
+color_tag = &"borealis"

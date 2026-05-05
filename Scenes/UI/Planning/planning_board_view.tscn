@@ -1,0 +1,9 @@
+[gd_scene load_steps=3 format=3 uid="uid://planningboardview01"]
+
+[ext_resource type="Script" path="res://Scripts/UI/Planning/PlanningBoardView.gd" id="1_pbv"]
+[ext_resource type="Texture2D" path="res://Assets/GridCellTopLeft.tres" id="2_gridtex"]
+
+[node name="PlanningBoardView" type="Control"]
+layout_mode = 2
+script = ExtResource("1_pbv")
+cell_texture = ExtResource("2_gridtex")

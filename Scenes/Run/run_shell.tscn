@@ -1,0 +1,141 @@
+[gd_scene load_steps=11 format=3 uid="uid://cdmxrunshell001"]
+
+[ext_resource type="Script" path="res://Scripts/Run/RunShell.gd" id="1_shell"]
+[ext_resource type="Script" path="res://Scripts/Run/RunController.gd" id="2_controller"]
+[ext_resource type="Script" path="res://Scripts/Planning/PlanningController.gd" id="3_planning"]
+[ext_resource type="PackedScene" uid="uid://cdmxrunhud001" path="res://Scenes/Run/run_hud.tscn" id="4_hud"]
+[ext_resource type="Resource" path="res://Resources/Run/DefaultRunParams.tres" id="5_params"]
+[ext_resource type="Resource" path="res://Resources/Planning/DefaultPlanningDeck.tres" id="6_deck"]
+[ext_resource type="Resource" path="res://Resources/Planning/DefaultOpponentStub.tres" id="7_stub"]
+[ext_resource type="PackedScene" uid="uid://planningboardview01" path="res://Scenes/UI/Planning/planning_board_view.tscn" id="8_board"]
+[ext_resource type="PackedScene" uid="uid://championrosterstrip01" path="res://Scenes/UI/Planning/champion_roster_strip.tscn" id="9_roster"]
+[ext_resource type="PackedScene" uid="uid://itempoolstrip01" path="res://Scenes/UI/Planning/item_pool_strip.tscn" id="10_items"]
+
+[node name="RunShell" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_shell")
+
+[node name="ColorRect" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.07, 0.09, 0.12, 1)
+
+[node name="RunController" type="Node" parent="."]
+script = ExtResource("2_controller")
+initial_run_params = ExtResource("5_params")
+planning_controller = NodePath("../PlanningController")
+
+[node name="PlanningController" type="Node" parent="."]
+script = ExtResource("3_planning")
+run_controller = NodePath("../RunController")
+player_deck = ExtResource("6_deck")
+opponent_stub = ExtResource("7_stub")
+auto_place_deck_hero = false
+
+[node name="ScrollContainer" type="ScrollContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="ScrollContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
+
+[node name="MarginTop" type="MarginContainer" parent="ScrollContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/margin_left = 32
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 32
+theme_override_constants/margin_bottom = 0
+
+[node name="RunHud" parent="ScrollContainer/VBoxContainer/MarginTop" instance=ExtResource("4_hud")]
+layout_mode = 2
+
+[node name="PlanningSection" type="VBoxContainer" parent="ScrollContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="PlanningLabel" type="Label" parent="ScrollContainer/VBoxContainer/PlanningSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Your champion roster"
+
+[node name="ChampionRosterStrip" parent="ScrollContainer/VBoxContainer/PlanningSection" instance=ExtResource("9_roster")]
+layout_mode = 2
+
+[node name="BoardLabel" type="Label" parent="ScrollContainer/VBoxContainer/PlanningSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Board  (top = opponent, bottom = your side)"
+
+[node name="PlanningBoardView" parent="ScrollContainer/VBoxContainer/PlanningSection" instance=ExtResource("8_board")]
+layout_mode = 2
+cell_px = 90
+
+[node name="ItemsLabel" type="Label" parent="ScrollContainer/VBoxContainer/PlanningSection"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Items from your deck"
+
+[node name="ItemPoolStrip" parent="ScrollContainer/VBoxContainer/PlanningSection" instance=ExtResource("10_items")]
+layout_mode = 2
+
+[node name="DebugSection" type="MarginContainer" parent="ScrollContainer/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/margin_left = 32
+theme_override_constants/margin_top = 40
+theme_override_constants/margin_right = 32
+theme_override_constants/margin_bottom = 16
+
+[node name="DebugPanel" type="VBoxContainer" parent="ScrollContainer/VBoxContainer/DebugSection"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="DebugTitle" type="Label" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Run debug"
+
+[node name="EndPlanningButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel"]
+layout_mode = 2
+text = "End planning (lock)"
+
+[node name="ResolveCombatButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel"]
+layout_mode = 2
+text = "Resolve combat (stub)"
+
+[node name="ApplyRoundResultButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel"]
+layout_mode = 2
+text = "Apply round result"
+
+[node name="ResetLayoutButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel"]
+layout_mode = 2
+text = "Reset layout"
+
+[node name="StartNewRunButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel"]
+layout_mode = 2
+text = "Start new run"
+
+[node name="BackToMenuButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel"]
+layout_mode = 2
+text = "Back to main menu"
+
+[connection signal="pressed" from="ScrollContainer/VBoxContainer/DebugSection/DebugPanel/EndPlanningButton" to="." method="_on_end_planning_pressed"]
+[connection signal="pressed" from="ScrollContainer/VBoxContainer/DebugSection/DebugPanel/ResolveCombatButton" to="." method="_on_resolve_combat_pressed"]
+[connection signal="pressed" from="ScrollContainer/VBoxContainer/DebugSection/DebugPanel/ApplyRoundResultButton" to="." method="_on_apply_round_result_pressed"]
+[connection signal="pressed" from="ScrollContainer/VBoxContainer/DebugSection/DebugPanel/ResetLayoutButton" to="." method="_on_reset_layout_pressed"]
+[connection signal="pressed" from="ScrollContainer/VBoxContainer/DebugSection/DebugPanel/StartNewRunButton" to="." method="_on_start_new_run_pressed"]
+[connection signal="pressed" from="ScrollContainer/VBoxContainer/DebugSection/DebugPanel/BackToMenuButton" to="." method="_on_back_to_menu_pressed"]

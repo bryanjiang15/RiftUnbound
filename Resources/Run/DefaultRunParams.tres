@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="RunParams" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Run/RunParams.gd" id="1_runparams"]
+
+[resource]
+script = ExtResource("1_runparams")
+starting_player_health = 100
+max_rounds = 0
+damage_on_loss_flat = 5
+damage_per_survivor = 2
+use_flat_damage = true
+stub_always_win = false
+stub_always_lose = false
+stub_enemy_survivors_on_loss = 3
+healing_on_round_win = 0
