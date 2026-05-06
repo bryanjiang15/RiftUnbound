@@ -1,8 +1,9 @@
-[gd_scene load_steps=2 format=3 uid="uid://itempoolstrip01"]
+[gd_scene format=3 uid="uid://dc7ascq35sl41"]
 
 [ext_resource type="Script" path="res://Scripts/UI/Planning/ItemPoolStrip.gd" id="1_items"]
+[ext_resource type="PackedScene" uid="uid://42hlngkppsd3" path="res://Scenes/UI/card_ui.tscn" id="2_cardui"]
 
-[node name="ItemPoolStrip" type="HBoxContainer"]
-layout_mode = 2
-theme_override_constants/separation = 8
+[node name="ItemPoolStrip" type="Container" unique_id=1785170115]
+custom_minimum_size = Vector2(0, 140)
 script = ExtResource("1_items")
+card_ui = ExtResource("2_cardui")

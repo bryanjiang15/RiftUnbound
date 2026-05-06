@@ -1,11 +1,12 @@
-[gd_resource type="Resource" script_class="Deck" load_steps=4 format=3]
+[gd_resource type="Resource" script_class="Deck" format=3 uid="uid://b340bhaa0w26j"]
 
-[ext_resource type="Script" path="res://Scripts/Card/Deck.gd" id="1_deck"]
-[ext_resource type="Resource" path="res://Champions/AzealeaBorealis.tres" id="2_hero"]
-[ext_resource type="Resource" path="res://Cards/Base Set/Azealea.tres" id="3_card"]
+[ext_resource type="Script" uid="uid://ba7rx7evbi1ai" path="res://Scripts/Card/Deck.gd" id="1_deck"]
+[ext_resource type="Script" uid="uid://2g1x3kra3kn3" path="res://Scripts/Card/CardData.gd" id="2_7xqi0"]
+[ext_resource type="Resource" uid="uid://cwyojonwjfbqc" path="res://Champions/AzealeaBorealis.tres" id="2_hero"]
+[ext_resource type="Resource" uid="uid://dbl2w0bn6irik" path="res://Cards/Base Set/Azealea.tres" id="3_card"]
 
 [resource]
 script = ExtResource("1_deck")
 hero = ExtResource("2_hero")
-main = Array[ExtResource("3_card")]([ExtResource("3_card"), ExtResource("3_card"), ExtResource("3_card"), ExtResource("3_card"), ExtResource("3_card")])
+main = Array[ExtResource("2_7xqi0")]([ExtResource("3_card"), ExtResource("3_card"), ExtResource("3_card"), ExtResource("3_card"), ExtResource("3_card")])
 title = "Debug planning deck"

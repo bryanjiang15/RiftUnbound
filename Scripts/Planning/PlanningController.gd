@@ -1,7 +1,12 @@
 extends Node
 class_name PlanningController
 
-## Owns BoardState for the current planning segment and syncs with RunController lifecycle.
+## Orchestrates the planning phase for a single run.
+##
+## Owns the BoardState and rebuilds it at the start of each run and each new round.
+## Bridges RunController lifecycle signals (run_started, round_advanced) with board
+## setup, opponent stub placement, and optional auto-placement of the deck hero.
+## Exposes validate_planning() so RunController can gate the phase transition.
 
 signal board_reset
 
@@ -24,6 +29,8 @@ func _ready() -> void:
 		opponent_stub = OpponentPlanningStub.new()
 	call_deferred("_try_connect_run")
 
+## Deferred connection to RunController signals. Deferred so that the scene tree is
+## fully ready before signal wiring, then triggers an immediate board reset.
 func _try_connect_run() -> void:
 	if run_controller == null:
 		return
@@ -39,6 +46,8 @@ func _on_run_started() -> void:
 func _on_round_advanced(_idx: int) -> void:
 	reset_board()
 
+## Creates a fresh BoardState, applies the opponent stub, optionally auto-places the
+## deck hero, then emits `board_reset` so UI components can refresh their display.
 func reset_board() -> void:
 	if grid_spec == null:
 		grid_spec = GridSpec.default_square_5x3_two_sided()
@@ -52,9 +61,12 @@ func reset_board() -> void:
 	board_state.rebuild_occupancy()
 	board_reset.emit()
 
+## Returns the active BoardState for the current round. May be null before the first reset.
 func get_board_state() -> BoardState:
 	return board_state
 
+## Runs PlanningValidator against the current board and params.
+## Returns an empty array when the board is legal; otherwise human-readable error strings.
 func validate_planning() -> PackedStringArray:
 	if board_state == null:
 		return PackedStringArray(["Board state missing."])

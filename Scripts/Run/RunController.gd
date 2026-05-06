@@ -1,6 +1,13 @@
 extends Node
 class_name RunController
 
+## Central state machine driving a single run from start to end.
+##
+## Owns RunState and InstanceIdScope for the active run, transitions between
+## PLANNING → COMBAT_RESOLVE → ROUND_RESULT, applies damage/healing, and emits
+## signals that RunHud and PlanningController listen to for UI / board updates.
+## Debug buttons in RunShell call the `request_*` methods directly.
+
 signal phase_changed(new_phase: RoundPhase.Phase)
 signal run_health_changed(new_health: int)
 signal run_ended(player_won_or_survived: bool)
@@ -20,9 +27,12 @@ var _phase: RoundPhase.Phase = RoundPhase.Phase.PLANNING
 var _pending_outcome: CombatOutcome
 var _last_snapshot: PlanningSnapshot
 
+## Returns the phase the run is currently in.
 func get_current_phase() -> RoundPhase.Phase:
 	return _phase
 
+## Returns the PlanningSnapshot locked when planning last ended, or null if the
+## planning phase has not been completed yet this run.
 func get_last_planning_snapshot() -> PlanningSnapshot:
 	return _last_snapshot
 
@@ -39,6 +49,8 @@ func restart_run() -> void:
 		p = RunParams.new()
 	start_run(p)
 
+## Initialises a fresh RunState and InstanceIdScope, resets the phase to PLANNING,
+## and emits phase_changed, run_health_changed, and run_started in order.
 func start_run(params: RunParams) -> void:
 	scope = InstanceIdScope.new()
 	scope.reset(1)
@@ -58,6 +70,9 @@ func start_run(params: RunParams) -> void:
 	run_health_changed.emit(run_state.player_run_health)
 	run_started.emit()
 
+## Attempts to lock the planning phase and move to COMBAT_RESOLVE.
+## If PlanningController is set, validates the board first; emits planning_advance_rejected
+## with error strings and returns early on any violation.
 func request_advance_from_planning() -> void:
 	if run_state == null or run_state.is_terminal:
 		return
@@ -76,6 +91,8 @@ func request_advance_from_planning() -> void:
 	_phase = RoundPhase.Phase.COMBAT_RESOLVE
 	phase_changed.emit(_phase)
 
+## Runs the stub combat resolver and transitions to ROUND_RESULT.
+## Must be called while in COMBAT_RESOLVE; ignored (with a warning) otherwise.
 func request_resolve_combat_stub() -> void:
 	if run_state == null or run_state.is_terminal:
 		return
@@ -87,6 +104,8 @@ func request_resolve_combat_stub() -> void:
 	_phase = RoundPhase.Phase.ROUND_RESULT
 	phase_changed.emit(_phase)
 
+## Applies the pending CombatOutcome: adjusts player health, checks terminal conditions,
+## then either emits run_ended or advances to the next round and resets to PLANNING.
 func request_apply_round_result() -> void:
 	if run_state == null or run_state.is_terminal:
 		return

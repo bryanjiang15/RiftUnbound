@@ -1,10 +1,15 @@
 extends Resource
 class_name OpponentPlanningStub
 
-## Local-test opponent layout (Phase C). Not the Phase E ghost pipeline.
+## Hardcoded opponent layout used during local development (Phase C stub).
+##
+## Not connected to the Phase E ghost/replay pipeline. Configure placements in the
+## inspector via DefaultOpponentStub.tres; swap the resource to test different boards.
 
 @export var placements: Array[OpponentPlacementEntry] = []
 
+## Clears the opponent side of `board` and re-places every entry from `placements`.
+## Safe to call each round reset; entries with a null champion are silently skipped.
 func apply_to(board: BoardState, scope: InstanceIdScope) -> void:
 	if board == null or scope == null:
 		return

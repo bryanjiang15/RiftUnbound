@@ -1,8 +1,14 @@
 extends RefCounted
 class_name PlanningValidator
 
-## Returns empty PackedStringArray if valid; otherwise human-readable reasons (UI / debug).
+## Pure validation utilities for BoardState.
+##
+## All methods are static — no instance state. Errors are returned as human-readable
+## strings so they can be shown directly in the HUD or logged without extra formatting.
 
+## Validates the entire board against `params` rules. Returns an empty array when the
+## board is legal; otherwise returns one string per violation (bounds, zone, duplicates,
+## slot limits, and occupancy consistency).
 static func validate(board: BoardState, params: PlanningParams) -> PackedStringArray:
 	var errs: PackedStringArray = []
 	if board == null or board.grid_spec == null:

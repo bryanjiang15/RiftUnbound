@@ -1,6 +1,11 @@
 extends VBoxContainer
 class_name RunHud
 
+## In-run HUD displaying live run status (health, round, phase, run ID, opponent count).
+##
+## Bind to a RunController via bind_controller() after both nodes are ready.
+## All label updates are driven by RunController signals; the HUD never polls state.
+
 @onready var health_label: Label = %HealthLabel
 @onready var round_label: Label = %RoundLabel
 @onready var phase_label: Label = %PhaseLabel
@@ -10,6 +15,8 @@ class_name RunHud
 
 var _controller: RunController
 
+## Connects to all RunController signals and performs an immediate full refresh.
+## Safely disconnects from any previously bound controller first.
 func bind_controller(controller: RunController) -> void:
 	if _controller != null and is_instance_valid(_controller):
 		_disconnect_controller(_controller)
@@ -43,13 +50,17 @@ func _refresh_all() -> void:
 	phase_label.text = "Phase: %s" % RoundPhase.phase_to_string(_controller.get_current_phase())
 	run_id_label.text = "Run id: %s" % rs.run_id
 
+## Updates the opponent champion count label. Called by RunShell on board_reset.
 func update_opponent_label(count: int) -> void:
 	opponent_label.text = "Opponent: %d champion%s" % [count, "s" if count != 1 else ""]
 
+## Shows a planning error banner with the joined error strings. Automatically hidden
+## by clear_planning_error() when the phase changes.
 func show_planning_error(errors: PackedStringArray) -> void:
 	planning_error_label.text = "Planning error: " + ", ".join(errors)
 	planning_error_label.visible = true
 
+## Hides and clears the planning error banner.
 func clear_planning_error() -> void:
 	planning_error_label.visible = false
 	planning_error_label.text = ""

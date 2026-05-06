@@ -25,7 +25,7 @@ func _ready() -> void:
 
 	# ── Case 2: collision ────────────────────────────────────────────────────
 	board = BoardState.new(spec)
-	var valid_player_cell := GridCoord.from_square(Vector2i(1, 7))
+	var valid_player_cell := GridCoord.from_square(Vector2i(1, 4))
 	var first_ok := board.place_player_champion(def, valid_player_cell, scope, params)
 	var second_ok := board.place_player_champion(def2, valid_player_cell, scope, params)
 	_check("first placement on valid cell succeeds", first_ok == true)
@@ -34,7 +34,7 @@ func _ready() -> void:
 	# ── Case 3: slot overflow ────────────────────────────────────────────────
 	board = BoardState.new(spec)
 	scope.reset(1)
-	var champ_cell := GridCoord.from_square(Vector2i(0, 6))
+	var champ_cell := GridCoord.from_square(Vector2i(0, 3))
 	board.place_player_champion(def, champ_cell, scope, params)
 	var champ_id := board.player_champions[0].instance_id
 	var card1 := _make_card_instance(scope)
@@ -51,12 +51,12 @@ func _ready() -> void:
 	# ── Case 4: wrong half ───────────────────────────────────────────────────
 	board = BoardState.new(spec)
 	scope.reset(1)
-	# spec: rows_per_side=5, so player rows=5..9, opponent rows=0..4
+	# spec: rows_per_side=3, so player rows=3..5, opponent rows=0..2
 	var opp_half_cell := GridCoord.from_square(Vector2i(1, 2))   # y=2 → opponent half
-	var player_half_cell := GridCoord.from_square(Vector2i(1, 7)) # y=7 → player half
+	var player_half_cell := GridCoord.from_square(Vector2i(1, 4)) # y=4 → player half
 	_check("player cannot place on opponent half (row 2)",
 		board.place_player_champion(def, opp_half_cell, scope, params) == false)
-	_check("opponent cannot place on player half (row 7)",
+	_check("opponent cannot place on player half (row 4)",
 		board.place_opponent_champion(def, player_half_cell, scope) == false)
 
 	# ── Bonus: clear() ───────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ func _ready() -> void:
 	# ── Bonus: occupancy consistent after place ───────────────────────────────
 	board = BoardState.new(spec)
 	scope.reset(1)
-	var pcell := GridCoord.from_square(Vector2i(2, 9))
+	var pcell := GridCoord.from_square(Vector2i(2, 4))
 	board.place_player_champion(def, pcell, scope, params)
 	var occ_entry: Variant = board.occupancy.get(pcell.to_key(), null)
 	_check("occupancy consistent after place",
@@ -84,7 +84,7 @@ func _ready() -> void:
 	board = BoardState.new(spec)
 	scope.reset(1)
 	var from_cell := GridCoord.from_square(Vector2i(0, 5))
-	var to_cell   := GridCoord.from_square(Vector2i(2, 8))
+	var to_cell   := GridCoord.from_square(Vector2i(4, 4))
 	board.place_player_champion(def, from_cell, scope, params)
 	var iid := board.player_champions[0].instance_id
 	var moved := board.move_player_champion(iid, to_cell, scope)
@@ -95,7 +95,7 @@ func _ready() -> void:
 	# ── Bonus: remove_player_champion ────────────────────────────────────────
 	board = BoardState.new(spec)
 	scope.reset(1)
-	var rm_cell := GridCoord.from_square(Vector2i(1, 6))
+	var rm_cell := GridCoord.from_square(Vector2i(1, 3))
 	board.place_player_champion(def, rm_cell, scope, params)
 	var rm_id := board.player_champions[0].instance_id
 	var removed := board.remove_player_champion(rm_id)

@@ -1,17 +1,17 @@
-[gd_scene load_steps=11 format=3 uid="uid://cdmxrunshell001"]
+[gd_scene format=3 uid="uid://dmy6se5ghs8vk"]
 
-[ext_resource type="Script" path="res://Scripts/Run/RunShell.gd" id="1_shell"]
-[ext_resource type="Script" path="res://Scripts/Run/RunController.gd" id="2_controller"]
-[ext_resource type="Script" path="res://Scripts/Planning/PlanningController.gd" id="3_planning"]
+[ext_resource type="Script" uid="uid://30ikjln43l23" path="res://Scripts/Run/RunShell.gd" id="1_shell"]
+[ext_resource type="Script" uid="uid://b22v0cg12ns5g" path="res://Scripts/Run/RunController.gd" id="2_controller"]
+[ext_resource type="Script" uid="uid://bpi6dibxaodol" path="res://Scripts/Planning/PlanningController.gd" id="3_planning"]
 [ext_resource type="PackedScene" uid="uid://cdmxrunhud001" path="res://Scenes/Run/run_hud.tscn" id="4_hud"]
 [ext_resource type="Resource" path="res://Resources/Run/DefaultRunParams.tres" id="5_params"]
-[ext_resource type="Resource" path="res://Resources/Planning/DefaultPlanningDeck.tres" id="6_deck"]
-[ext_resource type="Resource" path="res://Resources/Planning/DefaultOpponentStub.tres" id="7_stub"]
-[ext_resource type="PackedScene" uid="uid://planningboardview01" path="res://Scenes/UI/Planning/planning_board_view.tscn" id="8_board"]
-[ext_resource type="PackedScene" uid="uid://championrosterstrip01" path="res://Scenes/UI/Planning/champion_roster_strip.tscn" id="9_roster"]
-[ext_resource type="PackedScene" uid="uid://itempoolstrip01" path="res://Scenes/UI/Planning/item_pool_strip.tscn" id="10_items"]
+[ext_resource type="Resource" uid="uid://b340bhaa0w26j" path="res://Resources/Planning/DefaultPlanningDeck.tres" id="6_deck"]
+[ext_resource type="Resource" uid="uid://daoerikn8wwik" path="res://Resources/Planning/DefaultOpponentStub.tres" id="7_stub"]
+[ext_resource type="PackedScene" uid="uid://cxlxl2cnoqso7" path="res://Scenes/UI/Planning/planning_board_view.tscn" id="8_board"]
+[ext_resource type="PackedScene" uid="uid://sbxuoqts7737" path="res://Scenes/UI/Planning/champion_roster_strip.tscn" id="9_roster"]
+[ext_resource type="PackedScene" uid="uid://handstrip01" path="res://Scenes/UI/Planning/hand_strip.tscn" id="10_items"]
 
-[node name="RunShell" type="Control"]
+[node name="RunShell" type="Control" unique_id=1011938605]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -20,7 +20,7 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_shell")
 
-[node name="ColorRect" type="ColorRect" parent="."]
+[node name="ColorRect" type="ColorRect" parent="." unique_id=1225283380]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -29,19 +29,19 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0.07, 0.09, 0.12, 1)
 
-[node name="RunController" type="Node" parent="."]
+[node name="RunController" type="Node" parent="." unique_id=816104283 node_paths=PackedStringArray("planning_controller")]
 script = ExtResource("2_controller")
 initial_run_params = ExtResource("5_params")
 planning_controller = NodePath("../PlanningController")
 
-[node name="PlanningController" type="Node" parent="."]
+[node name="PlanningController" type="Node" parent="." unique_id=1413486238 node_paths=PackedStringArray("run_controller")]
 script = ExtResource("3_planning")
 run_controller = NodePath("../RunController")
-player_deck = ExtResource("6_deck")
 opponent_stub = ExtResource("7_stub")
+player_deck = ExtResource("6_deck")
 auto_place_deck_hero = false
 
-[node name="ScrollContainer" type="ScrollContainer" parent="."]
+[node name="ScrollContainer" type="ScrollContainer" parent="." unique_id=1340455479]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -49,87 +49,84 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="VBoxContainer" type="VBoxContainer" parent="ScrollContainer"]
+[node name="VBoxContainer" type="VBoxContainer" parent="ScrollContainer" unique_id=784998292]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 16
 
-[node name="MarginTop" type="MarginContainer" parent="ScrollContainer/VBoxContainer"]
+[node name="MarginTop" type="MarginContainer" parent="ScrollContainer/VBoxContainer" unique_id=18566249]
 layout_mode = 2
 theme_override_constants/margin_left = 32
 theme_override_constants/margin_top = 24
 theme_override_constants/margin_right = 32
 theme_override_constants/margin_bottom = 0
 
-[node name="RunHud" parent="ScrollContainer/VBoxContainer/MarginTop" instance=ExtResource("4_hud")]
-layout_mode = 2
+[node name="RunHud" parent="ScrollContainer/VBoxContainer/MarginTop" unique_id=422994207 instance=ExtResource("4_hud")]
 
-[node name="PlanningSection" type="VBoxContainer" parent="ScrollContainer/VBoxContainer"]
+[node name="PlanningSection" type="VBoxContainer" parent="ScrollContainer/VBoxContainer" unique_id=1850132843]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="PlanningLabel" type="Label" parent="ScrollContainer/VBoxContainer/PlanningSection"]
+[node name="PlanningLabel" type="Label" parent="ScrollContainer/VBoxContainer/PlanningSection" unique_id=1470330632]
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
 text = "Your champion roster"
 
-[node name="ChampionRosterStrip" parent="ScrollContainer/VBoxContainer/PlanningSection" instance=ExtResource("9_roster")]
-layout_mode = 2
+[node name="ChampionRosterStrip" parent="ScrollContainer/VBoxContainer/PlanningSection" unique_id=871283022 instance=ExtResource("9_roster")]
 
-[node name="BoardLabel" type="Label" parent="ScrollContainer/VBoxContainer/PlanningSection"]
+[node name="BoardLabel" type="Label" parent="ScrollContainer/VBoxContainer/PlanningSection" unique_id=504482753]
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
 text = "Board  (top = opponent, bottom = your side)"
 
-[node name="PlanningBoardView" parent="ScrollContainer/VBoxContainer/PlanningSection" instance=ExtResource("8_board")]
+[node name="PlanningBoardView" parent="ScrollContainer/VBoxContainer/PlanningSection" unique_id=129333673 instance=ExtResource("8_board")]
 layout_mode = 2
 cell_px = 90
 
-[node name="ItemsLabel" type="Label" parent="ScrollContainer/VBoxContainer/PlanningSection"]
+[node name="ItemsLabel" type="Label" parent="ScrollContainer/VBoxContainer/PlanningSection" unique_id=1443864698]
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
-text = "Items from your deck"
+text = "Your hand"
 
-[node name="ItemPoolStrip" parent="ScrollContainer/VBoxContainer/PlanningSection" instance=ExtResource("10_items")]
-layout_mode = 2
+[node name="HandStrip" parent="ScrollContainer/VBoxContainer/PlanningSection" unique_id=700788888 instance=ExtResource("10_items")]
 
-[node name="DebugSection" type="MarginContainer" parent="ScrollContainer/VBoxContainer"]
+[node name="DebugSection" type="MarginContainer" parent="ScrollContainer/VBoxContainer" unique_id=1994451267]
 layout_mode = 2
 theme_override_constants/margin_left = 32
 theme_override_constants/margin_top = 40
 theme_override_constants/margin_right = 32
 theme_override_constants/margin_bottom = 16
 
-[node name="DebugPanel" type="VBoxContainer" parent="ScrollContainer/VBoxContainer/DebugSection"]
+[node name="DebugPanel" type="VBoxContainer" parent="ScrollContainer/VBoxContainer/DebugSection" unique_id=1499530422]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="DebugTitle" type="Label" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel"]
+[node name="DebugTitle" type="Label" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel" unique_id=871821902]
 layout_mode = 2
 theme_override_font_sizes/font_size = 20
 text = "Run debug"
 
-[node name="EndPlanningButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel"]
+[node name="EndPlanningButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel" unique_id=1978991761]
 layout_mode = 2
 text = "End planning (lock)"
 
-[node name="ResolveCombatButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel"]
+[node name="ResolveCombatButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel" unique_id=648112790]
 layout_mode = 2
 text = "Resolve combat (stub)"
 
-[node name="ApplyRoundResultButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel"]
+[node name="ApplyRoundResultButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel" unique_id=2070713433]
 layout_mode = 2
 text = "Apply round result"
 
-[node name="ResetLayoutButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel"]
+[node name="ResetLayoutButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel" unique_id=272586968]
 layout_mode = 2
 text = "Reset layout"
 
-[node name="StartNewRunButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel"]
+[node name="StartNewRunButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel" unique_id=1021132482]
 layout_mode = 2
 text = "Start new run"
 
-[node name="BackToMenuButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel"]
+[node name="BackToMenuButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel" unique_id=1785428451]
 layout_mode = 2
 text = "Back to main menu"
 

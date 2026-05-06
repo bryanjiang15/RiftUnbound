@@ -1,6 +1,12 @@
 extends Resource
 class_name RunParams
 
+## Inspector-configurable parameters that govern a run's difficulty and pacing.
+##
+## Set once at run start via DefaultRunParams.tres; does not change mid-run.
+## Stub combat flags (stub_always_win / stub_always_lose) allow forced outcomes
+## for testing without a real combat resolver.
+
 ## Player run health at run start (not TCG lane health).
 @export var starting_player_health: int = 100
 
@@ -25,5 +31,6 @@ class_name RunParams
 ## Optional heal when winning a round (clamped to starting_player_health).
 @export var healing_on_round_win: int = 0
 
+## Convenience factory returning a RunParams with all default export values.
 static func default_params() -> RunParams:
 	return RunParams.new()

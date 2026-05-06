@@ -72,6 +72,29 @@ func set_locations():
 	if last_tween: await last_tween.finished
 	print("Passed location set (CardContainer)")
 
+## Populates the hand from a plain list of cards without a GameState.
+## Useful for the planning phase where no active game state is needed.
+## Connects each card's `selected` signal to `_select_card_hook(card, null, -1)`.
+func populate_from_card_list(cards: Array[CardData]) -> void:
+	for child in get_children():
+		child.queue_free()
+	if card_ui == null:
+		push_warning("CardContainer.populate_from_card_list: card_ui PackedScene not set")
+		return
+	for card in cards:
+		var ui: CardUI = card_ui.instantiate()
+		ui.referenced_card = card
+		add_child(ui)
+	await get_tree().process_frame
+	await set_locations()
+	for ui: CardUI in get_children():
+		if ui.selected.is_connected(_on_planning_card_selected):
+			continue
+		ui.selected.connect(_on_planning_card_selected)
+
+func _on_planning_card_selected(card: CardData) -> void:
+	_select_card_hook(card, null, -1)
+
 func _select_card_hook(card: CardData, state: GameState, index: int):
 	pass
 
