@@ -36,6 +36,11 @@ func get_current_phase() -> RoundPhase.Phase:
 func get_last_planning_snapshot() -> PlanningSnapshot:
 	return _last_snapshot
 
+## Returns the pending CombatOutcome (available after request_resolve_combat
+## transitions to ROUND_RESULT). Null while still in PLANNING or COMBAT_RESOLVE.
+func get_pending_outcome() -> CombatOutcome:
+	return _pending_outcome
+
 func _ready() -> void:
 	var params := initial_run_params
 	if params == null:
@@ -91,18 +96,37 @@ func request_advance_from_planning() -> void:
 	_phase = RoundPhase.Phase.COMBAT_RESOLVE
 	phase_changed.emit(_phase)
 
-## Runs the stub combat resolver and transitions to ROUND_RESULT.
+## Runs the real combat resolver (or falls back to the stub if no snapshot exists)
+## and transitions to ROUND_RESULT.
 ## Must be called while in COMBAT_RESOLVE; ignored (with a warning) otherwise.
-func request_resolve_combat_stub() -> void:
+func request_resolve_combat() -> void:
 	if run_state == null or run_state.is_terminal:
 		return
 	if _phase != RoundPhase.Phase.COMBAT_RESOLVE:
-		push_warning("RunController: resolve_combat_stub ignored (phase=%s)" % RoundPhase.phase_to_string(_phase))
+		push_warning("RunController: request_resolve_combat ignored (phase=%s)" % RoundPhase.phase_to_string(_phase))
 		return
 
-	_pending_outcome = stub_resolve_combat()
+	_pending_outcome = _resolve_combat()
 	_phase = RoundPhase.Phase.ROUND_RESULT
 	phase_changed.emit(_phase)
+
+## Resolves combat using the real CombatResolver when a snapshot is available,
+## falling back to the random stub otherwise.
+func _resolve_combat() -> CombatOutcome:
+	if _last_snapshot == null:
+		return stub_resolve_combat()
+	var spec: GridSpec
+	if planning_controller != null and planning_controller.grid_spec != null:
+		spec = planning_controller.grid_spec
+	else:
+		spec = GridSpec.default_square_5x3_two_sided()
+	var result: CombatResult = CombatResolver.resolve(_last_snapshot, spec)
+	var outcome := CombatOutcome.new()
+	outcome.player_won_round      = result.player_won
+	outcome.enemy_survivor_count  = result.opponent_survivors
+	outcome.player_survivor_count = result.player_survivors
+	outcome.combat_result         = result
+	return outcome
 
 ## Applies the pending CombatOutcome: adjusts player health, checks terminal conditions,
 ## then either emits run_ended or advances to the next round and resets to PLANNING.

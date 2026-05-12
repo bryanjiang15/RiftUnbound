@@ -6,10 +6,11 @@
 
 [sub_resource type="Resource" id="sub_stats"]
 script = ExtResource("2_cstats")
-max_health = 20
-current_health = 20
-attack = 1
+max_health = 10
+current_health = 10
+attack = 5
 defense = 2
+speed = 5
 
 [resource]
 script = ExtResource("1_chdata")

@@ -1,4 +1,4 @@
-[gd_scene format=3 uid="uid://dmy6se5ghs8vk"]
+[gd_scene load_steps=12 format=3 uid="uid://dmy6se5ghs8vk"]
 
 [ext_resource type="Script" uid="uid://30ikjln43l23" path="res://Scripts/Run/RunShell.gd" id="1_shell"]
 [ext_resource type="Script" uid="uid://b22v0cg12ns5g" path="res://Scripts/Run/RunController.gd" id="2_controller"]
@@ -10,6 +10,7 @@
 [ext_resource type="PackedScene" uid="uid://cxlxl2cnoqso7" path="res://Scenes/UI/Planning/planning_board_view.tscn" id="8_board"]
 [ext_resource type="PackedScene" uid="uid://sbxuoqts7737" path="res://Scenes/UI/Planning/champion_roster_strip.tscn" id="9_roster"]
 [ext_resource type="PackedScene" uid="uid://handstrip01" path="res://Scenes/UI/Planning/hand_strip.tscn" id="10_items"]
+[ext_resource type="PackedScene" uid="uid://combatboardview01" path="res://Scenes/UI/Combat/combat_board_view.tscn" id="11_combat"]
 
 [node name="RunShell" type="Control" unique_id=1011938605]
 layout_mode = 3
@@ -90,6 +91,20 @@ text = "Your hand"
 
 [node name="HandStrip" parent="ScrollContainer/VBoxContainer/PlanningSection" unique_id=700788888 instance=ExtResource("10_items")]
 
+[node name="CombatSection" type="VBoxContainer" parent="ScrollContainer/VBoxContainer" unique_id=993847201]
+layout_mode = 2
+theme_override_constants/separation = 12
+visible = false
+
+[node name="CombatLabel" type="Label" parent="ScrollContainer/VBoxContainer/CombatSection" unique_id=884621033]
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "Combat replay"
+
+[node name="CombatBoardView" parent="ScrollContainer/VBoxContainer/CombatSection" unique_id=773495862 instance=ExtResource("11_combat")]
+layout_mode = 2
+cell_px = 90
+
 [node name="DebugSection" type="MarginContainer" parent="ScrollContainer/VBoxContainer" unique_id=1994451267]
 layout_mode = 2
 theme_override_constants/margin_left = 32
@@ -112,7 +127,7 @@ text = "End planning (lock)"
 
 [node name="ResolveCombatButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel" unique_id=648112790]
 layout_mode = 2
-text = "Resolve combat (stub)"
+text = "Resolve combat (manual)"
 
 [node name="ApplyRoundResultButton" type="Button" parent="ScrollContainer/VBoxContainer/DebugSection/DebugPanel" unique_id=2070713433]
 layout_mode = 2

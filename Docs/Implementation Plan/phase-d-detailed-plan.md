@@ -36,13 +36,47 @@ No abilities, no item stat bonuses, no randomness.
 
 | Path | Purpose |
 |------|---------|
-| `Scripts/Combat/CombatUnit.gd` | Mutable runtime unit wrapping a `ChampionInstance`; owns current `GridCoord` and `current_health` so the source snapshot stays immutable |
+| `Scripts/Combat/CombatUnit.gd` | Source-agnostic runtime unit; **flat stats** (attack, defense, speed, health) copied from the source at creation time; `SourceKind` enum (`CHAMPION`, `ALLY_CARD`, `SUMMON`) + `source_id` for attribution; combat resolver never branches on source type (see design note below) |
 | `Scripts/Combat/CombatBoard.gd` | Mutable grid for combat; `occupancy: Dictionary` (key → CombatUnit), adjacency helpers, move/attack helpers |
 | `Scripts/Combat/CombatEvent.gd` | Single timestamped log entry; records action type, acting unit id, target cell/unit, damage dealt, new health, death flag |
 | `Scripts/Combat/CombatResolver.gd` | Pure `static` class; `resolve(snapshot, spec) → CombatResult`; no Node, no signals, fully headless-testable |
 | `Scripts/Combat/CombatResult.gd` | Return value of the resolver: `player_won`, `player_survivors`, `opponent_survivors`, `events: Array[CombatEvent]` |
 | `Scripts/UI/Combat/CombatBoardView.gd` | Scene controller that replays a `CombatResult` event log step-by-step over a grid that mirrors `PlanningBoardView` |
 | `Scripts/Tests/D1CombatResolverTests.gd` | Headless unit tests for the resolver |
+
+#### Design note — why `CombatUnit` does not wrap `ChampionInstance`
+
+Ally cards (`CardInstance`) and ability summons have no `ChampionInstance` to wrap.
+If `CombatUnit` held `var source: ChampionInstance`, adding those unit types would require
+union fields or type-branching inside the resolver.
+
+Instead, all combat-relevant stats are **copied once** from the source when the unit is
+built; the resolver then operates on a uniform `CombatUnit` regardless of origin.
+The `source_kind` + `source_id` fields carry just enough identity for the event log and
+UI replay without leaking domain types into the combat layer.
+
+```
+CombatUnit
+├── instance_id    : int          # unique within this combat
+├── source_kind    : SourceKind   # CHAMPION | ALLY_CARD | SUMMON
+├── source_id      : int          # instance_id of originating ChampionInstance / CardInstance
+├── display_name   : String       # for event log / UI tokens
+├── is_player_side : bool
+├── cell           : GridCoord    # mutable during combat
+├── max_health     : int          # copied at creation, never written back
+├── current_health : int
+├── attack         : int
+├── defense        : int
+└── speed          : int
+
+static from_champion(inst: ChampionInstance, player_side: bool, combat_id: int) → CombatUnit
+static from_ally_card(inst: CardInstance, cell: GridCoord, player_side: bool, combat_id: int) → CombatUnit
+  └── (Phase D: stats stubbed at 0; wired fully in post-D ally phase)
+```
+
+`CombatBoard.from_snapshot()` calls `from_champion()` for all champions in Phase D.
+When `PlanningSnapshot.deployed_allies` is non-empty (future phase), it calls
+`from_ally_card()` without any change to the resolver.
 
 ### Scenes (must be created)
 
@@ -84,17 +118,29 @@ Create the five new combat scripts. No Node, no signals, no scene dependencies.
 extends RefCounted
 class_name CombatUnit
 
-var source: ChampionInstance    # read-only reference to snapshot entry
+enum SourceKind { CHAMPION, ALLY_CARD, SUMMON }
+
+# Identity / attribution (used by event log and UI replay only)
 var instance_id: int
+var source_kind: SourceKind
+var source_id: int        # instance_id of originating ChampionInstance / CardInstance
+var display_name: String
+
+# Placement
 var is_player_side: bool
-var cell: GridCoord             # mutable position during combat
+var cell: GridCoord       # mutable position during combat
+
+# Combat stats — copied from source at creation; never referenced back
+var max_health: int
 var current_health: int
 var attack: int
 var defense: int
 var speed: int
 
-static func from_instance(inst: ChampionInstance, player_side: bool) -> CombatUnit
-func is_alive() -> bool:        return current_health > 0
+func is_alive() -> bool: return current_health > 0
+
+static func from_champion(inst: ChampionInstance, player_side: bool, combat_id: int) -> CombatUnit
+static func from_ally_card(inst: CardInstance, p_cell: GridCoord, player_side: bool, combat_id: int) -> CombatUnit
 ```
 
 **`CombatBoard.gd`**

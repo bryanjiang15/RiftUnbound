@@ -3,17 +3,20 @@ extends Control
 ## Top-level coordinator for the run_shell scene.
 ##
 ## Wires RunController, PlanningController, RunHud, PlanningBoardView,
-## ChampionRosterStrip, and ItemPoolStrip together at _ready time.
-## Also handles visibility toggling of the planning section and
-## forwarding debug button presses to RunController.
+## ChampionRosterStrip, HandStrip, and CombatBoardView together at _ready time.
+## Handles phase-aware visibility: PlanningSection shown during PLANNING /
+## ROUND_RESULT; CombatSection shown (with replay) during COMBAT_RESOLVE.
 
 @onready var run_controller: RunController = $RunController
 @onready var planning_controller: PlanningController = $PlanningController
 @onready var run_hud: RunHud = $ScrollContainer/VBoxContainer/MarginTop/RunHud
 @onready var planning_section: VBoxContainer = $ScrollContainer/VBoxContainer/PlanningSection
+@onready var combat_section: VBoxContainer = $ScrollContainer/VBoxContainer/CombatSection
 @onready var board_view: PlanningBoardView = $ScrollContainer/VBoxContainer/PlanningSection/PlanningBoardView
+@onready var combat_board_view: CombatBoardView = $ScrollContainer/VBoxContainer/CombatSection/CombatBoardView
 @onready var roster_strip: ChampionRosterStrip = $ScrollContainer/VBoxContainer/PlanningSection/ChampionRosterStrip
 @onready var item_strip: HandStrip = $ScrollContainer/VBoxContainer/PlanningSection/HandStrip
+@onready var apply_result_button: Button = $ScrollContainer/VBoxContainer/DebugSection/DebugPanel/ApplyRoundResultButton
 
 func _ready() -> void:
 	run_hud.bind_controller(run_controller)
@@ -25,13 +28,51 @@ func _ready() -> void:
 	item_strip.bind(planning_controller, board_view)
 	planning_controller.board_reset.connect(_on_board_reset)
 
-	_update_planning_section_visibility(run_controller.get_current_phase())
+	combat_board_view.replay_finished.connect(_on_replay_finished)
+
+	_update_section_visibility(run_controller.get_current_phase())
 
 func _on_phase_changed(phase: RoundPhase.Phase) -> void:
-	_update_planning_section_visibility(phase)
+	_update_section_visibility(phase)
 
-func _update_planning_section_visibility(phase: RoundPhase.Phase) -> void:
-	planning_section.visible = (phase == RoundPhase.Phase.PLANNING)
+func _update_section_visibility(phase: RoundPhase.Phase) -> void:
+	match phase:
+		RoundPhase.Phase.PLANNING:
+			planning_section.visible = true
+			combat_section.visible   = false
+			apply_result_button.disabled = false
+		RoundPhase.Phase.COMBAT_RESOLVE:
+			# Auto-resolve combat (deferred to avoid re-entrancy in the signal handler).
+			# This transitions immediately to ROUND_RESULT where the replay is shown.
+			planning_section.visible = false
+			combat_section.visible   = false
+			call_deferred("_auto_resolve_combat")
+		RoundPhase.Phase.ROUND_RESULT:
+			planning_section.visible = false
+			combat_section.visible   = true
+			apply_result_button.disabled = true
+			_start_replay_if_available()
+		_:
+			# Terminal state — leave whatever is visible as-is.
+			pass
+
+func _auto_resolve_combat() -> void:
+	run_controller.request_resolve_combat()
+
+func _start_replay_if_available() -> void:
+	var outcome: CombatOutcome = run_controller.get_pending_outcome()
+	if outcome == null or outcome.combat_result == null:
+		apply_result_button.disabled = false
+		return
+	var snapshot: PlanningSnapshot = run_controller.get_last_planning_snapshot()
+	var spec: GridSpec = planning_controller.grid_spec if planning_controller != null else GridSpec.default_square_5x3_two_sided()
+	if snapshot == null:
+		apply_result_button.disabled = false
+		return
+	combat_board_view.start_replay(outcome.combat_result, snapshot, spec)
+
+func _on_replay_finished() -> void:
+	apply_result_button.disabled = false
 
 func _on_planning_advance_rejected(errors: PackedStringArray) -> void:
 	push_warning("Planning advance rejected: %s" % ", ".join(errors))
@@ -41,9 +82,9 @@ func _on_planning_advance_rejected(errors: PackedStringArray) -> void:
 func _on_end_planning_pressed() -> void:
 	run_controller.request_advance_from_planning()
 
-## Triggers the stub combat resolver while in COMBAT_RESOLVE.
+## Triggers combat resolution while in COMBAT_RESOLVE.
 func _on_resolve_combat_pressed() -> void:
-	run_controller.request_resolve_combat_stub()
+	run_controller.request_resolve_combat()
 
 ## Applies the pending round result (damage/healing) and advances to the next round.
 func _on_apply_round_result_pressed() -> void:
