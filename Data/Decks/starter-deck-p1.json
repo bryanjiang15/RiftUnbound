@@ -1,0 +1,27 @@
+{
+  "deck_id": "starter-fury-p1",
+  "player_label": "Player 1",
+  "legend": "noxus-warlord",
+  "chosen_champion": "noxus-champion",
+  "main_deck": [
+    {"card_id": "noxus-champion", "count": 1},
+    {"card_id": "noxus-hopeful", "count": 3},
+    {"card_id": "iron-juggernaut", "count": 2},
+    {"card_id": "noxus-soldier", "count": 3},
+    {"card_id": "war-hound", "count": 3},
+    {"card_id": "noxus-berserker", "count": 3},
+    {"card_id": "noxus-shieldbearer", "count": 3},
+    {"card_id": "noxus-captain", "count": 3},
+    {"card_id": "noxus-lancer", "count": 3},
+    {"card_id": "noxus-militia", "count": 3},
+    {"card_id": "battle-cry", "count": 3},
+    {"card_id": "war-rally", "count": 2},
+    {"card_id": "noxus-charge", "count": 2},
+    {"card_id": "iron-shield-gear", "count": 3},
+    {"card_id": "war-blade", "count": 3}
+  ],
+  "rune_deck": [
+    {"card_id": "fury-rune", "count": 12}
+  ],
+  "battlefields": ["noxus-gates", "training-grounds", "ruined-coliseum"]
+}

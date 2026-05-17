@@ -1,0 +1,27 @@
+{
+  "deck_id": "starter-mind-p2",
+  "player_label": "Player 2",
+  "legend": "piltover-inventor",
+  "chosen_champion": "piltover-champion",
+  "main_deck": [
+    {"card_id": "piltover-champion", "count": 1},
+    {"card_id": "piltover-tinkerer", "count": 3},
+    {"card_id": "hextech-drone", "count": 3},
+    {"card_id": "piltover-guard", "count": 3},
+    {"card_id": "clockwork-sentinel", "count": 2},
+    {"card_id": "piltover-spy", "count": 3},
+    {"card_id": "piltover-scholar", "count": 3},
+    {"card_id": "hextech-mech", "count": 3},
+    {"card_id": "piltover-enforcer", "count": 3},
+    {"card_id": "piltover-militia", "count": 3},
+    {"card_id": "void-seeker", "count": 2},
+    {"card_id": "piltover-analysis", "count": 3},
+    {"card_id": "counter-protocol", "count": 2},
+    {"card_id": "hextech-enhancer", "count": 3},
+    {"card_id": "arcane-lens", "count": 3}
+  ],
+  "rune_deck": [
+    {"card_id": "mind-rune", "count": 12}
+  ],
+  "battlefields": ["piltover-bridge", "market-district", "shattered-plaza"]
+}

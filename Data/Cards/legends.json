@@ -1,0 +1,30 @@
+[
+  {
+    "id": "noxus-warlord",
+    "name": "Noxus Warlord",
+    "card_type": "legend",
+    "supertypes": [],
+    "tags": ["Noxus"],
+    "domain": ["fury"],
+    "energy_cost": 0,
+    "power_cost": [],
+    "champion_tag": "Noxus",
+    "keywords": [],
+    "abilities": [],
+    "flavor_text": "Conquer or be conquered."
+  },
+  {
+    "id": "piltover-inventor",
+    "name": "Piltover Inventor",
+    "card_type": "legend",
+    "supertypes": [],
+    "tags": ["Piltover"],
+    "domain": ["mind"],
+    "energy_cost": 0,
+    "power_cost": [],
+    "champion_tag": "Piltover",
+    "keywords": [],
+    "abilities": [],
+    "flavor_text": "The future belongs to those who build it."
+  }
+]

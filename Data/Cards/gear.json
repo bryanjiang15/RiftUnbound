@@ -1,0 +1,114 @@
+[
+  {
+    "id": "iron-shield-gear",
+    "name": "Iron Shield",
+    "card_type": "gear",
+    "supertypes": [],
+    "tags": ["Equipment"],
+    "domain": ["fury"],
+    "energy_cost": 2,
+    "power_cost": [],
+    "might_bonus": null,
+    "keywords": [{"id": "equip", "value": 1}],
+    "abilities": [
+      {
+        "ability_id": "iron-shield-gear-equip",
+        "ability_type": "activated",
+        "timing": null,
+        "condition": null,
+        "is_optional": true,
+        "cost": {"energy": 1, "exhaust": true},
+        "effect_type": "attach",
+        "effect_params": {"target": "friendly_unit"},
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "attached_keywords": [{"id": "shield", "value": 2}],
+    "flavor_text": "Heavy, reliable, unbreakable."
+  },
+  {
+    "id": "war-blade",
+    "name": "War Blade",
+    "card_type": "gear",
+    "supertypes": [],
+    "tags": ["Equipment", "Weapon"],
+    "domain": ["fury"],
+    "energy_cost": 2,
+    "power_cost": [],
+    "might_bonus": null,
+    "keywords": [{"id": "equip", "value": 1}],
+    "abilities": [
+      {
+        "ability_id": "war-blade-equip",
+        "ability_type": "activated",
+        "timing": null,
+        "condition": null,
+        "is_optional": true,
+        "cost": {"energy": 1, "exhaust": true},
+        "effect_type": "attach",
+        "effect_params": {"target": "friendly_unit"},
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "attached_keywords": [{"id": "assault", "value": 2}],
+    "flavor_text": "Forged in the heat of conquest."
+  },
+  {
+    "id": "hextech-enhancer",
+    "name": "Hextech Enhancer",
+    "card_type": "gear",
+    "supertypes": [],
+    "tags": ["Equipment", "Hextech"],
+    "domain": ["mind"],
+    "energy_cost": 2,
+    "power_cost": [],
+    "might_bonus": "+2",
+    "keywords": [{"id": "equip", "value": 1}],
+    "abilities": [
+      {
+        "ability_id": "hextech-enhancer-equip",
+        "ability_type": "activated",
+        "timing": null,
+        "condition": null,
+        "is_optional": true,
+        "cost": {"energy": 1, "exhaust": true},
+        "effect_type": "attach",
+        "effect_params": {"target": "friendly_unit"},
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "attached_keywords": [],
+    "flavor_text": "Power amplified, potential realized."
+  },
+  {
+    "id": "arcane-lens",
+    "name": "Arcane Lens",
+    "card_type": "gear",
+    "supertypes": [],
+    "tags": ["Equipment", "Hextech"],
+    "domain": ["mind"],
+    "energy_cost": 1,
+    "power_cost": [],
+    "might_bonus": null,
+    "keywords": [{"id": "equip", "value": 0}],
+    "abilities": [
+      {
+        "ability_id": "arcane-lens-equip",
+        "ability_type": "activated",
+        "timing": null,
+        "condition": null,
+        "is_optional": true,
+        "cost": {"energy": 0, "exhaust": true},
+        "effect_type": "attach",
+        "effect_params": {"target": "friendly_unit"},
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "attached_keywords": [{"id": "vision"}],
+    "flavor_text": "See what others cannot."
+  }
+]

@@ -1,0 +1,182 @@
+[
+  {
+    "id": "battle-cry",
+    "name": "Battle Cry",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": ["fury"],
+    "energy_cost": 2,
+    "power_cost": [],
+    "keywords": [],
+    "is_action": false,
+    "is_reaction": false,
+    "abilities": [
+      {
+        "ability_id": "battle-cry-effect",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "give_might",
+        "effect_params": {"amount": 2, "target": "friendly_unit", "targeting": "choose_one", "duration": "turn"},
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "For Noxus!"
+  },
+  {
+    "id": "war-rally",
+    "name": "War Rally",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": ["fury"],
+    "energy_cost": 3,
+    "power_cost": [],
+    "keywords": [{"id": "action"}],
+    "is_action": true,
+    "is_reaction": false,
+    "abilities": [
+      {
+        "ability_id": "war-rally-effect",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "deal_damage",
+        "effect_params": {"amount": 3, "target": "unit_at_battlefield", "targeting": "choose_one"},
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "The battle doesn't wait for you to be ready."
+  },
+  {
+    "id": "noxus-charge",
+    "name": "Noxus Charge",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": ["fury"],
+    "energy_cost": 1,
+    "power_cost": [],
+    "keywords": [{"id": "action"}],
+    "is_action": true,
+    "is_reaction": false,
+    "abilities": [
+      {
+        "ability_id": "noxus-charge-effect",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "ready_permanent",
+        "effect_params": {"target": "friendly_unit", "targeting": "choose_one"},
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "Rest is for the victors."
+  },
+  {
+    "id": "void-seeker",
+    "name": "Void Seeker",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": ["mind"],
+    "energy_cost": 4,
+    "power_cost": [],
+    "keywords": [],
+    "is_action": false,
+    "is_reaction": false,
+    "abilities": [
+      {
+        "ability_id": "void-seeker-damage",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "deal_damage",
+        "effect_params": {"amount": 4, "target": "unit_at_battlefield", "targeting": "choose_one"},
+        "is_action": false,
+        "is_reaction": false
+      },
+      {
+        "ability_id": "void-seeker-draw",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "draw",
+        "effect_params": {"amount": 1},
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "From the depths, clarity."
+  },
+  {
+    "id": "piltover-analysis",
+    "name": "Piltover Analysis",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": ["mind"],
+    "energy_cost": 2,
+    "power_cost": [],
+    "keywords": [],
+    "is_action": false,
+    "is_reaction": false,
+    "abilities": [
+      {
+        "ability_id": "piltover-analysis-draw",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "draw",
+        "effect_params": {"amount": 2},
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "Every problem has a solution. Find it."
+  },
+  {
+    "id": "counter-protocol",
+    "name": "Counter Protocol",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": ["mind"],
+    "energy_cost": 3,
+    "power_cost": [],
+    "keywords": [{"id": "reaction"}],
+    "is_action": false,
+    "is_reaction": true,
+    "abilities": [
+      {
+        "ability_id": "counter-protocol-effect",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "counter_spell",
+        "effect_params": {"target": "spell_on_chain"},
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "Anticipated. Countered. Neutralized."
+  }
+]

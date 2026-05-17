@@ -1,0 +1,78 @@
+[
+  {
+    "id": "fury-rune",
+    "name": "Fury Rune",
+    "card_type": "rune",
+    "supertypes": [],
+    "tags": [],
+    "domain": ["fury"],
+    "energy_cost": 0,
+    "power_cost": [],
+    "is_basic": true,
+    "keywords": [],
+    "abilities": [
+      {
+        "ability_id": "fury-rune-tap",
+        "ability_type": "activated",
+        "timing": null,
+        "condition": null,
+        "is_optional": true,
+        "cost": {"energy": 0, "power": [], "exhaust": true},
+        "effect_type": "add_energy",
+        "effect_params": {"amount": 1},
+        "is_action": false,
+        "is_reaction": true
+      },
+      {
+        "ability_id": "fury-rune-recycle",
+        "ability_type": "activated",
+        "timing": null,
+        "condition": null,
+        "is_optional": true,
+        "cost": {"energy": 0, "power": [], "exhaust": false, "recycle_self": true},
+        "effect_type": "add_power",
+        "effect_params": {"domain": "fury", "amount": 1},
+        "is_action": false,
+        "is_reaction": true
+      }
+    ]
+  },
+  {
+    "id": "mind-rune",
+    "name": "Mind Rune",
+    "card_type": "rune",
+    "supertypes": [],
+    "tags": [],
+    "domain": ["mind"],
+    "energy_cost": 0,
+    "power_cost": [],
+    "is_basic": true,
+    "keywords": [],
+    "abilities": [
+      {
+        "ability_id": "mind-rune-tap",
+        "ability_type": "activated",
+        "timing": null,
+        "condition": null,
+        "is_optional": true,
+        "cost": {"energy": 0, "power": [], "exhaust": true},
+        "effect_type": "add_energy",
+        "effect_params": {"amount": 1},
+        "is_action": false,
+        "is_reaction": true
+      },
+      {
+        "ability_id": "mind-rune-recycle",
+        "ability_type": "activated",
+        "timing": null,
+        "condition": null,
+        "is_optional": true,
+        "cost": {"energy": 0, "power": [], "exhaust": false, "recycle_self": true},
+        "effect_type": "add_power",
+        "effect_params": {"domain": "mind", "amount": 1},
+        "is_action": false,
+        "is_reaction": true
+      }
+    ]
+  }
+]
