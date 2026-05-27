@@ -33,6 +33,10 @@ extends Resource
 # Legend fields
 @export var champion_tag: String = ""
 
+# Art — relative path under res://Assets/ (e.g. "CardArts/OGN-251.webp")
+# Falls back to "Champ_Card.jpg" at display time if empty or unloadable.
+@export var image: String = ""
+
 
 func has_keyword(keyword_id: String) -> bool:
 	for kw in keywords:

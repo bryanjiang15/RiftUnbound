@@ -1,30 +1,42 @@
 [
   {
-    "id": "noxus-warlord",
-    "name": "Noxus Warlord",
+    "id": "jinx-loose-cannon",
+    "name": "Jinx - Loose Cannon",
+    "set": "OGN",
+    "card_number": "251",
     "card_type": "legend",
     "supertypes": [],
-    "tags": ["Noxus"],
-    "domain": ["fury"],
+    "tags": [
+      "Jinx"
+    ],
+    "domain": [
+      "fury",
+      "chaos"
+    ],
+    "rarity": "Rare",
     "energy_cost": 0,
     "power_cost": [],
-    "champion_tag": "Noxus",
+    "champion_tag": "Jinx",
     "keywords": [],
-    "abilities": [],
-    "flavor_text": "Conquer or be conquered."
-  },
-  {
-    "id": "piltover-inventor",
-    "name": "Piltover Inventor",
-    "card_type": "legend",
-    "supertypes": [],
-    "tags": ["Piltover"],
-    "domain": ["mind"],
-    "energy_cost": 0,
-    "power_cost": [],
-    "champion_tag": "Piltover",
-    "keywords": [],
-    "abilities": [],
-    "flavor_text": "The future belongs to those who build it."
+    "abilities": [
+      {
+        "ability_id": "jinx-loose-cannon-draw",
+        "ability_type": "triggered",
+        "timing": "beginning_phase_start",
+        "condition": {
+          "type": "hand_size_lte",
+          "value": 1
+        },
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "draw",
+        "effect_params": {
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "image": "CardArts/OGN-251.webp"
   }
 ]

@@ -1,33 +1,207 @@
 class_name AIPlayer
 extends Node
 
+# AI player that sends the current game state to the Python agent service and
+# executes whatever command the agent returns.  Falls back to the built-in
+# heuristic when the service is unreachable or returns an error.
+#
+# The node must be named "AIPlayer" (GameController looks it up by that name).
+# GameScene wires it up via: _ai.setup(_controller, 1)
+
 var controller: GameController
 var player_index: int = 1
 
-const THINK_DELAY: float = 0.6
+const AGENT_URL := "http://localhost:8765/decision"
+const THINK_DELAY := 0.5       # seconds before each decision
+const HTTP_TIMEOUT := 8.0      # seconds before falling back to heuristic
+const MAX_RETRIES := 3         # max rejection retry attempts
+
+var _http: HTTPRequest = null
+var _pending_brief_state: Dictionary = {}
+var _retry_count: int = 0
+var _last_rejected_move: Dictionary = {}
+var _last_rejection_reason: String = ""
+var _waiting_for_http: bool = false
 
 
 func setup(gc: GameController, pi: int) -> void:
 	controller = gc
 	player_index = pi
+	_http = HTTPRequest.new()
+	_http.timeout = HTTP_TIMEOUT
+	add_child(_http)
+	_http.request_completed.connect(_on_request_completed)
 
 
 func take_turn() -> void:
 	if controller == null or controller.gs == null:
 		return
 	var gs = controller.gs
-	if gs.game_over or gs.mulligan_phase:
+	if gs.game_over:
 		return
-	if not gs.can_player_act(player_index):
+	if _waiting_for_http:
 		return
-	# Delay slightly for readability
+
+	# Delay slightly so the game log is readable
 	await get_tree().create_timer(THINK_DELAY).timeout
-	_decide_and_act()
+	if gs.game_over:
+		return
+
+	# Re-check that the AI can still act (state may have changed during delay)
+	var can_act := _can_act_now(gs)
+	if not can_act:
+		return
+
+	_retry_count = 0
+	_last_rejected_move = {}
+	_last_rejection_reason = ""
+	await _request_decision(gs)
 
 
-func _decide_and_act() -> void:
-	var gs = controller.gs
-	if gs.game_over or not gs.can_player_act(player_index):
+# ── HTTP request ──────────────────────────────────────────────────────────────
+
+func _request_decision(gs: GameState) -> void:
+	_pending_brief_state = BriefStateSerializer.serialize(gs, player_index)
+
+	var payload := JSON.stringify(_build_request_payload())
+	var headers := PackedStringArray(["Content-Type: application/json"])
+
+	var err = _http.request(AGENT_URL, headers, HTTPClient.METHOD_POST, payload)
+	if err != OK:
+		push_warning("AIPlayer: HTTPRequest failed to start (err=%d). Using heuristic." % err)
+		_heuristic_fallback(gs)
+		return
+
+	_waiting_for_http = true
+
+
+func _build_request_payload() -> Dictionary:
+	var payload := {
+		"brief_state": _pending_brief_state,
+		"game_id": _pending_brief_state.get("game_id", "game"),
+	}
+	if not _last_rejected_move.is_empty():
+		payload["rejection_context"] = {
+			"rejected_move": _last_rejected_move,
+			"rejection_reason": _last_rejection_reason,
+		}
+	return payload
+
+
+func _on_request_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	_waiting_for_http = false
+	var gs = controller.gs if controller else null
+	if gs == null or gs.game_over:
+		return
+
+	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		push_warning("AIPlayer: HTTP error (result=%d, code=%d). Using heuristic." % [result, response_code])
+		_heuristic_fallback(gs)
+		return
+
+	var text := body.get_string_from_utf8()
+	var parsed = JSON.parse_string(text)
+	if parsed == null or not parsed is Dictionary:
+		push_warning("AIPlayer: Invalid JSON response. Using heuristic.")
+		_heuristic_fallback(gs)
+		return
+
+	var decision: Dictionary = parsed
+	var move_dict: Dictionary = decision.get("move", {})
+	if move_dict.is_empty():
+		push_warning("AIPlayer: No 'move' in response. Using heuristic.")
+		_heuristic_fallback(gs)
+		return
+
+	var cmd := _move_to_command(move_dict)
+	if cmd.is_empty():
+		push_warning("AIPlayer: Could not translate move to command. Using heuristic.")
+		_heuristic_fallback(gs)
+		return
+
+	# Store decision for potential rejection context on next call
+	_last_rejected_move = move_dict
+
+	# Submit the command.  submit_command sets controller.last_command_error if it
+	# produced an [ERROR] log, letting us distinguish real rejections from normal
+	# "still my turn" situations.
+	_submit(cmd)
+
+	# Rejection detected: retry immediately (synchronously, before any deferred
+	# _trigger_ai_turn fires) so _waiting_for_http is set before the next take_turn().
+	if controller.last_command_error:
+		_last_rejection_reason = "Game engine rejected the command."
+		if _retry_count < MAX_RETRIES:
+			_retry_count += 1
+			push_warning("AIPlayer: Move rejected — retry %d/%d" % [_retry_count, MAX_RETRIES])
+			_request_decision(gs)  # synchronous; sets _waiting_for_http = true
+		else:
+			push_warning("AIPlayer: Exhausted %d retries — heuristic fallback." % MAX_RETRIES)
+			_heuristic_fallback(gs)
+	# If the move was accepted the normal _maybe_trigger_ai() → take_turn() cycle
+	# (triggered inside submit_command) handles the next decision.  No extra work needed.
+
+
+# ── Command translation ───────────────────────────────────────────────────────
+
+func _move_to_command(move: Dictionary) -> String:
+	var action: String = move.get("action", "")
+	var p: Dictionary = move.get("parameters", {})
+
+	match action:
+		"mulligan_keep":
+			return "mulligan keep"
+		"mulligan":
+			var ids := " ".join(p.get("card_ids", []))
+			return ("mulligan %s" % ids) if ids != "" else "mulligan keep"
+		"play_card":
+			var cmd := "play %s" % p.get("card_id", "")
+			if p.get("destination", "") != "":
+				cmd += " to %s" % p["destination"]
+			if p.get("target_id", "") != "":
+				cmd += " target %s" % p["target_id"]
+			if p.get("from_champion", false):
+				cmd += " from champion"
+			if p.get("from_hidden", false):
+				cmd += " from hidden"
+			if p.get("accelerate", false):
+				cmd += " accelerate"
+			return cmd
+		"move_unit":
+			var ids = p.get("unit_ids", [])
+			if ids is String:
+				ids = [ids]
+			return "move %s to %s" % [" ".join(ids), p.get("destination", "base")]
+		"pass":
+			return "pass"
+		"end_turn":
+			return "end turn"
+		"use_ability":
+			var cmd := "use %s" % p.get("card_id", "")
+			if p.get("target_id", "") != "":
+				cmd += " target %s" % p["target_id"]
+			return cmd
+		"react":
+			var cmd := "react %s" % p.get("card_id", "")
+			if p.get("target_id", "") != "":
+				cmd += " target %s" % p["target_id"]
+			return cmd
+		"assign_damage":
+			return "assign %d to %s" % [p.get("amount", 0), p.get("target_id", "")]
+		"assign_done":
+			return "assign done"
+		"choose":
+			return "choose %s" % p.get("target_id", "")
+		"choose_none":
+			return "choose none"
+		_:
+			return ""
+
+
+# ── Heuristic fallback ────────────────────────────────────────────────────────
+
+func _heuristic_fallback(gs: GameState) -> void:
+	if gs.game_over or not _can_act_now(gs):
 		return
 
 	# Mulligan: always keep
@@ -35,126 +209,125 @@ func _decide_and_act() -> void:
 		_submit("mulligan keep")
 		return
 
-	# If there's a pending prompt for us, choose the first valid option
-	if not gs.pending_prompt.is_empty() and gs.pending_prompt.get("player_index", -1) == player_index:
+	# Pending prompt: pick first option
+	if not gs.pending_prompt.is_empty() and \
+	   gs.pending_prompt.get("player_index", -1) == player_index:
 		var choices = gs.pending_prompt.get("valid_choices", [])
-		if not choices.is_empty():
-			_submit("choose %s" % choices[0])
-		else:
-			_submit("choose none")
+		_submit("choose %s" % choices[0] if not choices.is_empty() else "choose none")
 		return
 
-	# Showdown/combat: pass
+	# Showdown / chain: pass
 	if gs.is_showdown_state() and gs.focus_player_index == player_index:
 		_submit("pass")
 		return
-
-	# Chain closed: pass
 	if not gs.chain.is_empty():
 		_submit("pass")
 		return
 
-	# Main Phase: tap all runes, play cards, move units, end turn
+	# Combat damage assignment: assign everything to first unit and confirm
+	if gs.combat_assignment_active and gs.attacker_player_index == player_index:
+		if gs.combat_bf_index >= 0:
+			var bf = gs.board.battlefields[gs.combat_bf_index]
+			var defenders = bf.units[1 - player_index]
+			var remaining = gs.remaining_attacker_might
+			for unit in defenders:
+				if unit.instance_id not in gs.damage_assignments and remaining > 0:
+					_submit("assign %d to %s" % [remaining, unit.instance_id])
+					await get_tree().create_timer(0.1).timeout
+					remaining = 0
+		_submit("assign done")
+		return
+
+	# Main phase
 	if gs.current_phase == TurnStateMachine.Phase.MAIN and \
 	   gs.current_state == TurnStateMachine.State.NEUTRAL_OPEN and \
 	   gs.turn_player_index == player_index:
-		_do_main_phase()
+		await _heuristic_main_phase(gs)
 		return
 
-	# Default: end turn if it's ours
 	if gs.turn_player_index == player_index:
 		_submit("end turn")
 
 
-func _do_main_phase() -> void:
-	var gs = controller.gs
+func _heuristic_main_phase(gs: GameState) -> void:
 	var ps: PlayerState = gs.players[player_index]
 
-	# Step 1: Tap all untapped runes for energy
-	for i in range(ps.channeled_runes.size()):
-		var rune = ps.channeled_runes[i]
-		if not rune.is_exhausted:
-			_submit("tap rune-%d" % i)
-			await get_tree().create_timer(0.15).timeout
-			if gs.game_over or not gs.can_player_act(player_index):
-				return
-
-	# Step 2: Play cards if we can afford them
-	var played_something = true
-	while played_something:
-		played_something = false
-		var best_card = _best_playable_card(gs, ps)
-		if best_card != null:
-			var target_bf = _choose_destination(gs, player_index)
-			var cmd = "play %s" % best_card.instance_id
-			if best_card.definition.card_type == "unit" and target_bf != "":
-				cmd += " to %s" % target_bf
+	# Play highest-cost affordable card (runes auto-pay on play)
+	var played := true
+	while played:
+		played = false
+		var best := _best_playable_card(gs, ps)
+		if best != null:
+			var dest := _choose_destination(gs)
+			var cmd := "play %s" % best.instance_id
+			if best.definition.card_type == "unit" and dest != "":
+				cmd += " to %s" % dest
 			_submit(cmd)
 			await get_tree().create_timer(0.2).timeout
-			played_something = true
-			if gs.game_over or not gs.can_player_act(player_index):
+			played = true
+			if gs.game_over or not _can_act_now(gs):
 				return
 
-	# Step 3: Move ready units to unclaimed battlefields
-	var ready_units = _get_ready_units_at_base(gs, player_index)
-	for unit in ready_units:
-		var target_bf = _best_move_target(gs, player_index)
-		if target_bf != "":
-			_submit("move %s to %s" % [unit.instance_id, target_bf])
+	# Move ready base units toward objectives
+	for unit in _get_ready_units_at_base(gs):
+		var target := _best_move_target(gs)
+		if target != "":
+			_submit("move %s to %s" % [unit.instance_id, target])
 			await get_tree().create_timer(0.2).timeout
-			if gs.game_over or not gs.can_player_act(player_index):
+			if gs.game_over or not _can_act_now(gs):
 				return
 
-	# Step 4: End turn
 	await get_tree().create_timer(0.1).timeout
-	if gs.can_player_act(player_index) and gs.turn_player_index == player_index:
+	if _can_act_now(gs) and gs.turn_player_index == player_index:
 		_submit("end turn")
 
 
 func _best_playable_card(gs: GameState, ps: PlayerState) -> CardInstance:
 	var best: CardInstance = null
-	var best_cost = -1
+	var best_cost := -1
 	for card in ps.hand:
-		if card.definition.card_type == "rune":
-			continue
-		if card.definition.is_reaction:
+		if card.definition.card_type == "rune" or card.definition.is_reaction:
 			continue
 		var cost = CostCalculator.compute_play_cost(card, player_index, gs)
 		if CostCalculator.can_afford(player_index, cost, gs):
-			var energy_cost = cost.get("energy", 0)
-			if energy_cost > best_cost:
-				best_cost = energy_cost
+			var ec: int = cost.get("energy", 0)
+			if ec > best_cost:
+				best_cost = ec
 				best = card
 	return best
 
 
-func _choose_destination(gs: GameState, pi: int) -> String:
-	# Prefer uncontrolled battlefields, then opponent-controlled
-	for i in range(gs.board.battlefields.size()):
-		var bf = gs.board.battlefields[i]
-		if bf.controller_index == -1 and bf.units[1 - pi].is_empty():
+func _choose_destination(gs: GameState) -> String:
+	for bf in gs.board.battlefields:
+		if bf.controller_index == -1 and bf.units[1 - player_index].is_empty():
 			return bf.battlefield_id
-	for i in range(gs.board.battlefields.size()):
-		var bf = gs.board.battlefields[i]
-		if bf.controller_index == 1 - pi:
+	for bf in gs.board.battlefields:
+		if bf.controller_index == 1 - player_index:
 			return bf.battlefield_id
 	return ""
 
 
-func _best_move_target(gs: GameState, pi: int) -> String:
-	for i in range(gs.board.battlefields.size()):
-		var bf = gs.board.battlefields[i]
-		if bf.controller_index != pi and bf.units[pi].is_empty():
+func _best_move_target(gs: GameState) -> String:
+	for bf in gs.board.battlefields:
+		if bf.controller_index != player_index and bf.units[player_index].is_empty():
 			return bf.battlefield_id
 	return ""
 
 
-func _get_ready_units_at_base(gs: GameState, pi: int) -> Array:
+func _get_ready_units_at_base(gs: GameState) -> Array:
 	var result: Array = []
-	for u in gs.players[pi].get_units_at_base():
+	for u in gs.players[player_index].get_units_at_base():
 		if not u.is_exhausted:
 			result.append(u)
 	return result
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+func _can_act_now(gs: GameState) -> bool:
+	if gs.mulligan_phase:
+		return not gs.mulligan_done[player_index]
+	return gs.can_player_act(player_index)
 
 
 func _submit(cmd: String) -> void:

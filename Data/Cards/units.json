@@ -1,367 +1,542 @@
 [
   {
-    "id": "noxus-champion",
-    "name": "Noxus Champion",
+    "id": "chemtech-enforcer",
+    "name": "Chemtech Enforcer",
+    "set": "OGN",
+    "card_number": "003",
     "card_type": "unit",
-    "supertypes": ["champion"],
-    "tags": ["Noxus"],
-    "domain": ["fury"],
+    "supertypes": [],
+    "tags": [
+      "Zaun"
+    ],
+    "domain": [
+      "fury"
+    ],
+    "rarity": "Common",
+    "energy_cost": 2,
+    "power_cost": [],
+    "might": 2,
+    "might_bonus": null,
+    "keywords": [
+      {
+        "id": "assault",
+        "value": 2
+      }
+    ],
+    "abilities": [
+      {
+        "ability_id": "chemtech-enforcer-play",
+        "ability_type": "triggered",
+        "timing": "on_play",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "discard",
+        "effect_params": {
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "\"Knock, knock.\"",
+    "image": "CardArts/OGN-003.webp"
+  },
+  {
+    "id": "flame-chompers",
+    "name": "Flame Chompers",
+    "set": "OGN",
+    "card_number": "006",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Zaun"
+    ],
+    "domain": [
+      "fury"
+    ],
+    "rarity": "Common",
+    "energy_cost": 3,
+    "power_cost": [],
+    "might": 3,
+    "might_bonus": null,
+    "keywords": [],
+    "abilities": [
+      {
+        "ability_id": "flame-chompers-discard",
+        "ability_type": "triggered",
+        "timing": "on_discard",
+        "condition": null,
+        "is_optional": true,
+        "cost": {
+          "power": [
+            {
+              "domain": "fury",
+              "amount": 1
+            }
+          ]
+        },
+        "effect_type": "play_self",
+        "effect_params": {},
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "\"GET 'EM, CHOMPIES!\"",
+    "image": "CardArts/OGN-006.webp"
+  },
+  {
+    "id": "magma-wurm",
+    "name": "Magma Wurm",
+    "set": "OGN",
+    "card_number": "011",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Freljord"
+    ],
+    "domain": [
+      "fury"
+    ],
+    "rarity": "Common",
+    "energy_cost": 8,
+    "power_cost": [],
+    "might": 8,
+    "might_bonus": null,
+    "keywords": [],
+    "abilities": [
+      {
+        "ability_id": "magma-wurm-passive",
+        "ability_type": "passive",
+        "timing": null,
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "other_friendly_units_enter_ready",
+        "effect_params": {},
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "A river of flame in an ocean of ice.",
+    "image": "CardArts/OGN-011.webp"
+  },
+  {
+    "id": "raging-soul",
+    "name": "Raging Soul",
+    "set": "OGN",
+    "card_number": "019",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Spirit",
+      "Shadow Isles"
+    ],
+    "domain": [
+      "fury"
+    ],
+    "rarity": "Uncommon",
     "energy_cost": 4,
     "power_cost": [],
     "might": 4,
     "might_bonus": null,
-    "keywords": [{"id": "assault", "value": 2}, {"id": "accelerate"}],
-    "abilities": [],
-    "flavor_text": "Lead by example — and by force."
-  },
-  {
-    "id": "noxus-hopeful",
-    "name": "Noxus Hopeful",
-    "card_type": "unit",
-    "supertypes": [],
-    "tags": ["Noxus"],
-    "domain": ["fury"],
-    "energy_cost": 2,
-    "power_cost": [],
-    "might": 3,
-    "might_bonus": null,
-    "keywords": [{"id": "legion"}],
+    "keywords": [],
     "abilities": [
       {
-        "ability_id": "noxus-hopeful-legion-cost",
+        "ability_id": "raging-soul-discard-conditional",
         "ability_type": "passive",
         "timing": null,
-        "condition": {"type": "legion"},
+        "condition": {
+          "type": "discarded_card_this_turn"
+        },
         "is_optional": false,
         "cost": {},
-        "effect_type": "cost_reduction",
-        "effect_params": {"amount": 2, "scope": "self", "duration": "play"},
+        "effect_type": "gain_keywords",
+        "effect_params": {
+          "keywords": [
+            {
+              "id": "assault",
+              "value": 1
+            },
+            {
+              "id": "ganking"
+            }
+          ]
+        },
         "is_action": false,
         "is_reaction": false
       }
     ],
-    "flavor_text": "The first step is always the hardest."
+    "image": "CardArts/OGN-019.webp"
   },
   {
-    "id": "iron-juggernaut",
-    "name": "Iron Juggernaut",
+    "id": "jinx-demolitionist",
+    "name": "Jinx - Demolitionist",
+    "set": "OGN",
+    "card_number": "030",
+    "card_type": "unit",
+    "supertypes": [
+      "champion"
+    ],
+    "tags": [
+      "Jinx",
+      "Zaun"
+    ],
+    "domain": [
+      "fury"
+    ],
+    "rarity": "Rare",
+    "energy_cost": 3,
+    "power_cost": [],
+    "might": 4,
+    "might_bonus": null,
+    "keywords": [
+      {
+        "id": "accelerate"
+      },
+      {
+        "id": "assault",
+        "value": 2
+      }
+    ],
+    "abilities": [
+      {
+        "ability_id": "jinx-demolitionist-accelerate",
+        "ability_type": "keyword_ability",
+        "timing": "on_play",
+        "condition": null,
+        "is_optional": true,
+        "cost": {
+          "energy": 1,
+          "power": [
+            {
+              "domain": "fury",
+              "amount": 1
+            }
+          ]
+        },
+        "effect_type": "enter_ready",
+        "effect_params": {},
+        "is_action": false,
+        "is_reaction": false
+      },
+      {
+        "ability_id": "jinx-demolitionist-play",
+        "ability_type": "triggered",
+        "timing": "on_play",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "discard",
+        "effect_params": {
+          "amount": 2
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "\"I really need a new gun. But don't tell my other guns.\"",
+    "image": "CardArts/OGN-030.webp"
+  },
+  {
+    "id": "vi-destructive",
+    "name": "Vi - Destructive",
+    "set": "OGN",
+    "card_number": "036",
+    "card_type": "unit",
+    "supertypes": [
+      "champion"
+    ],
+    "tags": [
+      "Vi",
+      "Piltover"
+    ],
+    "domain": [
+      "fury"
+    ],
+    "rarity": "Rare",
+    "energy_cost": 2,
+    "power_cost": [],
+    "might": 3,
+    "might_bonus": null,
+    "keywords": [
+      {
+        "id": "ganking"
+      }
+    ],
+    "abilities": [
+      {
+        "ability_id": "vi-destructive-recycle",
+        "ability_type": "activated",
+        "timing": null,
+        "condition": null,
+        "is_optional": true,
+        "cost": {
+          "recycle": 1
+        },
+        "effect_type": "give_might",
+        "effect_params": {
+          "amount": 1,
+          "target": "self",
+          "duration": "turn"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "\"Punch first. Ask questions while punching.\"",
+    "image": "CardArts/OGN-036.webp"
+  },
+  {
+    "id": "blazing-scorcher",
+    "name": "Blazing Scorcher",
+    "set": "OGN",
+    "card_number": "001",
     "card_type": "unit",
     "supertypes": [],
-    "tags": ["Noxus", "Soldier"],
-    "domain": ["fury"],
-    "energy_cost": 4,
-    "power_cost": [{"domain": "fury", "amount": 1}],
+    "tags": [
+      "Dragon",
+      "Noxus"
+    ],
+    "domain": [
+      "fury"
+    ],
+    "rarity": "Common",
+    "energy_cost": 5,
+    "power_cost": [],
     "might": 5,
     "might_bonus": null,
-    "keywords": [{"id": "tank"}],
-    "abilities": [],
-    "flavor_text": "Nothing stops the advance."
-  },
-  {
-    "id": "noxus-soldier",
-    "name": "Noxus Soldier",
-    "card_type": "unit",
-    "supertypes": [],
-    "tags": ["Noxus", "Soldier"],
-    "domain": ["fury"],
-    "energy_cost": 1,
-    "power_cost": [],
-    "might": 2,
-    "might_bonus": null,
-    "keywords": [],
-    "abilities": [],
-    "flavor_text": "Strength in numbers."
-  },
-  {
-    "id": "war-hound",
-    "name": "War Hound",
-    "card_type": "unit",
-    "supertypes": [],
-    "tags": ["Noxus", "Beast"],
-    "domain": ["fury"],
-    "energy_cost": 3,
-    "power_cost": [],
-    "might": 3,
-    "might_bonus": null,
-    "keywords": [{"id": "assault", "value": 2}],
-    "abilities": [],
-    "flavor_text": "Bred for battle."
-  },
-  {
-    "id": "noxus-berserker",
-    "name": "Noxus Berserker",
-    "card_type": "unit",
-    "supertypes": [],
-    "tags": ["Noxus", "Soldier"],
-    "domain": ["fury"],
-    "energy_cost": 2,
-    "power_cost": [],
-    "might": 2,
-    "might_bonus": null,
-    "keywords": [{"id": "ganking"}],
-    "abilities": [],
-    "flavor_text": "Strike hard, strike fast, strike everywhere."
-  },
-  {
-    "id": "noxus-shieldbearer",
-    "name": "Noxus Shieldbearer",
-    "card_type": "unit",
-    "supertypes": [],
-    "tags": ["Noxus", "Soldier"],
-    "domain": ["fury"],
-    "energy_cost": 3,
-    "power_cost": [],
-    "might": 3,
-    "might_bonus": null,
-    "keywords": [{"id": "shield", "value": 2}],
-    "abilities": [],
-    "flavor_text": "Their wall will not break."
-  },
-  {
-    "id": "noxus-captain",
-    "name": "Noxus Captain",
-    "card_type": "unit",
-    "supertypes": [],
-    "tags": ["Noxus", "Soldier"],
-    "domain": ["fury"],
-    "energy_cost": 3,
-    "power_cost": [],
-    "might": 3,
-    "might_bonus": null,
-    "keywords": [{"id": "accelerate"}],
-    "abilities": [],
-    "flavor_text": "Orders given, victory assured."
-  },
-  {
-    "id": "noxus-lancer",
-    "name": "Noxus Lancer",
-    "card_type": "unit",
-    "supertypes": [],
-    "tags": ["Noxus", "Soldier"],
-    "domain": ["fury"],
-    "energy_cost": 2,
-    "power_cost": [],
-    "might": 2,
-    "might_bonus": null,
-    "keywords": [],
-    "abilities": [],
-    "flavor_text": "Point it at the enemy. Charge."
-  },
-  {
-    "id": "noxus-militia",
-    "name": "Noxus Militia",
-    "card_type": "unit",
-    "supertypes": [],
-    "tags": ["Noxus", "Soldier"],
-    "domain": ["fury"],
-    "energy_cost": 1,
-    "power_cost": [],
-    "might": 1,
-    "might_bonus": null,
-    "keywords": [],
-    "abilities": [],
-    "flavor_text": "Every Noxian fights."
-  },
-  {
-    "id": "piltover-champion",
-    "name": "Piltover Champion",
-    "card_type": "unit",
-    "supertypes": ["champion"],
-    "tags": ["Piltover"],
-    "domain": ["mind"],
-    "energy_cost": 3,
-    "power_cost": [],
-    "might": 3,
-    "might_bonus": null,
-    "keywords": [{"id": "vision"}, {"id": "ganking"}],
+    "keywords": [
+      {
+        "id": "accelerate"
+      }
+    ],
     "abilities": [
       {
-        "ability_id": "piltover-champion-vision",
-        "ability_type": "triggered",
-        "timing": "play",
+        "ability_id": "blazing-scorcher-accelerate",
+        "ability_type": "keyword_ability",
+        "timing": "on_play",
         "condition": null,
         "is_optional": true,
-        "cost": {},
-        "effect_type": "predict",
-        "effect_params": {"amount": 1},
+        "cost": {
+          "energy": 1,
+          "power": [
+            {
+              "domain": "fury",
+              "amount": 1
+            }
+          ]
+        },
+        "effect_type": "enter_ready",
+        "effect_params": {},
         "is_action": false,
         "is_reaction": false
       }
     ],
-    "flavor_text": "Progress has no limits."
+    "image": "CardArts/OGN-001.webp"
   },
   {
-    "id": "piltover-tinkerer",
-    "name": "Piltover Tinkerer",
+    "id": "brazen-buccaneer",
+    "name": "Brazen Buccaneer",
+    "set": "OGN",
+    "card_number": "002",
     "card_type": "unit",
     "supertypes": [],
-    "tags": ["Piltover"],
-    "domain": ["mind"],
-    "energy_cost": 2,
+    "tags": [
+      "Pirate",
+      "Bilgewater"
+    ],
+    "domain": [
+      "fury"
+    ],
+    "rarity": "Common",
+    "energy_cost": 6,
     "power_cost": [],
-    "might": 2,
+    "might": 5,
     "might_bonus": null,
-    "keywords": [{"id": "vision"}],
+    "keywords": [],
     "abilities": [
       {
-        "ability_id": "piltover-tinkerer-vision",
+        "ability_id": "brazen-buccaneer-discard-discount",
         "ability_type": "triggered",
-        "timing": "play",
+        "timing": "on_play",
         "condition": null,
         "is_optional": true,
-        "cost": {},
-        "effect_type": "predict",
-        "effect_params": {"amount": 1},
+        "cost": {
+          "discard": 1
+        },
+        "effect_type": "cost_reduction",
+        "effect_params": {
+          "amount": 2,
+          "scope": "self",
+          "duration": "play"
+        },
         "is_action": false,
         "is_reaction": false
       }
     ],
-    "flavor_text": "A mind for machines."
+    "flavor_text": "\"They called my crew 'scurvy dogs,' and I took that personally.\"",
+    "image": "CardArts/OGN-002.webp"
   },
   {
-    "id": "hextech-drone",
-    "name": "Hextech Drone",
+    "id": "cemetery-attendant",
+    "name": "Cemetery Attendant",
+    "set": "OGN",
+    "card_number": "165",
     "card_type": "unit",
     "supertypes": [],
-    "tags": ["Piltover", "Mech"],
-    "domain": ["mind"],
+    "tags": [
+      "Dog",
+      "Shadow Isles"
+    ],
+    "domain": [
+      "chaos"
+    ],
+    "rarity": "Common",
     "energy_cost": 3,
     "power_cost": [],
     "might": 3,
     "might_bonus": null,
-    "keywords": [{"id": "deathknell"}],
+    "keywords": [],
     "abilities": [
       {
-        "ability_id": "hextech-drone-deathknell",
+        "ability_id": "cemetery-attendant-play",
+        "ability_type": "triggered",
+        "timing": "on_play",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "return_from_trash",
+        "effect_params": {
+          "target": "unit",
+          "destination": "hand"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "\"Good boy! Now, where's the rest of 'em?\"",
+    "image": "CardArts/OGN-165.webp"
+  },
+  {
+    "id": "undercover-agent",
+    "name": "Undercover Agent",
+    "set": "OGN",
+    "card_number": "178",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "chaos"
+    ],
+    "rarity": "Common",
+    "energy_cost": 5,
+    "power_cost": [],
+    "might": 5,
+    "might_bonus": null,
+    "keywords": [
+      {
+        "id": "deathknell"
+      }
+    ],
+    "abilities": [
+      {
+        "ability_id": "undercover-agent-deathknell",
         "ability_type": "triggered",
         "timing": "on_death",
         "condition": null,
         "is_optional": false,
         "cost": {},
-        "effect_type": "draw",
-        "effect_params": {"amount": 1},
+        "effect_type": "discard_then_draw",
+        "effect_params": {
+          "discard_amount": 2,
+          "draw_amount": 2
+        },
         "is_action": false,
         "is_reaction": false
       }
     ],
-    "flavor_text": "Its final transmission: one last gift."
+    "flavor_text": "Even he no longer knew which side he worked for.",
+    "image": "CardArts/OGN-178.webp"
   },
   {
-    "id": "piltover-guard",
-    "name": "Piltover Guard",
+    "id": "traveling-merchant",
+    "name": "Traveling Merchant",
+    "set": "OGN",
+    "card_number": "185",
     "card_type": "unit",
     "supertypes": [],
-    "tags": ["Piltover"],
-    "domain": ["mind"],
-    "energy_cost": 2,
-    "power_cost": [{"domain": "mind", "amount": 1}],
-    "might": 3,
-    "might_bonus": null,
-    "keywords": [{"id": "shield", "value": 1}],
-    "abilities": [],
-    "flavor_text": "Order maintained at any cost."
-  },
-  {
-    "id": "clockwork-sentinel",
-    "name": "Clockwork Sentinel",
-    "card_type": "unit",
-    "supertypes": [],
-    "tags": ["Piltover", "Mech"],
-    "domain": ["mind"],
-    "energy_cost": 4,
-    "power_cost": [{"domain": "mind", "amount": 1}],
-    "might": 4,
-    "might_bonus": null,
-    "keywords": [{"id": "tank"}],
-    "abilities": [],
-    "flavor_text": "Built to last. Built to hold the line."
-  },
-  {
-    "id": "piltover-spy",
-    "name": "Piltover Spy",
-    "card_type": "unit",
-    "supertypes": [],
-    "tags": ["Piltover"],
-    "domain": ["mind"],
-    "energy_cost": 1,
-    "power_cost": [],
-    "might": 1,
-    "might_bonus": null,
-    "keywords": [{"id": "ganking"}],
-    "abilities": [],
-    "flavor_text": "Everywhere and nowhere."
-  },
-  {
-    "id": "piltover-scholar",
-    "name": "Piltover Scholar",
-    "card_type": "unit",
-    "supertypes": [],
-    "tags": ["Piltover"],
-    "domain": ["mind"],
+    "tags": [
+      "Bilgewater"
+    ],
+    "domain": [
+      "chaos"
+    ],
+    "rarity": "Uncommon",
     "energy_cost": 2,
     "power_cost": [],
     "might": 2,
     "might_bonus": null,
-    "keywords": [{"id": "vision"}],
+    "keywords": [],
     "abilities": [
       {
-        "ability_id": "piltover-scholar-vision",
+        "ability_id": "traveling-merchant-move",
         "ability_type": "triggered",
-        "timing": "play",
+        "timing": "on_move",
         "condition": null,
-        "is_optional": true,
+        "is_optional": false,
         "cost": {},
-        "effect_type": "predict",
-        "effect_params": {"amount": 1},
+        "effect_type": "discard_then_draw",
+        "effect_params": {
+          "discard_amount": 1,
+          "draw_amount": 1
+        },
         "is_action": false,
         "is_reaction": false
       }
     ],
-    "flavor_text": "Knowledge is the sharpest weapon."
+    "flavor_text": "Payment first, refund never.",
+    "image": "Champ_Card.jpg"
   },
   {
-    "id": "hextech-mech",
-    "name": "Hextech Mech",
+    "id": "rhasa-the-sunderer",
+    "name": "Rhasa the Sunderer",
+    "set": "OGN",
+    "card_number": "195",
     "card_type": "unit",
     "supertypes": [],
-    "tags": ["Piltover", "Mech"],
-    "domain": ["mind"],
-    "energy_cost": 3,
+    "tags": [
+      "Spirit",
+      "Shadow Isles"
+    ],
+    "domain": [
+      "chaos"
+    ],
+    "rarity": "Rare",
+    "energy_cost": 10,
     "power_cost": [],
-    "might": 3,
+    "might": 6,
     "might_bonus": null,
     "keywords": [],
-    "abilities": [],
-    "flavor_text": "Powered by innovation."
-  },
-  {
-    "id": "piltover-enforcer",
-    "name": "Piltover Enforcer",
-    "card_type": "unit",
-    "supertypes": [],
-    "tags": ["Piltover"],
-    "domain": ["mind"],
-    "energy_cost": 3,
-    "power_cost": [],
-    "might": 3,
-    "might_bonus": null,
-    "keywords": [{"id": "shield", "value": 1}],
-    "abilities": [],
-    "flavor_text": "The law has teeth."
-  },
-  {
-    "id": "piltover-militia",
-    "name": "Piltover Militia",
-    "card_type": "unit",
-    "supertypes": [],
-    "tags": ["Piltover"],
-    "domain": ["mind"],
-    "energy_cost": 1,
-    "power_cost": [],
-    "might": 1,
-    "might_bonus": null,
-    "keywords": [],
-    "abilities": [],
-    "flavor_text": "Protecting the city block by block."
+    "abilities": [
+      {
+        "ability_id": "rhasa-cost-reduction",
+        "ability_type": "passive",
+        "timing": null,
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "cost_reduction",
+        "effect_params": {
+          "per_card_in_trash": true,
+          "reduction_per_card": 1,
+          "scope": "self"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "It feeds well on death, but better on madness.",
+    "image": "CardArts/OGN-195.webp"
   }
 ]

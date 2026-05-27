@@ -1,6 +1,9 @@
 class_name BoardView
 extends Control
 
+signal card_hovered(inst: CardInstance)
+signal card_unhovered()
+
 # ── Layout constants ──────────────────────────────────────────────────────────
 const HUD_H       := 38
 const RUNE_ROW_H  := 82
@@ -596,36 +599,49 @@ func _refresh_hand_zone(gs: GameState, pi: int) -> void:
 			hand_hbox.add_child(_make_card_back(pi))
 
 
-func _make_card_back(owner_pi: int) -> PanelContainer:
-	var pc := PanelContainer.new()
-	pc.custom_minimum_size = Vector2(CARD_W, CARD_H)
-	pc.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+func _make_card_back(owner_pi: int) -> Control:
+	var wrapper := Control.new()
+	wrapper.custom_minimum_size = Vector2(CARD_W, CARD_H)
+	wrapper.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	wrapper.clip_contents = false
 
+	var card := Control.new()
+	card.set_size(Vector2(CARD_W, CARD_H))
+	wrapper.add_child(card)
+
+	# Darkened card art as back face (always uses fallback — art is hidden)
+	var tex := TextureRect.new()
+	tex.texture = _load_card_texture("")
+	tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	tex.stretch_mode = TextureRect.STRETCH_SCALE
+	tex.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	card.add_child(tex)
+
+	# Heavy dark overlay to obscure art
+	var dim := ColorRect.new()
+	dim.color = Color(0.0, 0.0, 0.0, 0.72)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	card.add_child(dim)
+
+	# Owner-colored border
 	var owner_color := C_P1 if owner_pi == 0 else C_P2
-	var bg := owner_color * 0.12; bg.a = 1.0
-	pc.add_theme_stylebox_override("panel", _flat_sb(bg, owner_color * 0.35, 1, 4))
+	var border_panel := Panel.new()
+	border_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	border_panel.add_theme_stylebox_override("panel",
+		_flat_sb(Color(0, 0, 0, 0), owner_color * 0.5, 2, 4))
+	card.add_child(border_panel)
 
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 0)
-	pc.add_child(vbox)
-
-	# Spacer to push "?" toward center
-	var spacer_top := Control.new()
-	spacer_top.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	vbox.add_child(spacer_top)
-
+	# "?" centered
 	var lbl := Label.new()
 	lbl.text = "?"
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	lbl.add_theme_font_size_override("font_size", 28)
-	lbl.add_theme_color_override("font_color", owner_color * 0.55)
-	vbox.add_child(lbl)
+	lbl.add_theme_color_override("font_color", owner_color * 0.60)
+	card.add_child(lbl)
 
-	var spacer_bot := Control.new()
-	spacer_bot.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	vbox.add_child(spacer_bot)
-
-	return pc
+	return wrapper
 
 
 func _refresh_rune_zone(gs: GameState, pi: int) -> void:
@@ -758,105 +774,121 @@ func _refresh_chain(gs: GameState) -> void:
 
 
 # ── Card thumbnail builder ────────────────────────────────────────────────────
+# Wrapper/inner-child pattern: wrapper reserves layout space; inner card rotates.
+# Text labels are intentionally omitted — art carries all visual info.
+# Hover emits card_hovered so the preview panel can display full card details.
 
-func _make_card_thumb(inst: CardInstance) -> PanelContainer:
-	var pc := PanelContainer.new()
-	pc.custom_minimum_size = Vector2(CARD_W, CARD_H)
-	pc.size_flags_vertical  = Control.SIZE_SHRINK_CENTER
+func _make_card_thumb(inst: CardInstance) -> Control:
+	var wrapper := Control.new()
+	wrapper.custom_minimum_size = Vector2(CARD_W, CARD_H)
+	wrapper.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	wrapper.clip_contents = false
+	wrapper.mouse_filter = Control.MOUSE_FILTER_STOP
 
-	var type_color := _card_type_color(inst.definition.card_type)
+	# Emit hover signals so GameScene can update the preview panel
+	wrapper.mouse_entered.connect(func(): card_hovered.emit(inst))
+	wrapper.mouse_exited.connect(func(): card_unhovered.emit())
+
+	# Inner card — holds all visuals, rotates when exhausted
+	var card := Control.new()
+	card.set_size(Vector2(CARD_W, CARD_H))
+	card.clip_contents = false
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wrapper.add_child(card)
+
+	# Full-bleed card art
+	var tex := TextureRect.new()
+	tex.texture = _load_card_texture(inst.definition.image)
+	tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	tex.stretch_mode = TextureRect.STRETCH_SCALE
+	tex.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	tex.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(tex)
+
+	# Owner-colored border (transparent fill)
 	var owner_color := C_P1 if inst.owner_index == 0 else C_P2
-	var bg := type_color.lerp(owner_color * 0.3, 0.25)
-	if inst.is_exhausted:
-		bg = bg.lerp(Color(0.08, 0.08, 0.08), 0.55)
-	pc.add_theme_stylebox_override("panel",
-		_flat_sb(bg, owner_color if not inst.is_exhausted else Color(0.3, 0.3, 0.35), 1, 4))
+	var border_panel := Panel.new()
+	border_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	border_panel.add_theme_stylebox_override("panel",
+		_flat_sb(Color(0, 0, 0, 0), owner_color, 2, 4))
+	border_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(border_panel)
 
-	var vbox := VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 1)
-	pc.add_child(vbox)
+	# Tiny instance-ID strip at the very bottom (needed for commands)
+	var id_bg := ColorRect.new()
+	id_bg.color = Color(0.0, 0.0, 0.0, 0.70)
+	id_bg.anchor_left = 0.0; id_bg.anchor_right  = 1.0
+	id_bg.anchor_top  = 0.88; id_bg.anchor_bottom = 1.0
+	id_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(id_bg)
 
-	# Card name
-	var name_lbl := Label.new()
-	name_lbl.text = _short_name(inst.definition.name)
-	name_lbl.clip_text = true
-	name_lbl.add_theme_font_size_override("font_size", 9)
-	name_lbl.add_theme_color_override("font_color",
-		Color(0.95, 0.95, 0.95) if not inst.is_exhausted else Color(0.55, 0.55, 0.55))
-	vbox.add_child(name_lbl)
-
-	# Type tag
-	var type_lbl := Label.new()
-	type_lbl.text = inst.definition.card_type.to_upper()
-	type_lbl.add_theme_font_size_override("font_size", 8)
-	type_lbl.add_theme_color_override("font_color", type_color.lightened(0.3))
-	vbox.add_child(type_lbl)
-
-	# Cost
-	var cost_lbl := Label.new()
-	cost_lbl.text = inst.definition.cost_string()
-	cost_lbl.add_theme_font_size_override("font_size", 9)
-	cost_lbl.add_theme_color_override("font_color", Color(0.65, 0.85, 0.65))
-	vbox.add_child(cost_lbl)
-
-	# Might (units)
-	if inst.definition.card_type == "unit":
-		var cur := inst.get_current_might()
-		var base := inst.definition.might
-		var might_lbl := Label.new()
-		might_lbl.text = "%d / %dM" % [cur, base]
-		might_lbl.add_theme_font_size_override("font_size", 11)
-		var might_col := Color(0.9, 0.75, 0.35) if inst.buff_counters > 0 or inst.temp_might_bonus > 0 \
-						 else Color(0.82, 0.90, 0.82)
-		might_lbl.add_theme_color_override("font_color", might_col)
-		vbox.add_child(might_lbl)
-
-	# Damage badge
-	if inst.damage > 0:
-		var dmg_lbl := Label.new()
-		dmg_lbl.text = "DMG: %d" % inst.damage
-		dmg_lbl.add_theme_font_size_override("font_size", 9)
-		dmg_lbl.add_theme_color_override("font_color", Color(0.95, 0.30, 0.30))
-		vbox.add_child(dmg_lbl)
-
-	# Status badges
-	var badges: Array[String] = []
-	if inst.is_exhausted: badges.append("EXH")
-	if inst.is_stunned:   badges.append("STUN")
-	if inst.buff_counters > 0: badges.append("★BUFF")
-	if not badges.is_empty():
-		var status_lbl := Label.new()
-		status_lbl.text = " ".join(badges)
-		status_lbl.add_theme_font_size_override("font_size", 8)
-		status_lbl.add_theme_color_override("font_color", Color(0.90, 0.85, 0.30))
-		vbox.add_child(status_lbl)
-
-	# Instance ID (bottom, small, for commands)
 	var id_lbl := Label.new()
 	id_lbl.text = inst.instance_id
 	id_lbl.clip_text = true
-	id_lbl.add_theme_font_size_override("font_size", 8)
-	id_lbl.add_theme_color_override("font_color", Color(0.45, 0.45, 0.50))
-	vbox.add_child(id_lbl)
+	id_lbl.anchor_left  = 0.0;  id_lbl.anchor_right  = 1.0
+	id_lbl.anchor_top   = 0.89; id_lbl.anchor_bottom = 1.0
+	id_lbl.offset_left = 2; id_lbl.offset_right = -2
+	id_lbl.add_theme_font_size_override("font_size", 7)
+	id_lbl.add_theme_color_override("font_color", Color(0.70, 0.70, 0.75))
+	id_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(id_lbl)
 
-	return pc
+	# Small status badges in top-left corner (damage / stun / buff only)
+	var badges: Array[String] = []
+	if inst.damage > 0:        badges.append("❤%d" % inst.damage)
+	if inst.is_stunned:        badges.append("~")
+	if inst.buff_counters > 0: badges.append("★")
+	if not badges.is_empty():
+		var badge_bg := ColorRect.new()
+		badge_bg.color = Color(0.0, 0.0, 0.0, 0.72)
+		badge_bg.anchor_left = 0.0; badge_bg.anchor_right  = 0.55
+		badge_bg.anchor_top  = 0.0; badge_bg.anchor_bottom = 0.18
+		badge_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_child(badge_bg)
+		var badge_lbl := Label.new()
+		badge_lbl.text = " ".join(badges)
+		badge_lbl.anchor_left  = 0.0;  badge_lbl.anchor_right  = 0.55
+		badge_lbl.anchor_top   = 0.01; badge_lbl.anchor_bottom = 0.17
+		badge_lbl.offset_left = 2
+		badge_lbl.add_theme_font_size_override("font_size", 8)
+		badge_lbl.add_theme_color_override("font_color", Color(0.95, 0.35, 0.35))
+		badge_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_child(badge_lbl)
+
+	# Exhausted: dim overlay + rotate 90° (TCG "tapped" look)
+	if inst.is_exhausted:
+		var dim := ColorRect.new()
+		dim.color = Color(0.0, 0.0, 0.0, 0.45)
+		dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_child(dim)
+		card.pivot_offset = Vector2(CARD_W / 2.0, CARD_H / 2.0)
+		card.rotation_degrees = 90.0
+
+	return wrapper
 
 
-func _make_rune_slot(idx: int, rune: CardInstance, pi: int) -> PanelContainer:
-	var pc := PanelContainer.new()
-	pc.custom_minimum_size = Vector2(RUNE_W, RUNE_H)
-	pc.size_flags_vertical  = Control.SIZE_SHRINK_CENTER
+func _make_rune_slot(idx: int, rune: CardInstance, pi: int) -> Control:
+	# Same wrapper/inner pattern so exhausted runes can rotate freely
+	var wrapper := Control.new()
+	wrapper.custom_minimum_size = Vector2(RUNE_W, RUNE_H)
+	wrapper.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	wrapper.clip_contents = false
+
+	var slot := PanelContainer.new()
+	slot.set_size(Vector2(RUNE_W, RUNE_H))
+	wrapper.add_child(slot)
 
 	var domain: String = rune.definition.domain[0] if rune.definition.domain.size() > 0 else ""
 	var d_color := CardDefinition.domain_color(domain)
-	var bg := d_color * (0.18 if not rune.is_exhausted else 0.07)
+	var bg  := d_color * (0.18 if not rune.is_exhausted else 0.07)
 	bg.a = 1.0
 	var bdr := d_color * (0.8 if not rune.is_exhausted else 0.3)
-	pc.add_theme_stylebox_override("panel", _flat_sb(bg, bdr, 1, 4))
+	slot.add_theme_stylebox_override("panel", _flat_sb(bg, bdr, 1, 4))
 
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 2)
-	pc.add_child(vbox)
+	slot.add_child(vbox)
 
 	var idx_lbl := Label.new()
 	idx_lbl.text = str(idx)
@@ -873,15 +905,12 @@ func _make_rune_slot(idx: int, rune: CardInstance, pi: int) -> PanelContainer:
 		d_color if not rune.is_exhausted else Color(0.35, 0.35, 0.35))
 	vbox.add_child(d_lbl)
 
+	# Rotate inner slot 90° when exhausted; wrapper keeps its layout slot
 	if rune.is_exhausted:
-		var exh_lbl := Label.new()
-		exh_lbl.text = "EXH"
-		exh_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		exh_lbl.add_theme_font_size_override("font_size", 8)
-		exh_lbl.add_theme_color_override("font_color", Color(0.45, 0.45, 0.45))
-		vbox.add_child(exh_lbl)
+		slot.pivot_offset = Vector2(RUNE_W / 2.0, RUNE_H / 2.0)
+		slot.rotation_degrees = 90.0
 
-	return pc
+	return wrapper
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -898,6 +927,18 @@ func _flat_sb(bg: Color, border: Color, border_w: int = 1,
 	sb.content_margin_top    = 3
 	sb.content_margin_bottom = 3
 	return sb
+
+
+func _load_card_texture(image_path: String) -> Texture2D:
+	const FALLBACK := "res://Assets/Champ_Card.jpg"
+	if image_path.is_empty():
+		return load(FALLBACK)
+	var full := "res://Assets/" + image_path
+	if ResourceLoader.exists(full):
+		var tex = load(full)
+		if tex is Texture2D:
+			return tex
+	return load(FALLBACK)
 
 
 func _vsep() -> VSeparator:

@@ -1,0 +1,527 @@
+OGN-251 Jinx - Loose Cannon
+Effect
+At start of your Beginning Phase, draw 1 if you have one or fewer cards in your hand.
+Title
+Jinx - Loose Cannon
+Set
+OGN - Origins
+Card Number
+251
+Rarity
+Rare
+Promo
+No
+Tags
+Jinx
+Card type
+Legend
+Color
+Fury
+Chaos
+
+OGN-298 Zaun Warrens
+Effect
+When you conquer here, discard 1, then draw 1.
+Title
+Zaun Warrens
+Set
+OGN - Origins
+Card Number
+298
+Rarity
+Uncommon
+Promo
+No
+Card type
+Battlefield
+
+OGN-289 Targon's Peak
+Effect
+When you conquer here, ready up to 2 runes at the end of this turn.
+Errata
+When you conquer here, ready up to 2 runes at the end of this turn.
+Title
+Targon's Peak
+Set
+OGN - Origins
+Card Number
+289
+Rarity
+Uncommon
+Promo
+No
+Card type
+Battlefield
+
+OGN-285 Reaver's Row
+Effect
+When you defend here, you may move a friendly unit here to base.
+Title
+Reaver's Row
+Set
+OGN - Origins
+Card Number
+285
+Rarity
+Uncommon
+Promo
+No
+Card type
+Battlefield
+
+OGN-185 Traveling Merchant
+Effect
+When I move, discard 1, then draw 1.
+Flavor
+Payment first, refund never.
+Title
+Traveling Merchant
+Set
+OGN - Origins
+Card Number
+185
+Rarity
+Uncommon
+Might
+2
+Cost
+2
+Promo
+No
+Tags
+Bilgewater
+Card type
+Unit
+Color
+Chaos
+
+OGN-036 Vi - Destructive
+Effect
+Ganking (I can move from battlefield to battlefield.)
+Recycle 1 from your trash: Give me +1 rb_might this turn.
+Flavor
+“Punch first. Ask questions while punching.”
+Title
+Vi - Destructive
+Set
+OGN - Origins
+Card Number
+036
+Rarity
+Rare
+Might
+3
+Cost
+2
+Promo
+No
+Tags
+Vi
+Piltover
+Card type
+Unit
+Super type
+Champion
+Color
+Fury
+
+OGN-003 Chemtech Enforcer
+Effect
+Assault 2 (+2 rb_might while I'm an attacker.)
+When you play me, discard 1.
+Flavor
+“Knock, knock.”
+Title
+Chemtech Enforcer
+Set
+OGN - Origins
+Card Number
+003
+Rarity
+Common
+Might
+2
+Cost
+2
+Promo
+No
+Tags
+Zaun
+Card type
+Unit
+Color
+Fury
+
+OGN-165 Cemetery Attendant
+Effect
+When you play me, return a unit from your trash to your hand.
+Flavor
+“Good boy! Now, where’s the rest of ‘em?”
+Title
+Cemetery Attendant
+Set
+OGN - Origins
+Card Number
+165
+Rarity
+Common
+Might
+3
+Cost
+3
+Promo
+No
+Tags
+Dog
+Shadow Isles
+Card type
+Unit
+Color
+Chaos
+
+OGN-030 Jinx - Demolitionist
+Effect
+Accelerate (You may pay rb_energy_1rb_rune_fury as an additional cost to have me enter ready.)
+Assault 2 (+2 rb_might while I'm an attacker.)
+When you play me, discard 2.
+Flavor
+“I really need a new gun. But don’t tell my other guns.”
+Title
+Jinx - Demolitionist
+Set
+OGN - Origins
+Card Number
+030
+Rarity
+Rare
+Might
+4
+Cost
+3
+Promo
+No
+Tags
+Jinx
+Zaun
+Card type
+Unit
+Super type
+Champion
+Color
+Fury
+
+OGN-006 Flame Chompers
+Effect
+When you discard me, you may pay rb_rune_fury to play me.
+Flavor
+"GET 'EM, CHOMPIES!"
+Title
+Flame Chompers
+Set
+OGN - Origins
+Card Number
+006
+Rarity
+Common
+Might
+3
+Cost
+3
+Promo
+No
+Tags
+Zaun
+Card type
+Unit
+Color
+Fury
+
+OGN-019 Raging Soul
+Effect
+If you've discarded a card this turn, I have Assault and Ganking. (+1 rb_might while I'm an attacker. I can move from battlefield to battlefield.)
+Title
+Raging Soul
+Set
+OGN - Origins
+Card Number
+019
+Rarity
+Uncommon
+Might
+4
+Cost
+4
+Promo
+No
+Tags
+Spirit
+Shadow Isles
+Card type
+Unit
+Color
+Fury
+
+OGN-178 Undercover Agent
+Effect
+Deathknell — Discard 2, then draw 2. (When I die, get the effect.)
+Flavor
+Even he no longer knew which side he worked for.
+Title
+Undercover Agent
+Set
+OGN - Origins
+Card Number
+178
+Rarity
+Common
+Might
+5
+Cost
+5
+Promo
+No
+Card type
+Unit
+Color
+Chaos
+
+OGN-001 Blazing Scorcher
+Effect
+Accelerate (You may pay rb_energy_1rb_rune_fury as an additional cost to have me enter ready.)
+Title
+Blazing Scorcher
+Set
+OGN - Origins
+Card Number
+001
+Rarity
+Common
+Might
+5
+Cost
+5
+Promo
+No
+Tags
+Dragon
+Noxus
+Card type
+Unit
+Color
+Fury
+
+OGN-002 Brazen Buccaneer
+Effect
+As you play me, you may discard 1 as an additional cost. If you do, reduce my cost by rb_energy_2.
+Flavor
+“They called my crew ‘scurvy dogs,’ and I took that personally.”
+Title
+Brazen Buccaneer
+Set
+OGN - Origins
+Card Number
+002
+Rarity
+Common
+Might
+5
+Cost
+6
+Promo
+No
+Tags
+Pirate
+Bilgewater
+Card type
+Unit
+Color
+Fury
+
+OGN-011 Magma Wurm
+Effect
+Other friendly units enter ready.
+Flavor
+A river of flame in an ocean of ice.
+Title
+Magma Wurm
+Set
+OGN - Origins
+Card Number
+011
+Rarity
+Common
+Might
+8
+Cost
+8
+Promo
+No
+Tags
+Freljord
+Card type
+Unit
+Color
+Fury
+
+OGN-195 Rhasa the Sunderer
+Effect
+I cost rb_energy_1 less for each card in your trash.
+Flavor
+It feeds well on death, but better on madness.
+Title
+Rhasa the Sunderer
+Set
+OGN - Origins
+Card Number
+195
+Rarity
+Rare
+Might
+6
+Cost
+10
+Promo
+No
+Tags
+Spirit
+Shadow Isles
+Card type
+Unit
+Color
+Chaos
+
+OGN-182 Scrapheap
+Effect
+When this is played, discarded, or killed, draw 1.
+Flavor
+The parts that make it to the heap are the ones that DIDN’T blow up.
+Title
+Scrapheap
+Set
+OGN - Origins
+Card Number
+182
+Rarity
+Uncommon
+Cost
+2
+Promo
+No
+Card type
+Gear
+Color
+Chaos
+
+OGN-169 Gust
+Effect
+Reaction (Play any time, even before spells and abilities resolve.)
+Return a unit at a battlefield with 3 rb_might or less to its owner's hand.
+Title
+Gust
+Set
+OGN - Origins
+Card Number
+169
+Rarity
+Common
+Cost
+1
+Promo
+No
+Card type
+Spell
+Color
+Chaos
+
+OGN-168 Fight or Flight
+Effect
+Hidden (Hide now for rb_rune_rainbow to react with later for rb_energy_0.)
+Action (Play on your turn or in showdowns.)
+Move a unit from a battlefield to its base.
+Flavor
+“Boo.”
+Title
+Fight or Flight
+Set
+OGN - Origins
+Card Number
+168
+Rarity
+Common
+Cost
+2
+Promo
+No
+Card type
+Spell
+Color
+Chaos
+
+OGN-008 Get Excited!
+Effect
+Action (Play on your turn or in showdowns.)
+Discard 1. Deal its Energy cost as damage to a unit at a battlefield. (Ignore its Power cost.)
+Flavor
+“Everybody, panic!”
+Title
+Get Excited!
+Set
+OGN - Origins
+Card Number
+008
+Rarity
+Common
+Cost
+2
+Promo
+No
+Card type
+Spell
+Color
+Fury
+
+OGN-024 Void Seeker
+Effect
+Action (Play on your turn or in showdowns.)
+Deal 4 to a unit at a battlefield. Draw 1.
+Flavor
+“It’s a good day for a hunt.” —Kai’Sa
+Title
+Void Seeker
+Set
+OGN - Origins
+Card Number
+024
+Rarity
+Uncommon
+Cost
+3
+Promo
+No
+Card type
+Spell
+Color
+Fury
+
+OGN-180 Fading Memories
+Effect
+Give a unit at a battlefield or a gear Temporary. (Kill it at the start of its controller's Beginning Phase, before scoring.)
+Flavor
+You too shall pass.
+Title
+Fading Memories
+Set
+OGN - Origins
+Card Number
+180
+Rarity
+Uncommon
+Cost
+4
+Promo
+No
+Card type
+Spell
+Color
+Chaos
+

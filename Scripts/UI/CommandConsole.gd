@@ -182,6 +182,12 @@ const HINTS: Dictionary = {
 		"example": "new game",
 		"note": "Restarts the game with the same decks."
 	},
+	"menu": {
+		"usage": "menu",
+		"params": "No arguments.",
+		"example": "menu",
+		"note": "Return to the main menu to choose a different match type."
+	},
 }
 
 

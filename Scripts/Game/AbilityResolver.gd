@@ -49,6 +49,10 @@ func resolve_ability(ability: Dictionary, source: CardInstance, target: CardInst
 			log_lines.append_array(_predict(params, source, gs))
 		"return_to_hand":
 			log_lines.append_array(_return_to_hand(params, source, target, gs))
+		"enter_ready":
+			log_lines.append_array(_enter_ready(params, source, gs))
+		"return_from_trash":
+			log_lines.append_array(_return_from_trash(params, source, gs))
 		"cost_reduction":
 			pass  # Handled at cost calculation time, not resolution
 		"attach":
@@ -270,6 +274,23 @@ func _return_to_hand(params: Dictionary, source: CardInstance, target: CardInsta
 	gs.board.remove_unit_from_battlefield(target)
 	gs.players[owner].move_to_hand(target)
 	return ["> %s returned to P%d's hand" % [target.display_name(), owner + 1]]
+
+
+func _enter_ready(params: Dictionary, source: CardInstance, gs: GameState) -> Array:
+	source.ready()
+	return ["> %s enters ready" % source.display_name()]
+
+
+func _return_from_trash(params: Dictionary, source: CardInstance, gs: GameState) -> Array:
+	var owner: int = source.owner_index
+	var ps: PlayerState = gs.players[owner]
+	var target_type: String = params.get("target", "any")
+	for i in range(ps.trash.size() - 1, -1, -1):
+		var card = ps.trash[i]
+		if target_type == "any" or card.definition.card_type == target_type:
+			ps.move_to_hand(card)
+			return ["> P%d returned %s from trash to hand" % [owner + 1, card.display_name()]]
+	return ["> P%d has no %s in trash to return" % [owner + 1, target_type]]
 
 
 func _attach(params: Dictionary, source: CardInstance, target: CardInstance, gs: GameState) -> Array:

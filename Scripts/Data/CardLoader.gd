@@ -92,4 +92,5 @@ static func _parse_definition(d: Dictionary) -> CardDefinition:
 	def.is_basic = d.get("is_basic", false)
 	def.facedown_capacity = d.get("facedown_capacity", 1)
 	def.champion_tag = d.get("champion_tag", "")
+	def.image = d.get("image", "")
 	return def

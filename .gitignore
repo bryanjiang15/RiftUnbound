@@ -2,3 +2,10 @@
 .godot/
 /android/
 /card-game-framework/
+
+# AI agent runtime files
+ai_agent/agent_memory.db
+ai_agent/agent_decisions.log
+__pycache__/
+*.pyc
+.env

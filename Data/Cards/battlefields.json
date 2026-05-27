@@ -1,86 +1,100 @@
 [
   {
-    "id": "noxus-gates",
-    "name": "Noxus Gates",
-    "card_type": "battlefield",
-    "supertypes": [],
-    "tags": ["Noxus"],
-    "domain": [],
-    "energy_cost": 0,
-    "power_cost": [],
-    "facedown_capacity": 1,
-    "keywords": [],
-    "abilities": [],
-    "flavor_text": "Every empire begins with an open gate — and ends with a closed one."
-  },
-  {
-    "id": "training-grounds",
-    "name": "Training Grounds",
+    "id": "zaun-warrens",
+    "name": "Zaun Warrens",
+    "set": "OGN",
+    "card_number": "298",
     "card_type": "battlefield",
     "supertypes": [],
     "tags": [],
     "domain": [],
+    "rarity": "Uncommon",
     "energy_cost": 0,
     "power_cost": [],
     "facedown_capacity": 1,
     "keywords": [],
-    "abilities": [],
-    "flavor_text": "Where warriors are forged."
+    "abilities": [
+      {
+        "ability_id": "zaun-warrens-conquer",
+        "ability_type": "triggered",
+        "timing": "on_conquer",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "discard_then_draw",
+        "effect_params": {
+          "discard_amount": 1,
+          "draw_amount": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "image": "CardArts/OGN-298.webp"
   },
   {
-    "id": "ruined-coliseum",
-    "name": "Ruined Coliseum",
+    "id": "targons-peak",
+    "name": "Targon's Peak",
+    "set": "OGN",
+    "card_number": "289",
     "card_type": "battlefield",
     "supertypes": [],
     "tags": [],
     "domain": [],
+    "rarity": "Uncommon",
     "energy_cost": 0,
     "power_cost": [],
     "facedown_capacity": 1,
     "keywords": [],
-    "abilities": [],
-    "flavor_text": "Echoes of past glories linger."
+    "abilities": [
+      {
+        "ability_id": "targons-peak-conquer",
+        "ability_type": "triggered",
+        "timing": "on_conquer",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "ready_runes",
+        "effect_params": {
+          "amount": 2,
+          "timing": "end_of_turn"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "image": "CardArts/OGN-289.webp"
   },
   {
-    "id": "piltover-bridge",
-    "name": "Piltover Bridge",
-    "card_type": "battlefield",
-    "supertypes": [],
-    "tags": ["Piltover"],
-    "domain": [],
-    "energy_cost": 0,
-    "power_cost": [],
-    "facedown_capacity": 1,
-    "keywords": [],
-    "abilities": [],
-    "flavor_text": "Where Topside meets Undercity."
-  },
-  {
-    "id": "market-district",
-    "name": "Market District",
-    "card_type": "battlefield",
-    "supertypes": [],
-    "tags": ["Piltover"],
-    "domain": [],
-    "energy_cost": 0,
-    "power_cost": [],
-    "facedown_capacity": 1,
-    "keywords": [],
-    "abilities": [],
-    "flavor_text": "Control the trade routes, control the war."
-  },
-  {
-    "id": "shattered-plaza",
-    "name": "Shattered Plaza",
+    "id": "reavers-row",
+    "name": "Reaver's Row",
+    "set": "OGN",
+    "card_number": "285",
     "card_type": "battlefield",
     "supertypes": [],
     "tags": [],
     "domain": [],
+    "rarity": "Uncommon",
     "energy_cost": 0,
     "power_cost": [],
     "facedown_capacity": 1,
     "keywords": [],
-    "abilities": [],
-    "flavor_text": "The ground remembers every battle fought here."
+    "abilities": [
+      {
+        "ability_id": "reavers-row-defend",
+        "ability_type": "triggered",
+        "timing": "on_defend",
+        "condition": null,
+        "is_optional": true,
+        "cost": {},
+        "effect_type": "move_unit_to_base",
+        "effect_params": {
+          "target": "friendly_unit_here"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "image": "CardArts/OGN-285.webp"
   }
 ]

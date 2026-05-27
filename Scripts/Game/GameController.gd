@@ -12,6 +12,10 @@ var ability_resolver: AbilityResolver = AbilityResolver.new()
 
 var _ai_player_index: int = 1  # which player is AI (-1 = human vs human)
 
+# Set to true if the most recent submit_command call logged an [ERROR].
+# AIPlayer reads this to detect genuine move rejections vs. normal "still my turn".
+var last_command_error: bool = false
+
 
 func _ready() -> void:
 	start_game()
@@ -75,6 +79,7 @@ func start_game() -> void:
 # ─── Public entry point ──────────────────────────────────────────────────────
 
 func submit_command(player_index: int, raw: String) -> void:
+	last_command_error = false
 	if gs.game_over:
 		_log("[ERROR] Game is over. Type 'new game' to start again.")
 		return
@@ -138,6 +143,9 @@ func submit_command(player_index: int, raw: String) -> void:
 		"new":
 			if args.size() > 0 and args[0] == "game":
 				start_game()
+		"menu":
+			get_tree().change_scene_to_file("res://Scenes/MainMenu.tscn")
+			return
 		_:
 			_log("[ERROR] Unknown command '%s'. Type 'help' for available commands." % verb)
 
@@ -505,14 +513,22 @@ func _cmd_play(player_index: int, args: Array) -> void:
 		_log("[ERROR] Cannot play %s in current state (%s)." % [card.definition.name, gs.get_state_name()])
 		return
 
+	# Units can only be played to base.
+	# Direct battlefield deployment requires the Ambush keyword (not yet implemented).
+	if card.definition.card_type == "unit" and destination.begins_with("battlefield"):
+		_log("[ERROR] Units must be played to base. Direct battlefield deployment requires Ambush (not yet implemented).")
+		return
+
 	# Compute cost
 	var cost = CostCalculator.compute_play_cost(card, player_index, gs, use_accelerate)
 	if not CostCalculator.can_afford(player_index, cost, gs):
-		_log("[ERROR] Cannot play %s: insufficient resources (need %s, pool: %s)" % [
-			card.definition.name, CostCalculator.cost_to_string(cost),
-			ps.rune_pool.describe()
-		])
-		return
+		_auto_pay_runes(player_index, cost)
+		if not CostCalculator.can_afford(player_index, cost, gs):
+			_log("[ERROR] Cannot play %s: insufficient resources (need %s, pool: %s)" % [
+				card.definition.name, CostCalculator.cost_to_string(cost),
+				ps.rune_pool.describe()
+			])
+			return
 
 	# Pay cost
 	CostCalculator.pay_cost(player_index, cost, null, gs)
@@ -535,9 +551,9 @@ func _cmd_play(player_index: int, args: Array) -> void:
 		"spell":
 			_play_spell(player_index, card, target_id, destination)
 
-	# Vision keyword: look at top of deck
-	if card.has_keyword("vision") and card.definition.card_type == "unit":
-		_handle_vision(player_index, card)
+	# Fire on_play triggers for units and gear (spells use "resolution" timing on the chain)
+	if card.definition.card_type != "spell":
+		_fire_on_play_triggers(card)
 
 	_run_cleanup()
 
@@ -620,10 +636,9 @@ func _play_spell(player_index: int, card: CardInstance, target_id: String, desti
 		_log(l)
 
 
-func _handle_vision(player_index: int, card: CardInstance) -> void:
-	# Trigger vision ability on play
+func _fire_on_play_triggers(card: CardInstance) -> void:
 	for ab in card.definition.abilities:
-		if ab.get("timing", "") == "play" and ab.get("effect_type", "") == "predict":
+		if ab.get("timing", "") == "on_play":
 			var lines = ability_resolver.resolve_ability(ab, card, null, gs)
 			for l in lines:
 				_log(l)
@@ -701,13 +716,12 @@ func _cmd_move(player_index: int, args: Array) -> void:
 		else:
 			gs.board.add_unit_to_battlefield(unit, dest_bf_idx)
 			_log("> [P%d] %s moved to %s" % [player_index + 1, unit.display_name(), destination])
-			# Check if this triggers contested
+			# Check if this triggers contested:
+			# - opponent controls it, OR
+			# - it is uncontrolled (player must claim it via showdown), OR
+			# - opponent already has units there
 			var bf = gs.board.battlefields[dest_bf_idx]
-			if bf.controller_index >= 0 and bf.controller_index != player_index:
-				bf.is_contested = true
-				gs.attacker_player_index = player_index
-				_log("> %s is now Contested" % bf.display_name)
-			elif not bf.units[1 - player_index].is_empty():
+			if bf.controller_index != player_index or not bf.units[1 - player_index].is_empty():
 				bf.is_contested = true
 				gs.attacker_player_index = player_index
 				_log("> %s is now Contested" % bf.display_name)
@@ -1020,20 +1034,111 @@ func _build_target_prompt(card: CardInstance, ab: Dictionary, player_index: int,
 	]
 
 
+# ─── Auto-pay ────────────────────────────────────────────────────────────────
+# Called by _cmd_play when the pool doesn't yet cover the cost.
+# Automatically taps/recycles runes to make up the shortfall, preferring
+# recycling exhausted runes first and tapping to cover energy last.
+
+func _auto_pay_runes(player_index: int, cost: Dictionary) -> void:
+	var ps: PlayerState = gs.players[player_index]
+
+	# 1. Specific domain power requirements — recycle matching runes.
+	for pc in cost.get("power", []):
+		var domain: String = pc.get("domain", "")
+		if domain == "any":
+			continue
+		var need: int = maxi(0, pc.get("amount", 0) - ps.rune_pool.power.get(domain, 0))
+		for _i in range(need):
+			var rune = _find_rune_for_recycle_domain(ps, domain)
+			if rune != null:
+				_auto_recycle_rune(player_index, rune)
+
+	# 2. "Any" domain power requirements — recycle any rune.
+	for pc in cost.get("power", []):
+		if pc.get("domain", "") != "any":
+			continue
+		var need: int = maxi(0, pc.get("amount", 0) - ps.rune_pool.total_power())
+		for _i in range(need):
+			var rune = _find_rune_for_recycle_any(ps)
+			if rune != null:
+				_auto_recycle_rune(player_index, rune)
+
+	# 3. Energy requirement — tap untapped runes.
+	var energy_need: int = maxi(0, cost.get("energy", 0) - ps.rune_pool.energy)
+	for _i in range(energy_need):
+		var rune = _find_untapped_rune(ps)
+		if rune != null:
+			_auto_tap_rune(player_index, rune)
+
+
+func _find_rune_for_recycle_domain(ps: PlayerState, domain: String) -> CardInstance:
+	# Prefer already-exhausted runes of the domain (they can't supply energy anyway).
+	for rune in ps.channeled_runes:
+		if rune.is_exhausted and domain in rune.definition.domain:
+			return rune
+	for rune in ps.channeled_runes:
+		if not rune.is_exhausted and domain in rune.definition.domain:
+			return rune
+	return null
+
+
+func _find_rune_for_recycle_any(ps: PlayerState) -> CardInstance:
+	for rune in ps.channeled_runes:
+		if rune.is_exhausted:
+			return rune
+	for rune in ps.channeled_runes:
+		return rune
+	return null
+
+
+func _find_untapped_rune(ps: PlayerState) -> CardInstance:
+	for rune in ps.channeled_runes:
+		if not rune.is_exhausted:
+			return rune
+	return null
+
+
+func _auto_tap_rune(player_index: int, rune: CardInstance) -> void:
+	for ab in rune.definition.abilities:
+		if ab.get("effect_type", "") == "add_energy":
+			if ab.get("cost", {}).get("exhaust", false):
+				rune.exhaust()
+			var lines = ability_resolver.resolve_ability(ab, rune, null, gs)
+			for l in lines:
+				_log(l)
+			return
+
+
+func _auto_recycle_rune(player_index: int, rune: CardInstance) -> void:
+	for ab in rune.definition.abilities:
+		if ab.get("effect_type", "") == "add_power":
+			CostCalculator.pay_cost(player_index, ab.get("cost", {}), rune, gs)
+			var lines = ability_resolver.resolve_ability(ab, rune, null, gs)
+			for l in lines:
+				_log(l)
+			_log("> [Auto] Rune recycled to bottom of Rune Deck")
+			return
+
+
 func _log(text: String) -> void:
+	if text.begins_with("[ERROR]"):
+		last_command_error = true
 	game_log_message.emit(text)
 	print(text)
 
 
 func _maybe_trigger_ai() -> void:
-	if _ai_player_index < 0:
+	if _ai_player_index < 0 or gs.game_over:
 		return
-	if gs.game_over or gs.mulligan_phase:
+	# Mulligan is outside the normal turn-state machine; handle it separately.
+	if gs.mulligan_phase:
+		if not gs.mulligan_done[_ai_player_index]:
+			call_deferred("_trigger_ai_turn")
 		return
-	if gs.current_phase != TurnStateMachine.Phase.MAIN:
-		return
+	# Trigger for every situation where the AI seat has the right to act:
+	# main phase priority, showdown focus, chain reactions, pending prompts,
+	# and combat damage assignment all route through can_player_act().
 	if gs.can_player_act(_ai_player_index):
-		# Defer to next frame to avoid re-entrancy
 		call_deferred("_trigger_ai_turn")
 
 

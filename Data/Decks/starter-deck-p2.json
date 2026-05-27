@@ -1,27 +1,31 @@
 {
-  "deck_id": "starter-mind-p2",
+  "deck_id": "ogn-decklist-1-p2",
   "player_label": "Player 2",
-  "legend": "piltover-inventor",
-  "chosen_champion": "piltover-champion",
+  "legend": "jinx-loose-cannon",
+  "chosen_champion": "jinx-demolitionist",
   "main_deck": [
-    {"card_id": "piltover-champion", "count": 1},
-    {"card_id": "piltover-tinkerer", "count": 3},
-    {"card_id": "hextech-drone", "count": 3},
-    {"card_id": "piltover-guard", "count": 3},
-    {"card_id": "clockwork-sentinel", "count": 2},
-    {"card_id": "piltover-spy", "count": 3},
-    {"card_id": "piltover-scholar", "count": 3},
-    {"card_id": "hextech-mech", "count": 3},
-    {"card_id": "piltover-enforcer", "count": 3},
-    {"card_id": "piltover-militia", "count": 3},
+    {"card_id": "chemtech-enforcer", "count": 3},
+    {"card_id": "flame-chompers", "count": 3},
+    {"card_id": "magma-wurm", "count": 1},
+    {"card_id": "raging-soul", "count": 3},
+    {"card_id": "jinx-demolitionist", "count": 1},
+    {"card_id": "vi-destructive", "count": 1},
+    {"card_id": "blazing-scorcher", "count": 2},
+    {"card_id": "brazen-buccaneer", "count": 3},
+    {"card_id": "cemetery-attendant", "count": 2},
+    {"card_id": "undercover-agent", "count": 2},
+    {"card_id": "traveling-merchant", "count": 3},
+    {"card_id": "rhasa-the-sunderer", "count": 1},
+    {"card_id": "get-excited", "count": 2},
     {"card_id": "void-seeker", "count": 2},
-    {"card_id": "piltover-analysis", "count": 3},
-    {"card_id": "counter-protocol", "count": 2},
-    {"card_id": "hextech-enhancer", "count": 3},
-    {"card_id": "arcane-lens", "count": 3}
+    {"card_id": "fight-or-flight", "count": 3},
+    {"card_id": "gust", "count": 3},
+    {"card_id": "fading-memories", "count": 2},
+    {"card_id": "scrapheap", "count": 3}
   ],
   "rune_deck": [
-    {"card_id": "mind-rune", "count": 12}
+    {"card_id": "fury-rune", "count": 7},
+    {"card_id": "chaos-rune", "count": 6}
   ],
-  "battlefields": ["piltover-bridge", "market-district", "shattered-plaza"]
+  "battlefields": ["zaun-warrens", "targons-peak", "reavers-row"]
 }
