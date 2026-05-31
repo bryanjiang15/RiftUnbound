@@ -23,6 +23,10 @@ var _last_rejected_move: Dictionary = {}
 var _last_rejection_reason: String = ""
 var _waiting_for_http: bool = false
 
+# Phase 1 additions
+var _current_game_id: String = ""
+var _game_over_reported: bool = false
+
 
 func setup(gc: GameController, pi: int) -> void:
 	controller = gc
@@ -31,6 +35,9 @@ func setup(gc: GameController, pi: int) -> void:
 	_http.timeout = HTTP_TIMEOUT
 	add_child(_http)
 	_http.request_completed.connect(_on_request_completed)
+	# Phase 1: detect game-over and opponent actions
+	controller.board_updated.connect(_on_board_updated)
+	controller.game_log_message.connect(_on_game_log_message)
 
 
 func take_turn() -> void:
@@ -62,6 +69,7 @@ func take_turn() -> void:
 
 func _request_decision(gs: GameState) -> void:
 	_pending_brief_state = BriefStateSerializer.serialize(gs, player_index)
+	_current_game_id = _pending_brief_state.get("game_id", "")
 
 	var payload := JSON.stringify(_build_request_payload())
 	var headers := PackedStringArray(["Content-Type: application/json"])
@@ -131,6 +139,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 	# _trigger_ai_turn fires) so _waiting_for_http is set before the next take_turn().
 	if controller.last_command_error:
 		_last_rejection_reason = "Game engine rejected the command."
+		_report_outcome(false, _last_rejection_reason)
 		if _retry_count < MAX_RETRIES:
 			_retry_count += 1
 			push_warning("AIPlayer: Move rejected — retry %d/%d" % [_retry_count, MAX_RETRIES])
@@ -138,6 +147,8 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		else:
 			push_warning("AIPlayer: Exhausted %d retries — heuristic fallback." % MAX_RETRIES)
 			_heuristic_fallback(gs)
+	else:
+		_report_outcome(true)
 	# If the move was accepted the normal _maybe_trigger_ai() → take_turn() cycle
 	# (triggered inside submit_command) handles the next decision.  No extra work needed.
 
@@ -334,3 +345,110 @@ func _submit(cmd: String) -> void:
 	if controller and not controller.gs.game_over:
 		controller.submit_command(player_index, cmd)
 		controller.board_updated.emit()
+
+
+# ── Phase 1: outcome reporting, game-over, opponent tracking ──────────────────
+
+func _report_outcome(accepted: bool, rejection_reason: String = "") -> void:
+	if _current_game_id.is_empty():
+		return
+	var body := {
+		"game_id": _current_game_id,
+		"accepted": accepted,
+	}
+	if not accepted and not rejection_reason.is_empty():
+		body["rejection_reason"] = rejection_reason
+	_fire_and_forget(AGENT_URL.replace("/decision", "/outcome"), body)
+
+
+func _on_board_updated() -> void:
+	if _game_over_reported or controller == null or controller.gs == null:
+		return
+	var gs = controller.gs
+	if not gs.game_over or gs.winner_index < 0:
+		return
+	_game_over_reported = true
+	var body := {
+		"game_id": _current_game_id,
+		"winner_index": gs.winner_index,
+		"my_player_index": player_index,
+		"my_score": gs.players[player_index].score,
+		"opp_score": gs.players[1 - player_index].score,
+		"total_turns": gs.turn_number,
+	}
+	_fire_and_forget(AGENT_URL.replace("/decision", "/game_over"), body)
+
+
+func _on_game_log_message(text: String) -> void:
+	# Detect visible opponent commands in the format "[P{n}] > {command}"
+	var opp_index := 1 - player_index
+	var prefix := "[P%d] > " % (opp_index + 1)
+	if not text.begins_with(prefix):
+		return
+	var cmd := text.substr(prefix.length()).strip_edges()
+	var description := _parse_opponent_command(cmd)
+	if description.is_empty() or _current_game_id.is_empty():
+		return
+	var turn := controller.gs.turn_number if controller and controller.gs else 0
+	_fire_and_forget(AGENT_URL.replace("/decision", "/opponent_action"), {
+		"game_id": _current_game_id,
+		"turn": turn,
+		"action": description,
+	})
+
+
+func _parse_opponent_command(cmd: String) -> String:
+	var tokens := cmd.split(" ", false)
+	if tokens.is_empty():
+		return ""
+	match tokens[0]:
+		"play":
+			if tokens.size() < 2:
+				return ""
+			var card_id := tokens[1]
+			var dest := ""
+			var to_idx := tokens.find("to")
+			if to_idx >= 0 and to_idx + 1 < tokens.size():
+				dest = tokens[to_idx + 1]
+			return "played %s%s" % [card_id, (" to " + dest) if dest else ""]
+		"move":
+			var to_idx := tokens.find("to")
+			if to_idx < 0 or to_idx + 1 >= tokens.size():
+				return ""
+			var dest := tokens[to_idx + 1]
+			var unit_count := to_idx - 1
+			var label := "unit" if unit_count <= 1 else "%d units" % unit_count
+			return "moved %s to %s" % [label, dest]
+		"end":
+			return "ended their turn"
+		"pass":
+			return "passed"
+		"use":
+			if tokens.size() < 2:
+				return ""
+			return "used ability %s%s" % [tokens[1], _target_suffix(tokens)]
+		"react":
+			if tokens.size() < 2:
+				return ""
+			return "played reaction %s%s" % [tokens[1], _target_suffix(tokens)]
+		"choose":
+			if tokens.size() < 2:
+				return ""
+			return "chose %s" % tokens[1]
+		_:
+			return ""
+
+
+func _target_suffix(tokens: Array) -> String:
+	var target_idx := tokens.find("target")
+	if target_idx >= 0 and target_idx + 1 < tokens.size():
+		return " targeting %s" % tokens[target_idx + 1]
+	return ""
+
+
+func _fire_and_forget(url: String, body: Dictionary) -> void:
+	var http := HTTPRequest.new()
+	add_child(http)
+	http.request_completed.connect(func(_r, _c, _h, _b): http.queue_free())
+	http.request(url, ["Content-Type: application/json"],
+		HTTPClient.METHOD_POST, JSON.stringify(body))

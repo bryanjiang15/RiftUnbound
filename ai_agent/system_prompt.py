@@ -75,6 +75,18 @@ HIGH_FREQUENCY_RULES = """
   runes to cover the full cost.  You never manually manage runes — just play_card.
 - Rune Pool (Energy + domain Power) empties at end of Draw Phase and each turn.
 
+### Reading your resources (IMPORTANT)
+- The brief state shows one resource line: `Resources: XE playable  [N untapped ...]`
+- **XE playable is the number to use for affordability.** It equals untapped runes
+  plus any floating energy already in the pool (rare, from card/ability effects).
+- Each untapped rune auto-taps when you play_card, giving +1E and +1 domain power.
+- Domain power (FUR, MIN, etc.) works the same way — the displayed totals already
+  include both rune contributions and any floating pool power.
+- Cards in hand are pre-labelled [PLAYABLE] or [too costly] based on this.
+  Trust those labels; do not recompute from raw pool fields.
+- "Floating" energy/power (from ability effects, not runes) is called out
+  explicitly when present; otherwise the pool is empty and runes are the resource.
+
 ### Units
 - Permanents — stay on board after play.
   Units are ALWAYS played to base.  Use `destination: "base"` or omit the field

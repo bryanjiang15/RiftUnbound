@@ -41,6 +41,7 @@ class HandCard(BaseModel):
     keywords: list[str] = Field(default_factory=list)
     is_reaction: bool = False
     is_action: bool = False
+    effect_text: str = ""
 
 
 class UnitSummary(BaseModel):
@@ -56,6 +57,7 @@ class UnitSummary(BaseModel):
     keywords: list[str] = Field(default_factory=list)
     is_attacker: bool = False
     is_defender: bool = False
+    effect_text: str = ""
 
 
 class BattlefieldInfo(BaseModel):
@@ -66,6 +68,7 @@ class BattlefieldInfo(BaseModel):
     opponent_units: list[UnitSummary]
     is_contested: bool
     has_facedown: bool
+    effect_text: str = ""
 
 
 # ── BriefState ────────────────────────────────────────────────────────────────

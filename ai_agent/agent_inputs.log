@@ -1,0 +1,2577 @@
+Riftbound AI Agent — Input Log
+Started: 2026-05-31 21:24:30 UTC
+════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────
+Turn 1  Type: mulligan  Game: Player 1-vs-Player 2  [2026-05-31T21:24:44Z]
+────────────────────────────────────────────────────────────────────────
+[SYSTEM]
+## Goal
+Win the game of Riftbound by reaching 8 victory points before your opponent.
+Control battlefields to score points each turn.  Contest your opponent's
+battlefields.  Protect your own.  Play to win; do not stall.
+
+## Role and Boundaries
+- You are a player agent for one seat (my_player_index in the brief state).
+- You propose exactly one legal move per decision.
+- Godot owns the rules engine and validates every move.
+- If a move is rejected as illegal, read the rejection reason and propose a
+  different legal move.
+- Never try to access or infer hidden information you are not entitled to.
+
+## Behavioral Guidance
+- Be decisive.  Uncertainty about the best play is not a reason to pass;
+  prefer a plausible advancing move over a pass.
+- When uncertain about a rules interaction, call lookup_rule rather than guess.
+- Call list_legal_moves when you want a concrete option set to reason over;
+  the brief state already includes one, but list_legal_moves is always fresh.
+- Keep reasoning concise — two to four sentences focused on why this move,
+  not a full game recap.
+- Prioritize board presence and score advancement over hand hoarding.
+- State assumptions explicitly in reasoning so errors are reviewable.
+
+
+
+## Riftbound — High-Frequency Rules (memorize these; do not call lookup_rule)
+
+### Turn Structure
+1. Awaken Phase — ready all your permanents.
+2. Beginning Phase — score 1 point per battlefield you control (Hold).
+3. Channel Phase — take top 2 Runes from your Rune Deck onto the board.
+4. Draw Phase — draw 1 card; both players' Rune Pools empty.
+5. Main Phase — your primary action window (Neutral Open state).
+6. Ending Phase — heal all units; expire "this turn" effects; Rune Pool empties.
+
+### Resources
+- Cards have an Energy Cost (number) and optional Power Cost (domain symbols).
+- **play_card auto-pays**: the engine automatically taps and/or recycles your
+  runes to cover the full cost.  You never manually manage runes — just play_card.
+- Rune Pool (Energy + domain Power) empties at end of Draw Phase and each turn.
+
+### Reading your resources (IMPORTANT)
+- The brief state shows one resource line: `Resources: XE playable  [N untapped ...]`
+- **XE playable is the number to use for affordability.** It equals untapped runes
+  plus any floating energy already in the pool (rare, from card/ability effects).
+- Each untapped rune auto-taps when you play_card, giving +1E and +1 domain power.
+- Domain power (FUR, MIN, etc.) works the same way — the displayed totals already
+  include both rune contributions and any floating pool power.
+- Cards in hand are pre-labelled [PLAYABLE] or [too costly] based on this.
+  Trust those labels; do not recompute from raw pool fields.
+- "Floating" energy/power (from ability effects, not runes) is called out
+  explicitly when present; otherwise the pool is empty and runes are the resource.
+
+### Units
+- Permanents — stay on board after play.
+  Units are ALWAYS played to base.  Use `destination: "base"` or omit the field
+  entirely.
+- Enter exhausted when played to base (cannot act that turn), unless Accelerate.
+- Use `move_unit` on a later action to send a ready base unit to a Battlefield.
+- Standard Move: exhaust a unit to move it Base ↔ Battlefield (cost: Exhaust).
+- Die during Cleanup when damage ≥ Might.
+- Damage heals at end of each player's turn and after Combat.
+
+### Runes
+- Channeled each turn (2 per turn, 3 for the second player on their first turn).
+- Payment is handled automatically when you play a card or use an ability.
+
+### Battlefields
+- Moving a unit into a battlefield you don't control triggers a Showdown.
+- Opponent already there → Combat Showdown (combat starts).
+- Empty uncontrolled → Non-Combat Showdown.
+
+### Combat (summary)
+- Attacker and Defender units engage.
+- Both sides can play Action/Reaction cards (Showdown window).
+- Damage step: Attacker assigns Might across enemy units (lethal damage first;
+  Tank units must receive lethal before others).
+- After damage, units heal; Attacker recalls if Defenders survive.
+- Win: only your units remain → you gain Control of the battlefield.
+
+### Turn States
+- Neutral Open: Main Phase, no Chain.  Only Turn Player acts.
+- Neutral Closed: Chain exists, no Showdown.  Only Reactions.
+- Showdown Open: Showdown/Combat active, no Chain.  Player with Focus acts.
+- Showdown Closed: Showdown/Combat active, Chain exists.  Only Reactions.
+
+### Win Condition (1v1 Duel)
+- Victory Score: 8 points.
+- Score via Hold (start-of-turn, per controlled battlefield) or Conquer
+  (first time you take a battlefield each turn).
+- Win is checked on every Cleanup: ≥ 8 points AND more points than your
+  opponent → you win immediately.
+- Conquer + last point: only counts if you also scored every battlefield that turn.
+
+### Priority / Focus
+- Priority: right to act.  One player holds it at a time.
+- Focus: right to act during Showdown.  Passes between players alternately.
+- "pass" gives up Priority or Focus.
+- When all players pass in sequence during a Showdown → Showdown closes.
+
+### Key Keywords
+- Assault [X]: +X Might while attacking.
+- Shield [X]: +X Might while defending.
+- Tank: must receive lethal damage before non-Tank friendly units.
+- Ganking: unit may Standard Move Battlefield → Battlefield.
+- Accelerate: pay +1 Energy + 1 Power to enter Ready instead of Exhausted.
+- Legion: cost reduced by 2 if you played another card this turn.
+- Reaction: can be played during Closed states on any player's turn.
+- Action: can be played during Showdown Open states.
+- Deflect [X]: enemy spells/abilities targeting this cost X more Power.
+- Deathknell: triggers when the unit dies.
+
+
+
+## Output Contract — STRICTLY REQUIRED
+
+You MUST always respond with a single JSON object and NOTHING ELSE.
+No markdown fences, no explanatory text, no trailing notes — only raw JSON.
+
+Required shape:
+{
+  "reasoning": "A concise explanation of why this move was chosen: the
+                situation as you read it, the options you considered, the
+                expected outcome, and any assumptions or uncertainty.",
+  "move": {
+    "action": "<one of the action names below>",
+    "parameters": { ... action-specific fields ... }
+  },
+  "confidence": "(optional) high / medium / low",
+  "alternatives_considered": "(optional) ONE plain string sentence describing other moves weighed — NOT an array"
+}
+
+Action names and their required parameters:
+  mulligan_keep          {}
+  mulligan               {"card_ids": ["<id>", ...]}     # 1 or 2 card IDs
+  play_card              {"card_id": "<id>",
+                          "destination": "<base|"">",
+                          "target_id": "<id or "">",
+                          "from_champion": false,
+                          "from_hidden": false,
+                          "accelerate": false}
+  move_unit              {"unit_ids": ["<id>", ...],
+                          "destination": "<battlefield-a|battlefield-b|base>"}
+  pass                   {}
+  end_turn               {}
+  use_ability            {"card_id": "<id>", "target_id": "<id or "">"}
+  react                  {"card_id": "<id>", "target_id": "<id or "">"}
+  assign_damage          {"amount": <int>, "target_id": "<id>"}
+  assign_done            {}
+  choose                 {"target_id": "<id>"}
+  choose_none            {}
+
+IMPORTANT — Rune payment is automatic:
+- play_card auto-pays its full cost by tapping and/or recycling your runes as
+  needed.  You cannot manually tap or recycle runes — go straight to play_card.
+
+Rules for output:
+- Exactly ONE move per decision.  Multi-step plans happen across turns.
+- "reasoning" and "move" are MANDATORY.
+- If you are uncertain, still commit to one move and state the uncertainty
+  in reasoning rather than refusing or omitting the move.
+- On a rejected move, produce a NEW move that accounts for the rejection.
+
+[USER]
+## Recent game history (oldest first)
+  Turn 2 #6 [chain_reaction]: pass() → OK
+    Reasoning: In the current Neutral Closed state, I can only play reactions, but I have no reaction cards in hand. Therefore, the only legal move available is to pass. I have no other options to influence the game
+  Turn 2 #7 [chain_reaction]: pass() → OK
+    Reasoning: In the current Neutral Closed state, I can only play reactions. However, I have no reaction cards in hand, and the only legal move available is to pass. Given that I have no other options to influence
+  Turn 2 #8 [main_phase]: use_ability(card_id=vi-destructive, target_id=battlefield-a) → OK
+    Reasoning: Given the current state, I have limited energy resources and cannot play any cards from my hand due to their high cost. However, I can use Vi - Destructive's ability to move it to a battlefield. Since
+  Turn 2 #9 [chain_reaction]: pass() → OK
+    Reasoning: In the current Neutral Closed state, I can only play reactions, but I have no reaction cards in hand. Additionally, all cards in my hand are too costly to play with my current resources. Therefore, th
+  Turn 2 #10 [chain_reaction]: pass() → OK
+    Reasoning: Currently, I am in a Neutral Closed state, which means I can only play reactions. However, I have no reaction cards in hand, and all cards in my hand are too costly to play with my current resources. 
+  Turn 4 #11 [main_phase]: play_card(card_id=blazing-scorcher, destination=base, accelerate=True) → REJECTED
+    Rejection: Game engine rejected the command.
+    Reasoning: Given the current board state, I have several options to increase my board presence and potentially gain control of a battlefield. Playing 'Blazing Scorcher' is a strong move because it has 5 Might an
+  Turn 4 #12 [main_phase]: pass() → ?
+    Reasoning: Fallback: could not produce a valid decision within retry budget.
+  Turn 4 #13 [chain_reaction]: pass() → ?
+    Reasoning: In the current Neutral Closed state, I can only play reactions. However, I have no reaction cards in hand, and all cards in my hand are too costly to play with my current resources. Therefore, the onl
+  Turn 2 #14 [main_phase]: pass() → OK
+    Reasoning: Fallback: could not produce a valid decision within retry budget.
+  Turn 5 #15 [pending_choice]: choose_none() → OK
+    Reasoning: Given the current state, I have no playable cards due to exhausted resources and no available actions that can be taken. The only legal move is to 'choose none', which indicates that there are no pend
+
+[USER]
+## Opponent actions (recent, oldest first)
+  Turn 1: played chemtech-enforcer-2
+  Turn 1: ended their turn
+  Turn 3: moved unit to battlefield-a
+  Turn 3: passed
+  Turn 3: played scrapheap
+  Turn 1: played chemtech-enforcer-3
+  Turn 1: ended their turn
+  Turn 3: passed
+
+[USER]
+## Current Decision
+
+Turn 1 | Phase: Awaken Phase | State: Neutral Open | Decision type: **mulligan**
+My score: 0 | Opponent score: 0 | Victory: 8 pts
+
+Resources: 0E playable  [0 untapped (none)]
+
+Hand (4 cards):
+  gust-3 — Gust [spell] (1E) [too costly] reaction
+    Effect: Reaction (Play any time, even before spells and abilities resolve.) Return a unit at a battlefield with 3 Might or less to its owner's hand.
+  blazing-scorcher-2 — Blazing Scorcher [unit] (5E) Might:5 [too costly] accelerate
+    Effect: Accelerate (You may pay [1] and a fury rune as an additional cost to have me enter ready.)
+  undercover-agent — Undercover Agent [unit] (5E) Might:5 [too costly] deathknell
+    Effect: Deathknell — Discard 2, then draw 2. (When I die, get the effect.)
+  cemetery-attendant — Cemetery Attendant [unit] (3E) Might:3 [too costly] 
+    Effect: When you play me, return a unit from your trash to your hand.
+
+Opponent hand size: 4
+
+[battlefield-a] Zaun Warrens — uncontrolled
+  Effect: When you conquer here, discard 1, then draw 1.
+[battlefield-b] Targon's Peak — uncontrolled
+  Effect: When you conquer here, ready up to 2 runes at the end of this turn.
+
+Legal moves (11 total, first 11 shown):
+  mulligan keep
+  mulligan gust-3
+  mulligan blazing-scorcher-2
+  mulligan undercover-agent
+  mulligan cemetery-attendant
+  mulligan gust-3 blazing-scorcher-2
+  mulligan gust-3 undercover-agent
+  mulligan gust-3 cemetery-attendant
+  mulligan blazing-scorcher-2 undercover-agent
+  mulligan blazing-scorcher-2 cemetery-attendant
+  mulligan undercover-agent cemetery-attendant
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 2  Type: main_phase  Game: Player 1-vs-Player 2  [2026-05-31T21:25:26Z]
+────────────────────────────────────────────────────────────────────────
+[SYSTEM]
+## Goal
+Win the game of Riftbound by reaching 8 victory points before your opponent.
+Control battlefields to score points each turn.  Contest your opponent's
+battlefields.  Protect your own.  Play to win; do not stall.
+
+## Role and Boundaries
+- You are a player agent for one seat (my_player_index in the brief state).
+- You propose exactly one legal move per decision.
+- Godot owns the rules engine and validates every move.
+- If a move is rejected as illegal, read the rejection reason and propose a
+  different legal move.
+- Never try to access or infer hidden information you are not entitled to.
+
+## Behavioral Guidance
+- Be decisive.  Uncertainty about the best play is not a reason to pass;
+  prefer a plausible advancing move over a pass.
+- When uncertain about a rules interaction, call lookup_rule rather than guess.
+- Call list_legal_moves when you want a concrete option set to reason over;
+  the brief state already includes one, but list_legal_moves is always fresh.
+- Keep reasoning concise — two to four sentences focused on why this move,
+  not a full game recap.
+- Prioritize board presence and score advancement over hand hoarding.
+- State assumptions explicitly in reasoning so errors are reviewable.
+
+
+
+## Riftbound — High-Frequency Rules (memorize these; do not call lookup_rule)
+
+### Turn Structure
+1. Awaken Phase — ready all your permanents.
+2. Beginning Phase — score 1 point per battlefield you control (Hold).
+3. Channel Phase — take top 2 Runes from your Rune Deck onto the board.
+4. Draw Phase — draw 1 card; both players' Rune Pools empty.
+5. Main Phase — your primary action window (Neutral Open state).
+6. Ending Phase — heal all units; expire "this turn" effects; Rune Pool empties.
+
+### Resources
+- Cards have an Energy Cost (number) and optional Power Cost (domain symbols).
+- **play_card auto-pays**: the engine automatically taps and/or recycles your
+  runes to cover the full cost.  You never manually manage runes — just play_card.
+- Rune Pool (Energy + domain Power) empties at end of Draw Phase and each turn.
+
+### Reading your resources (IMPORTANT)
+- The brief state shows one resource line: `Resources: XE playable  [N untapped ...]`
+- **XE playable is the number to use for affordability.** It equals untapped runes
+  plus any floating energy already in the pool (rare, from card/ability effects).
+- Each untapped rune auto-taps when you play_card, giving +1E and +1 domain power.
+- Domain power (FUR, MIN, etc.) works the same way — the displayed totals already
+  include both rune contributions and any floating pool power.
+- Cards in hand are pre-labelled [PLAYABLE] or [too costly] based on this.
+  Trust those labels; do not recompute from raw pool fields.
+- "Floating" energy/power (from ability effects, not runes) is called out
+  explicitly when present; otherwise the pool is empty and runes are the resource.
+
+### Units
+- Permanents — stay on board after play.
+  Units are ALWAYS played to base.  Use `destination: "base"` or omit the field
+  entirely.
+- Enter exhausted when played to base (cannot act that turn), unless Accelerate.
+- Use `move_unit` on a later action to send a ready base unit to a Battlefield.
+- Standard Move: exhaust a unit to move it Base ↔ Battlefield (cost: Exhaust).
+- Die during Cleanup when damage ≥ Might.
+- Damage heals at end of each player's turn and after Combat.
+
+### Runes
+- Channeled each turn (2 per turn, 3 for the second player on their first turn).
+- Payment is handled automatically when you play a card or use an ability.
+
+### Battlefields
+- Moving a unit into a battlefield you don't control triggers a Showdown.
+- Opponent already there → Combat Showdown (combat starts).
+- Empty uncontrolled → Non-Combat Showdown.
+
+### Combat (summary)
+- Attacker and Defender units engage.
+- Both sides can play Action/Reaction cards (Showdown window).
+- Damage step: Attacker assigns Might across enemy units (lethal damage first;
+  Tank units must receive lethal before others).
+- After damage, units heal; Attacker recalls if Defenders survive.
+- Win: only your units remain → you gain Control of the battlefield.
+
+### Turn States
+- Neutral Open: Main Phase, no Chain.  Only Turn Player acts.
+- Neutral Closed: Chain exists, no Showdown.  Only Reactions.
+- Showdown Open: Showdown/Combat active, no Chain.  Player with Focus acts.
+- Showdown Closed: Showdown/Combat active, Chain exists.  Only Reactions.
+
+### Win Condition (1v1 Duel)
+- Victory Score: 8 points.
+- Score via Hold (start-of-turn, per controlled battlefield) or Conquer
+  (first time you take a battlefield each turn).
+- Win is checked on every Cleanup: ≥ 8 points AND more points than your
+  opponent → you win immediately.
+- Conquer + last point: only counts if you also scored every battlefield that turn.
+
+### Priority / Focus
+- Priority: right to act.  One player holds it at a time.
+- Focus: right to act during Showdown.  Passes between players alternately.
+- "pass" gives up Priority or Focus.
+- When all players pass in sequence during a Showdown → Showdown closes.
+
+### Key Keywords
+- Assault [X]: +X Might while attacking.
+- Shield [X]: +X Might while defending.
+- Tank: must receive lethal damage before non-Tank friendly units.
+- Ganking: unit may Standard Move Battlefield → Battlefield.
+- Accelerate: pay +1 Energy + 1 Power to enter Ready instead of Exhausted.
+- Legion: cost reduced by 2 if you played another card this turn.
+- Reaction: can be played during Closed states on any player's turn.
+- Action: can be played during Showdown Open states.
+- Deflect [X]: enemy spells/abilities targeting this cost X more Power.
+- Deathknell: triggers when the unit dies.
+
+
+
+## Output Contract — STRICTLY REQUIRED
+
+You MUST always respond with a single JSON object and NOTHING ELSE.
+No markdown fences, no explanatory text, no trailing notes — only raw JSON.
+
+Required shape:
+{
+  "reasoning": "A concise explanation of why this move was chosen: the
+                situation as you read it, the options you considered, the
+                expected outcome, and any assumptions or uncertainty.",
+  "move": {
+    "action": "<one of the action names below>",
+    "parameters": { ... action-specific fields ... }
+  },
+  "confidence": "(optional) high / medium / low",
+  "alternatives_considered": "(optional) ONE plain string sentence describing other moves weighed — NOT an array"
+}
+
+Action names and their required parameters:
+  mulligan_keep          {}
+  mulligan               {"card_ids": ["<id>", ...]}     # 1 or 2 card IDs
+  play_card              {"card_id": "<id>",
+                          "destination": "<base|"">",
+                          "target_id": "<id or "">",
+                          "from_champion": false,
+                          "from_hidden": false,
+                          "accelerate": false}
+  move_unit              {"unit_ids": ["<id>", ...],
+                          "destination": "<battlefield-a|battlefield-b|base>"}
+  pass                   {}
+  end_turn               {}
+  use_ability            {"card_id": "<id>", "target_id": "<id or "">"}
+  react                  {"card_id": "<id>", "target_id": "<id or "">"}
+  assign_damage          {"amount": <int>, "target_id": "<id>"}
+  assign_done            {}
+  choose                 {"target_id": "<id>"}
+  choose_none            {}
+
+IMPORTANT — Rune payment is automatic:
+- play_card auto-pays its full cost by tapping and/or recycling your runes as
+  needed.  You cannot manually tap or recycle runes — go straight to play_card.
+
+Rules for output:
+- Exactly ONE move per decision.  Multi-step plans happen across turns.
+- "reasoning" and "move" are MANDATORY.
+- If you are uncertain, still commit to one move and state the uncertainty
+  in reasoning rather than refusing or omitting the move.
+- On a rejected move, produce a NEW move that accounts for the rejection.
+
+[USER]
+## Recent game history (oldest first)
+  Turn 2 #7 [chain_reaction]: pass() → OK
+    Reasoning: In the current Neutral Closed state, I can only play reactions. However, I have no reaction cards in hand, and the only legal move available is to pass. Given that I have no other options to influence
+  Turn 2 #8 [main_phase]: use_ability(card_id=vi-destructive, target_id=battlefield-a) → OK
+    Reasoning: Given the current state, I have limited energy resources and cannot play any cards from my hand due to their high cost. However, I can use Vi - Destructive's ability to move it to a battlefield. Since
+  Turn 2 #9 [chain_reaction]: pass() → OK
+    Reasoning: In the current Neutral Closed state, I can only play reactions, but I have no reaction cards in hand. Additionally, all cards in my hand are too costly to play with my current resources. Therefore, th
+  Turn 2 #10 [chain_reaction]: pass() → OK
+    Reasoning: Currently, I am in a Neutral Closed state, which means I can only play reactions. However, I have no reaction cards in hand, and all cards in my hand are too costly to play with my current resources. 
+  Turn 4 #11 [main_phase]: play_card(card_id=blazing-scorcher, destination=base, accelerate=True) → REJECTED
+    Rejection: Game engine rejected the command.
+    Reasoning: Given the current board state, I have several options to increase my board presence and potentially gain control of a battlefield. Playing 'Blazing Scorcher' is a strong move because it has 5 Might an
+  Turn 4 #12 [main_phase]: pass() → ?
+    Reasoning: Fallback: could not produce a valid decision within retry budget.
+  Turn 4 #13 [chain_reaction]: pass() → ?
+    Reasoning: In the current Neutral Closed state, I can only play reactions. However, I have no reaction cards in hand, and all cards in my hand are too costly to play with my current resources. Therefore, the onl
+  Turn 2 #14 [main_phase]: pass() → OK
+    Reasoning: Fallback: could not produce a valid decision within retry budget.
+  Turn 5 #15 [pending_choice]: choose_none() → OK
+    Reasoning: Given the current state, I have no playable cards due to exhausted resources and no available actions that can be taken. The only legal move is to 'choose none', which indicates that there are no pend
+  Turn 1 #0 [mulligan]: mulligan(card_ids=[blazing-scorcher-2,undercover-agent]) → OK
+    Reasoning: In the current mulligan phase, I need to decide whether to keep my initial hand or exchange some cards for potentially more useful ones. My current hand consists of cards that are too costly to play i
+
+[USER]
+## Opponent actions (recent, oldest first)
+  Turn 3: moved unit to battlefield-a
+  Turn 3: passed
+  Turn 3: played scrapheap
+  Turn 1: played chemtech-enforcer-3
+  Turn 1: ended their turn
+  Turn 3: passed
+  Turn 1: played vi-destructive
+  Turn 1: ended their turn
+
+[USER]
+## Current Decision
+
+Turn 2 | Phase: Main Phase | State: Neutral Open | Decision type: **main_phase**
+My score: 0 | Opponent score: 0 | Victory: 8 pts
+
+Resources: 3E playable  CHA×2 FUR×1  [3 untapped (2 chaos, 1 fury)]
+
+Hand (5 cards):
+  gust-3 — Gust [spell] (1E) [PLAYABLE] reaction
+    Effect: Reaction (Play any time, even before spells and abilities resolve.) Return a unit at a battlefield with 3 Might or less to its owner's hand.
+  cemetery-attendant — Cemetery Attendant [unit] (3E) Might:3 [PLAYABLE] 
+    Effect: When you play me, return a unit from your trash to your hand.
+  traveling-merchant-2 — Traveling Merchant [unit] (2E) Might:2 [PLAYABLE] 
+    Effect: When I move, discard 1, then draw 1.
+  fading-memories-2 — Fading Memories [spell] (4E) [too costly] 
+    Effect: Give a unit at a battlefield or a gear Temporary. (Kill it at the start of its controller's Beginning Phase, before scoring.)
+  brazen-buccaneer — Brazen Buccaneer [unit] (6E) Might:5 [too costly] 
+    Effect: As you play me, you may discard 1 as an additional cost. If you do, reduce my cost by [2].
+
+Opponent base units: vi-destructive(3MHT*)
+Opponent hand size: 4
+
+[battlefield-a] Zaun Warrens — uncontrolled
+  Effect: When you conquer here, discard 1, then draw 1.
+[battlefield-b] Targon's Peak — uncontrolled
+  Effect: When you conquer here, ready up to 2 runes at the end of this turn.
+
+Legal moves (4 total, first 4 shown):
+  play cemetery-attendant
+  play traveling-merchant-2
+  play jinx-demolitionist from champion
+  end turn
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 2  Type: main_phase  Game: Player 1-vs-Player 2  [2026-05-31T21:25:30Z]
+────────────────────────────────────────────────────────────────────────
+[SYSTEM]
+## Goal
+Win the game of Riftbound by reaching 8 victory points before your opponent.
+Control battlefields to score points each turn.  Contest your opponent's
+battlefields.  Protect your own.  Play to win; do not stall.
+
+## Role and Boundaries
+- You are a player agent for one seat (my_player_index in the brief state).
+- You propose exactly one legal move per decision.
+- Godot owns the rules engine and validates every move.
+- If a move is rejected as illegal, read the rejection reason and propose a
+  different legal move.
+- Never try to access or infer hidden information you are not entitled to.
+
+## Behavioral Guidance
+- Be decisive.  Uncertainty about the best play is not a reason to pass;
+  prefer a plausible advancing move over a pass.
+- When uncertain about a rules interaction, call lookup_rule rather than guess.
+- Call list_legal_moves when you want a concrete option set to reason over;
+  the brief state already includes one, but list_legal_moves is always fresh.
+- Keep reasoning concise — two to four sentences focused on why this move,
+  not a full game recap.
+- Prioritize board presence and score advancement over hand hoarding.
+- State assumptions explicitly in reasoning so errors are reviewable.
+
+
+
+## Riftbound — High-Frequency Rules (memorize these; do not call lookup_rule)
+
+### Turn Structure
+1. Awaken Phase — ready all your permanents.
+2. Beginning Phase — score 1 point per battlefield you control (Hold).
+3. Channel Phase — take top 2 Runes from your Rune Deck onto the board.
+4. Draw Phase — draw 1 card; both players' Rune Pools empty.
+5. Main Phase — your primary action window (Neutral Open state).
+6. Ending Phase — heal all units; expire "this turn" effects; Rune Pool empties.
+
+### Resources
+- Cards have an Energy Cost (number) and optional Power Cost (domain symbols).
+- **play_card auto-pays**: the engine automatically taps and/or recycles your
+  runes to cover the full cost.  You never manually manage runes — just play_card.
+- Rune Pool (Energy + domain Power) empties at end of Draw Phase and each turn.
+
+### Reading your resources (IMPORTANT)
+- The brief state shows one resource line: `Resources: XE playable  [N untapped ...]`
+- **XE playable is the number to use for affordability.** It equals untapped runes
+  plus any floating energy already in the pool (rare, from card/ability effects).
+- Each untapped rune auto-taps when you play_card, giving +1E and +1 domain power.
+- Domain power (FUR, MIN, etc.) works the same way — the displayed totals already
+  include both rune contributions and any floating pool power.
+- Cards in hand are pre-labelled [PLAYABLE] or [too costly] based on this.
+  Trust those labels; do not recompute from raw pool fields.
+- "Floating" energy/power (from ability effects, not runes) is called out
+  explicitly when present; otherwise the pool is empty and runes are the resource.
+
+### Units
+- Permanents — stay on board after play.
+  Units are ALWAYS played to base.  Use `destination: "base"` or omit the field
+  entirely.
+- Enter exhausted when played to base (cannot act that turn), unless Accelerate.
+- Use `move_unit` on a later action to send a ready base unit to a Battlefield.
+- Standard Move: exhaust a unit to move it Base ↔ Battlefield (cost: Exhaust).
+- Die during Cleanup when damage ≥ Might.
+- Damage heals at end of each player's turn and after Combat.
+
+### Runes
+- Channeled each turn (2 per turn, 3 for the second player on their first turn).
+- Payment is handled automatically when you play a card or use an ability.
+
+### Battlefields
+- Moving a unit into a battlefield you don't control triggers a Showdown.
+- Opponent already there → Combat Showdown (combat starts).
+- Empty uncontrolled → Non-Combat Showdown.
+
+### Combat (summary)
+- Attacker and Defender units engage.
+- Both sides can play Action/Reaction cards (Showdown window).
+- Damage step: Attacker assigns Might across enemy units (lethal damage first;
+  Tank units must receive lethal before others).
+- After damage, units heal; Attacker recalls if Defenders survive.
+- Win: only your units remain → you gain Control of the battlefield.
+
+### Turn States
+- Neutral Open: Main Phase, no Chain.  Only Turn Player acts.
+- Neutral Closed: Chain exists, no Showdown.  Only Reactions.
+- Showdown Open: Showdown/Combat active, no Chain.  Player with Focus acts.
+- Showdown Closed: Showdown/Combat active, Chain exists.  Only Reactions.
+
+### Win Condition (1v1 Duel)
+- Victory Score: 8 points.
+- Score via Hold (start-of-turn, per controlled battlefield) or Conquer
+  (first time you take a battlefield each turn).
+- Win is checked on every Cleanup: ≥ 8 points AND more points than your
+  opponent → you win immediately.
+- Conquer + last point: only counts if you also scored every battlefield that turn.
+
+### Priority / Focus
+- Priority: right to act.  One player holds it at a time.
+- Focus: right to act during Showdown.  Passes between players alternately.
+- "pass" gives up Priority or Focus.
+- When all players pass in sequence during a Showdown → Showdown closes.
+
+### Key Keywords
+- Assault [X]: +X Might while attacking.
+- Shield [X]: +X Might while defending.
+- Tank: must receive lethal damage before non-Tank friendly units.
+- Ganking: unit may Standard Move Battlefield → Battlefield.
+- Accelerate: pay +1 Energy + 1 Power to enter Ready instead of Exhausted.
+- Legion: cost reduced by 2 if you played another card this turn.
+- Reaction: can be played during Closed states on any player's turn.
+- Action: can be played during Showdown Open states.
+- Deflect [X]: enemy spells/abilities targeting this cost X more Power.
+- Deathknell: triggers when the unit dies.
+
+
+
+## Output Contract — STRICTLY REQUIRED
+
+You MUST always respond with a single JSON object and NOTHING ELSE.
+No markdown fences, no explanatory text, no trailing notes — only raw JSON.
+
+Required shape:
+{
+  "reasoning": "A concise explanation of why this move was chosen: the
+                situation as you read it, the options you considered, the
+                expected outcome, and any assumptions or uncertainty.",
+  "move": {
+    "action": "<one of the action names below>",
+    "parameters": { ... action-specific fields ... }
+  },
+  "confidence": "(optional) high / medium / low",
+  "alternatives_considered": "(optional) ONE plain string sentence describing other moves weighed — NOT an array"
+}
+
+Action names and their required parameters:
+  mulligan_keep          {}
+  mulligan               {"card_ids": ["<id>", ...]}     # 1 or 2 card IDs
+  play_card              {"card_id": "<id>",
+                          "destination": "<base|"">",
+                          "target_id": "<id or "">",
+                          "from_champion": false,
+                          "from_hidden": false,
+                          "accelerate": false}
+  move_unit              {"unit_ids": ["<id>", ...],
+                          "destination": "<battlefield-a|battlefield-b|base>"}
+  pass                   {}
+  end_turn               {}
+  use_ability            {"card_id": "<id>", "target_id": "<id or "">"}
+  react                  {"card_id": "<id>", "target_id": "<id or "">"}
+  assign_damage          {"amount": <int>, "target_id": "<id>"}
+  assign_done            {}
+  choose                 {"target_id": "<id>"}
+  choose_none            {}
+
+IMPORTANT — Rune payment is automatic:
+- play_card auto-pays its full cost by tapping and/or recycling your runes as
+  needed.  You cannot manually tap or recycle runes — go straight to play_card.
+
+Rules for output:
+- Exactly ONE move per decision.  Multi-step plans happen across turns.
+- "reasoning" and "move" are MANDATORY.
+- If you are uncertain, still commit to one move and state the uncertainty
+  in reasoning rather than refusing or omitting the move.
+- On a rejected move, produce a NEW move that accounts for the rejection.
+
+[USER]
+## Recent game history (oldest first)
+  Turn 2 #8 [main_phase]: use_ability(card_id=vi-destructive, target_id=battlefield-a) → OK
+    Reasoning: Given the current state, I have limited energy resources and cannot play any cards from my hand due to their high cost. However, I can use Vi - Destructive's ability to move it to a battlefield. Since
+  Turn 2 #9 [chain_reaction]: pass() → OK
+    Reasoning: In the current Neutral Closed state, I can only play reactions, but I have no reaction cards in hand. Additionally, all cards in my hand are too costly to play with my current resources. Therefore, th
+  Turn 2 #10 [chain_reaction]: pass() → OK
+    Reasoning: Currently, I am in a Neutral Closed state, which means I can only play reactions. However, I have no reaction cards in hand, and all cards in my hand are too costly to play with my current resources. 
+  Turn 4 #11 [main_phase]: play_card(card_id=blazing-scorcher, destination=base, accelerate=True) → REJECTED
+    Rejection: Game engine rejected the command.
+    Reasoning: Given the current board state, I have several options to increase my board presence and potentially gain control of a battlefield. Playing 'Blazing Scorcher' is a strong move because it has 5 Might an
+  Turn 4 #12 [main_phase]: pass() → ?
+    Reasoning: Fallback: could not produce a valid decision within retry budget.
+  Turn 4 #13 [chain_reaction]: pass() → ?
+    Reasoning: In the current Neutral Closed state, I can only play reactions. However, I have no reaction cards in hand, and all cards in my hand are too costly to play with my current resources. Therefore, the onl
+  Turn 2 #14 [main_phase]: pass() → OK
+    Reasoning: Fallback: could not produce a valid decision within retry budget.
+  Turn 5 #15 [pending_choice]: choose_none() → OK
+    Reasoning: Given the current state, I have no playable cards due to exhausted resources and no available actions that can be taken. The only legal move is to 'choose none', which indicates that there are no pend
+  Turn 1 #0 [mulligan]: mulligan(card_ids=[blazing-scorcher-2,undercover-agent]) → OK
+    Reasoning: In the current mulligan phase, I need to decide whether to keep my initial hand or exchange some cards for potentially more useful ones. My current hand consists of cards that are too costly to play i
+  Turn 2 #1 [main_phase]: play_card(card_id=cemetery-attendant, destination=base) → OK
+    Reasoning: Given the current board state and available resources, I aim to establish a stronger board presence by playing a unit. The 'Cemetery Attendant' is a good choice because it has 3 Might and its ability 
+
+[USER]
+## Opponent actions (recent, oldest first)
+  Turn 3: moved unit to battlefield-a
+  Turn 3: passed
+  Turn 3: played scrapheap
+  Turn 1: played chemtech-enforcer-3
+  Turn 1: ended their turn
+  Turn 3: passed
+  Turn 1: played vi-destructive
+  Turn 1: ended their turn
+
+[USER]
+## Current Decision
+
+Turn 2 | Phase: Main Phase | State: Neutral Open | Decision type: **main_phase**
+My score: 0 | Opponent score: 0 | Victory: 8 pts
+
+Resources: 0E playable  [0 untapped (none) | 3 exhausted (2 chaos, 1 fury)]
+
+Hand (4 cards):
+  gust-3 — Gust [spell] (1E) [too costly] reaction
+    Effect: Reaction (Play any time, even before spells and abilities resolve.) Return a unit at a battlefield with 3 Might or less to its owner's hand.
+  traveling-merchant-2 — Traveling Merchant [unit] (2E) Might:2 [too costly] 
+    Effect: When I move, discard 1, then draw 1.
+  fading-memories-2 — Fading Memories [spell] (4E) [too costly] 
+    Effect: Give a unit at a battlefield or a gear Temporary. (Kill it at the start of its controller's Beginning Phase, before scoring.)
+  brazen-buccaneer — Brazen Buccaneer [unit] (6E) Might:5 [too costly] 
+    Effect: As you play me, you may discard 1 as an additional cost. If you do, reduce my cost by [2].
+
+My base units: cemetery-attendant(3MHT*)
+Opponent base units: vi-destructive(3MHT*)
+Opponent hand size: 4
+
+[battlefield-a] Zaun Warrens — uncontrolled
+  Effect: When you conquer here, discard 1, then draw 1.
+[battlefield-b] Targon's Peak — uncontrolled
+  Effect: When you conquer here, ready up to 2 runes at the end of this turn.
+
+Legal moves (1 total, first 1 shown):
+  end turn
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 3  Type: showdown_focus  Game: Player 1-vs-Player 2  [2026-05-31T21:28:13Z]
+────────────────────────────────────────────────────────────────────────
+[SYSTEM]
+## Goal
+Win the game of Riftbound by reaching 8 victory points before your opponent.
+Control battlefields to score points each turn.  Contest your opponent's
+battlefields.  Protect your own.  Play to win; do not stall.
+
+## Role and Boundaries
+- You are a player agent for one seat (my_player_index in the brief state).
+- You propose exactly one legal move per decision.
+- Godot owns the rules engine and validates every move.
+- If a move is rejected as illegal, read the rejection reason and propose a
+  different legal move.
+- Never try to access or infer hidden information you are not entitled to.
+
+## Behavioral Guidance
+- Be decisive.  Uncertainty about the best play is not a reason to pass;
+  prefer a plausible advancing move over a pass.
+- When uncertain about a rules interaction, call lookup_rule rather than guess.
+- Call list_legal_moves when you want a concrete option set to reason over;
+  the brief state already includes one, but list_legal_moves is always fresh.
+- Keep reasoning concise — two to four sentences focused on why this move,
+  not a full game recap.
+- Prioritize board presence and score advancement over hand hoarding.
+- State assumptions explicitly in reasoning so errors are reviewable.
+
+
+
+## Riftbound — High-Frequency Rules (memorize these; do not call lookup_rule)
+
+### Turn Structure
+1. Awaken Phase — ready all your permanents.
+2. Beginning Phase — score 1 point per battlefield you control (Hold).
+3. Channel Phase — take top 2 Runes from your Rune Deck onto the board.
+4. Draw Phase — draw 1 card; both players' Rune Pools empty.
+5. Main Phase — your primary action window (Neutral Open state).
+6. Ending Phase — heal all units; expire "this turn" effects; Rune Pool empties.
+
+### Resources
+- Cards have an Energy Cost (number) and optional Power Cost (domain symbols).
+- **play_card auto-pays**: the engine automatically taps and/or recycles your
+  runes to cover the full cost.  You never manually manage runes — just play_card.
+- Rune Pool (Energy + domain Power) empties at end of Draw Phase and each turn.
+
+### Reading your resources (IMPORTANT)
+- The brief state shows one resource line: `Resources: XE playable  [N untapped ...]`
+- **XE playable is the number to use for affordability.** It equals untapped runes
+  plus any floating energy already in the pool (rare, from card/ability effects).
+- Each untapped rune auto-taps when you play_card, giving +1E and +1 domain power.
+- Domain power (FUR, MIN, etc.) works the same way — the displayed totals already
+  include both rune contributions and any floating pool power.
+- Cards in hand are pre-labelled [PLAYABLE] or [too costly] based on this.
+  Trust those labels; do not recompute from raw pool fields.
+- "Floating" energy/power (from ability effects, not runes) is called out
+  explicitly when present; otherwise the pool is empty and runes are the resource.
+
+### Units
+- Permanents — stay on board after play.
+  Units are ALWAYS played to base.  Use `destination: "base"` or omit the field
+  entirely.
+- Enter exhausted when played to base (cannot act that turn), unless Accelerate.
+- Use `move_unit` on a later action to send a ready base unit to a Battlefield.
+- Standard Move: exhaust a unit to move it Base ↔ Battlefield (cost: Exhaust).
+- Die during Cleanup when damage ≥ Might.
+- Damage heals at end of each player's turn and after Combat.
+
+### Runes
+- Channeled each turn (2 per turn, 3 for the second player on their first turn).
+- Payment is handled automatically when you play a card or use an ability.
+
+### Battlefields
+- Moving a unit into a battlefield you don't control triggers a Showdown.
+- Opponent already there → Combat Showdown (combat starts).
+- Empty uncontrolled → Non-Combat Showdown.
+
+### Combat (summary)
+- Attacker and Defender units engage.
+- Both sides can play Action/Reaction cards (Showdown window).
+- Damage step: Attacker assigns Might across enemy units (lethal damage first;
+  Tank units must receive lethal before others).
+- After damage, units heal; Attacker recalls if Defenders survive.
+- Win: only your units remain → you gain Control of the battlefield.
+
+### Turn States
+- Neutral Open: Main Phase, no Chain.  Only Turn Player acts.
+- Neutral Closed: Chain exists, no Showdown.  Only Reactions.
+- Showdown Open: Showdown/Combat active, no Chain.  Player with Focus acts.
+- Showdown Closed: Showdown/Combat active, Chain exists.  Only Reactions.
+
+### Win Condition (1v1 Duel)
+- Victory Score: 8 points.
+- Score via Hold (start-of-turn, per controlled battlefield) or Conquer
+  (first time you take a battlefield each turn).
+- Win is checked on every Cleanup: ≥ 8 points AND more points than your
+  opponent → you win immediately.
+- Conquer + last point: only counts if you also scored every battlefield that turn.
+
+### Priority / Focus
+- Priority: right to act.  One player holds it at a time.
+- Focus: right to act during Showdown.  Passes between players alternately.
+- "pass" gives up Priority or Focus.
+- When all players pass in sequence during a Showdown → Showdown closes.
+
+### Key Keywords
+- Assault [X]: +X Might while attacking.
+- Shield [X]: +X Might while defending.
+- Tank: must receive lethal damage before non-Tank friendly units.
+- Ganking: unit may Standard Move Battlefield → Battlefield.
+- Accelerate: pay +1 Energy + 1 Power to enter Ready instead of Exhausted.
+- Legion: cost reduced by 2 if you played another card this turn.
+- Reaction: can be played during Closed states on any player's turn.
+- Action: can be played during Showdown Open states.
+- Deflect [X]: enemy spells/abilities targeting this cost X more Power.
+- Deathknell: triggers when the unit dies.
+
+
+
+## Output Contract — STRICTLY REQUIRED
+
+You MUST always respond with a single JSON object and NOTHING ELSE.
+No markdown fences, no explanatory text, no trailing notes — only raw JSON.
+
+Required shape:
+{
+  "reasoning": "A concise explanation of why this move was chosen: the
+                situation as you read it, the options you considered, the
+                expected outcome, and any assumptions or uncertainty.",
+  "move": {
+    "action": "<one of the action names below>",
+    "parameters": { ... action-specific fields ... }
+  },
+  "confidence": "(optional) high / medium / low",
+  "alternatives_considered": "(optional) ONE plain string sentence describing other moves weighed — NOT an array"
+}
+
+Action names and their required parameters:
+  mulligan_keep          {}
+  mulligan               {"card_ids": ["<id>", ...]}     # 1 or 2 card IDs
+  play_card              {"card_id": "<id>",
+                          "destination": "<base|"">",
+                          "target_id": "<id or "">",
+                          "from_champion": false,
+                          "from_hidden": false,
+                          "accelerate": false}
+  move_unit              {"unit_ids": ["<id>", ...],
+                          "destination": "<battlefield-a|battlefield-b|base>"}
+  pass                   {}
+  end_turn               {}
+  use_ability            {"card_id": "<id>", "target_id": "<id or "">"}
+  react                  {"card_id": "<id>", "target_id": "<id or "">"}
+  assign_damage          {"amount": <int>, "target_id": "<id>"}
+  assign_done            {}
+  choose                 {"target_id": "<id>"}
+  choose_none            {}
+
+IMPORTANT — Rune payment is automatic:
+- play_card auto-pays its full cost by tapping and/or recycling your runes as
+  needed.  You cannot manually tap or recycle runes — go straight to play_card.
+
+Rules for output:
+- Exactly ONE move per decision.  Multi-step plans happen across turns.
+- "reasoning" and "move" are MANDATORY.
+- If you are uncertain, still commit to one move and state the uncertainty
+  in reasoning rather than refusing or omitting the move.
+- On a rejected move, produce a NEW move that accounts for the rejection.
+
+[USER]
+## Recent game history (oldest first)
+  Turn 2 #9 [chain_reaction]: pass() → OK
+    Reasoning: In the current Neutral Closed state, I can only play reactions, but I have no reaction cards in hand. Additionally, all cards in my hand are too costly to play with my current resources. Therefore, th
+  Turn 2 #10 [chain_reaction]: pass() → OK
+    Reasoning: Currently, I am in a Neutral Closed state, which means I can only play reactions. However, I have no reaction cards in hand, and all cards in my hand are too costly to play with my current resources. 
+  Turn 4 #11 [main_phase]: play_card(card_id=blazing-scorcher, destination=base, accelerate=True) → REJECTED
+    Rejection: Game engine rejected the command.
+    Reasoning: Given the current board state, I have several options to increase my board presence and potentially gain control of a battlefield. Playing 'Blazing Scorcher' is a strong move because it has 5 Might an
+  Turn 4 #12 [main_phase]: pass() → ?
+    Reasoning: Fallback: could not produce a valid decision within retry budget.
+  Turn 4 #13 [chain_reaction]: pass() → ?
+    Reasoning: In the current Neutral Closed state, I can only play reactions. However, I have no reaction cards in hand, and all cards in my hand are too costly to play with my current resources. Therefore, the onl
+  Turn 2 #14 [main_phase]: pass() → OK
+    Reasoning: Fallback: could not produce a valid decision within retry budget.
+  Turn 5 #15 [pending_choice]: choose_none() → OK
+    Reasoning: Given the current state, I have no playable cards due to exhausted resources and no available actions that can be taken. The only legal move is to 'choose none', which indicates that there are no pend
+  Turn 1 #0 [mulligan]: mulligan(card_ids=[blazing-scorcher-2,undercover-agent]) → OK
+    Reasoning: In the current mulligan phase, I need to decide whether to keep my initial hand or exchange some cards for potentially more useful ones. My current hand consists of cards that are too costly to play i
+  Turn 2 #1 [main_phase]: play_card(card_id=cemetery-attendant, destination=base) → OK
+    Reasoning: Given the current board state and available resources, I aim to establish a stronger board presence by playing a unit. The 'Cemetery Attendant' is a good choice because it has 3 Might and its ability 
+  Turn 2 #2 [main_phase]: end_turn() → OK
+    Reasoning: I have no playable cards due to exhausted resources, and I cannot move any units since my Cemetery Attendant is already at the base and exhausted. The only legal move available is to end the turn. Thi
+
+[USER]
+## Opponent actions (recent, oldest first)
+  Turn 3: played scrapheap
+  Turn 1: played chemtech-enforcer-3
+  Turn 1: ended their turn
+  Turn 3: passed
+  Turn 1: played vi-destructive
+  Turn 1: ended their turn
+  Turn 3: moved unit to battlefield-a
+  Turn 3: passed
+
+[USER]
+## Current Decision
+
+Turn 3 | Phase: Main Phase | State: Showdown Open | Decision type: **showdown_focus**
+My score: 0 | Opponent score: 0 | Victory: 8 pts
+
+Resources: 0E playable  [0 untapped (none) | 3 exhausted (2 chaos, 1 fury)]
+
+Hand (4 cards):
+  gust-3 — Gust [spell] (1E) [too costly] reaction
+    Effect: Reaction (Play any time, even before spells and abilities resolve.) Return a unit at a battlefield with 3 Might or less to its owner's hand.
+  traveling-merchant-2 — Traveling Merchant [unit] (2E) Might:2 [too costly] 
+    Effect: When I move, discard 1, then draw 1.
+  fading-memories-2 — Fading Memories [spell] (4E) [too costly] 
+    Effect: Give a unit at a battlefield or a gear Temporary. (Kill it at the start of its controller's Beginning Phase, before scoring.)
+  brazen-buccaneer — Brazen Buccaneer [unit] (6E) Might:5 [too costly] 
+    Effect: As you play me, you may discard 1 as an additional cost. If you do, reduce my cost by [2].
+
+My base units: cemetery-attendant(3MHT*)
+Opponent hand size: 5
+
+[battlefield-a] Zaun Warrens — uncontrolled
+  Effect: When you conquer here, discard 1, then draw 1.
+  Opp units: vi-destructive(3MHT)
+[battlefield-b] Targon's Peak — uncontrolled
+  Effect: When you conquer here, ready up to 2 runes at the end of this turn.
+
+Legal moves (1 total, first 1 shown):
+  pass
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 4  Type: main_phase  Game: Player 1-vs-Player 2  [2026-05-31T21:29:05Z]
+────────────────────────────────────────────────────────────────────────
+[SYSTEM]
+## Goal
+Win the game of Riftbound by reaching 8 victory points before your opponent.
+Control battlefields to score points each turn.  Contest your opponent's
+battlefields.  Protect your own.  Play to win; do not stall.
+
+## Role and Boundaries
+- You are a player agent for one seat (my_player_index in the brief state).
+- You propose exactly one legal move per decision.
+- Godot owns the rules engine and validates every move.
+- If a move is rejected as illegal, read the rejection reason and propose a
+  different legal move.
+- Never try to access or infer hidden information you are not entitled to.
+
+## Behavioral Guidance
+- Be decisive.  Uncertainty about the best play is not a reason to pass;
+  prefer a plausible advancing move over a pass.
+- When uncertain about a rules interaction, call lookup_rule rather than guess.
+- Call list_legal_moves when you want a concrete option set to reason over;
+  the brief state already includes one, but list_legal_moves is always fresh.
+- Keep reasoning concise — two to four sentences focused on why this move,
+  not a full game recap.
+- Prioritize board presence and score advancement over hand hoarding.
+- State assumptions explicitly in reasoning so errors are reviewable.
+
+
+
+## Riftbound — High-Frequency Rules (memorize these; do not call lookup_rule)
+
+### Turn Structure
+1. Awaken Phase — ready all your permanents.
+2. Beginning Phase — score 1 point per battlefield you control (Hold).
+3. Channel Phase — take top 2 Runes from your Rune Deck onto the board.
+4. Draw Phase — draw 1 card; both players' Rune Pools empty.
+5. Main Phase — your primary action window (Neutral Open state).
+6. Ending Phase — heal all units; expire "this turn" effects; Rune Pool empties.
+
+### Resources
+- Cards have an Energy Cost (number) and optional Power Cost (domain symbols).
+- **play_card auto-pays**: the engine automatically taps and/or recycles your
+  runes to cover the full cost.  You never manually manage runes — just play_card.
+- Rune Pool (Energy + domain Power) empties at end of Draw Phase and each turn.
+
+### Reading your resources (IMPORTANT)
+- The brief state shows one resource line: `Resources: XE playable  [N untapped ...]`
+- **XE playable is the number to use for affordability.** It equals untapped runes
+  plus any floating energy already in the pool (rare, from card/ability effects).
+- Each untapped rune auto-taps when you play_card, giving +1E and +1 domain power.
+- Domain power (FUR, MIN, etc.) works the same way — the displayed totals already
+  include both rune contributions and any floating pool power.
+- Cards in hand are pre-labelled [PLAYABLE] or [too costly] based on this.
+  Trust those labels; do not recompute from raw pool fields.
+- "Floating" energy/power (from ability effects, not runes) is called out
+  explicitly when present; otherwise the pool is empty and runes are the resource.
+
+### Units
+- Permanents — stay on board after play.
+  Units are ALWAYS played to base.  Use `destination: "base"` or omit the field
+  entirely.
+- Enter exhausted when played to base (cannot act that turn), unless Accelerate.
+- Use `move_unit` on a later action to send a ready base unit to a Battlefield.
+- Standard Move: exhaust a unit to move it Base ↔ Battlefield (cost: Exhaust).
+- Die during Cleanup when damage ≥ Might.
+- Damage heals at end of each player's turn and after Combat.
+
+### Runes
+- Channeled each turn (2 per turn, 3 for the second player on their first turn).
+- Payment is handled automatically when you play a card or use an ability.
+
+### Battlefields
+- Moving a unit into a battlefield you don't control triggers a Showdown.
+- Opponent already there → Combat Showdown (combat starts).
+- Empty uncontrolled → Non-Combat Showdown.
+
+### Combat (summary)
+- Attacker and Defender units engage.
+- Both sides can play Action/Reaction cards (Showdown window).
+- Damage step: Attacker assigns Might across enemy units (lethal damage first;
+  Tank units must receive lethal before others).
+- After damage, units heal; Attacker recalls if Defenders survive.
+- Win: only your units remain → you gain Control of the battlefield.
+
+### Turn States
+- Neutral Open: Main Phase, no Chain.  Only Turn Player acts.
+- Neutral Closed: Chain exists, no Showdown.  Only Reactions.
+- Showdown Open: Showdown/Combat active, no Chain.  Player with Focus acts.
+- Showdown Closed: Showdown/Combat active, Chain exists.  Only Reactions.
+
+### Win Condition (1v1 Duel)
+- Victory Score: 8 points.
+- Score via Hold (start-of-turn, per controlled battlefield) or Conquer
+  (first time you take a battlefield each turn).
+- Win is checked on every Cleanup: ≥ 8 points AND more points than your
+  opponent → you win immediately.
+- Conquer + last point: only counts if you also scored every battlefield that turn.
+
+### Priority / Focus
+- Priority: right to act.  One player holds it at a time.
+- Focus: right to act during Showdown.  Passes between players alternately.
+- "pass" gives up Priority or Focus.
+- When all players pass in sequence during a Showdown → Showdown closes.
+
+### Key Keywords
+- Assault [X]: +X Might while attacking.
+- Shield [X]: +X Might while defending.
+- Tank: must receive lethal damage before non-Tank friendly units.
+- Ganking: unit may Standard Move Battlefield → Battlefield.
+- Accelerate: pay +1 Energy + 1 Power to enter Ready instead of Exhausted.
+- Legion: cost reduced by 2 if you played another card this turn.
+- Reaction: can be played during Closed states on any player's turn.
+- Action: can be played during Showdown Open states.
+- Deflect [X]: enemy spells/abilities targeting this cost X more Power.
+- Deathknell: triggers when the unit dies.
+
+
+
+## Output Contract — STRICTLY REQUIRED
+
+You MUST always respond with a single JSON object and NOTHING ELSE.
+No markdown fences, no explanatory text, no trailing notes — only raw JSON.
+
+Required shape:
+{
+  "reasoning": "A concise explanation of why this move was chosen: the
+                situation as you read it, the options you considered, the
+                expected outcome, and any assumptions or uncertainty.",
+  "move": {
+    "action": "<one of the action names below>",
+    "parameters": { ... action-specific fields ... }
+  },
+  "confidence": "(optional) high / medium / low",
+  "alternatives_considered": "(optional) ONE plain string sentence describing other moves weighed — NOT an array"
+}
+
+Action names and their required parameters:
+  mulligan_keep          {}
+  mulligan               {"card_ids": ["<id>", ...]}     # 1 or 2 card IDs
+  play_card              {"card_id": "<id>",
+                          "destination": "<base|"">",
+                          "target_id": "<id or "">",
+                          "from_champion": false,
+                          "from_hidden": false,
+                          "accelerate": false}
+  move_unit              {"unit_ids": ["<id>", ...],
+                          "destination": "<battlefield-a|battlefield-b|base>"}
+  pass                   {}
+  end_turn               {}
+  use_ability            {"card_id": "<id>", "target_id": "<id or "">"}
+  react                  {"card_id": "<id>", "target_id": "<id or "">"}
+  assign_damage          {"amount": <int>, "target_id": "<id>"}
+  assign_done            {}
+  choose                 {"target_id": "<id>"}
+  choose_none            {}
+
+IMPORTANT — Rune payment is automatic:
+- play_card auto-pays its full cost by tapping and/or recycling your runes as
+  needed.  You cannot manually tap or recycle runes — go straight to play_card.
+
+Rules for output:
+- Exactly ONE move per decision.  Multi-step plans happen across turns.
+- "reasoning" and "move" are MANDATORY.
+- If you are uncertain, still commit to one move and state the uncertainty
+  in reasoning rather than refusing or omitting the move.
+- On a rejected move, produce a NEW move that accounts for the rejection.
+
+[USER]
+## Recent game history (oldest first)
+  Turn 2 #10 [chain_reaction]: pass() → OK
+    Reasoning: Currently, I am in a Neutral Closed state, which means I can only play reactions. However, I have no reaction cards in hand, and all cards in my hand are too costly to play with my current resources. 
+  Turn 4 #11 [main_phase]: play_card(card_id=blazing-scorcher, destination=base, accelerate=True) → REJECTED
+    Rejection: Game engine rejected the command.
+    Reasoning: Given the current board state, I have several options to increase my board presence and potentially gain control of a battlefield. Playing 'Blazing Scorcher' is a strong move because it has 5 Might an
+  Turn 4 #12 [main_phase]: pass() → ?
+    Reasoning: Fallback: could not produce a valid decision within retry budget.
+  Turn 4 #13 [chain_reaction]: pass() → ?
+    Reasoning: In the current Neutral Closed state, I can only play reactions. However, I have no reaction cards in hand, and all cards in my hand are too costly to play with my current resources. Therefore, the onl
+  Turn 2 #14 [main_phase]: pass() → OK
+    Reasoning: Fallback: could not produce a valid decision within retry budget.
+  Turn 5 #15 [pending_choice]: choose_none() → OK
+    Reasoning: Given the current state, I have no playable cards due to exhausted resources and no available actions that can be taken. The only legal move is to 'choose none', which indicates that there are no pend
+  Turn 1 #0 [mulligan]: mulligan(card_ids=[blazing-scorcher-2,undercover-agent]) → OK
+    Reasoning: In the current mulligan phase, I need to decide whether to keep my initial hand or exchange some cards for potentially more useful ones. My current hand consists of cards that are too costly to play i
+  Turn 2 #1 [main_phase]: play_card(card_id=cemetery-attendant, destination=base) → OK
+    Reasoning: Given the current board state and available resources, I aim to establish a stronger board presence by playing a unit. The 'Cemetery Attendant' is a good choice because it has 3 Might and its ability 
+  Turn 2 #2 [main_phase]: end_turn() → OK
+    Reasoning: I have no playable cards due to exhausted resources, and I cannot move any units since my Cemetery Attendant is already at the base and exhausted. The only legal move available is to end the turn. Thi
+  Turn 3 #3 [showdown_focus]: pass() → OK
+    Reasoning: Currently, we are in a Showdown Open state, and I hold the focus. However, I have no playable cards in my hand due to exhausted resources, and the only legal move available is to pass. This is a non-c
+
+[USER]
+## Opponent actions (recent, oldest first)
+  Turn 1: ended their turn
+  Turn 3: passed
+  Turn 1: played vi-destructive
+  Turn 1: ended their turn
+  Turn 3: moved unit to battlefield-a
+  Turn 3: passed
+  Turn 3: played raging-soul-3
+  Turn 3: ended their turn
+
+[USER]
+## Current Decision
+
+Turn 4 | Phase: Main Phase | State: Neutral Open | Decision type: **main_phase**
+My score: 0 | Opponent score: 1 | Victory: 8 pts
+
+Resources: 5E playable  CHA×3 FUR×2  [5 untapped (3 chaos, 2 fury)]
+
+Hand (5 cards):
+  gust-3 — Gust [spell] (1E) [PLAYABLE] reaction
+    Effect: Reaction (Play any time, even before spells and abilities resolve.) Return a unit at a battlefield with 3 Might or less to its owner's hand.
+  traveling-merchant-2 — Traveling Merchant [unit] (2E) Might:2 [PLAYABLE] 
+    Effect: When I move, discard 1, then draw 1.
+  fading-memories-2 — Fading Memories [spell] (4E) [PLAYABLE] 
+    Effect: Give a unit at a battlefield or a gear Temporary. (Kill it at the start of its controller's Beginning Phase, before scoring.)
+  brazen-buccaneer — Brazen Buccaneer [unit] (6E) Might:5 [too costly] 
+    Effect: As you play me, you may discard 1 as an additional cost. If you do, reduce my cost by [2].
+  chemtech-enforcer — Chemtech Enforcer [unit] (2E) Might:2 [PLAYABLE] assault
+    Effect: Assault 2 (+2 Might while I'm an attacker.) When you play me, discard 1.
+
+My base units: cemetery-attendant(3MHT)
+Opponent base units: raging-soul-3(4MHT*)
+Opponent hand size: 4
+
+[battlefield-a] Zaun Warrens — P1
+  Effect: When you conquer here, discard 1, then draw 1.
+  Opp units: vi-destructive(3MHT)
+[battlefield-b] Targon's Peak — uncontrolled
+  Effect: When you conquer here, ready up to 2 runes at the end of this turn.
+
+Legal moves (7 total, first 7 shown):
+  play traveling-merchant-2
+  play fading-memories-2
+  play chemtech-enforcer
+  move cemetery-attendant to battlefield-a
+  move cemetery-attendant to battlefield-b
+  play jinx-demolitionist from champion
+  end turn
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 4  Type: main_phase  Game: Player 1-vs-Player 2  [2026-05-31T21:29:08Z]
+────────────────────────────────────────────────────────────────────────
+[SYSTEM]
+## Goal
+Win the game of Riftbound by reaching 8 victory points before your opponent.
+Control battlefields to score points each turn.  Contest your opponent's
+battlefields.  Protect your own.  Play to win; do not stall.
+
+## Role and Boundaries
+- You are a player agent for one seat (my_player_index in the brief state).
+- You propose exactly one legal move per decision.
+- Godot owns the rules engine and validates every move.
+- If a move is rejected as illegal, read the rejection reason and propose a
+  different legal move.
+- Never try to access or infer hidden information you are not entitled to.
+
+## Behavioral Guidance
+- Be decisive.  Uncertainty about the best play is not a reason to pass;
+  prefer a plausible advancing move over a pass.
+- When uncertain about a rules interaction, call lookup_rule rather than guess.
+- Call list_legal_moves when you want a concrete option set to reason over;
+  the brief state already includes one, but list_legal_moves is always fresh.
+- Keep reasoning concise — two to four sentences focused on why this move,
+  not a full game recap.
+- Prioritize board presence and score advancement over hand hoarding.
+- State assumptions explicitly in reasoning so errors are reviewable.
+
+
+
+## Riftbound — High-Frequency Rules (memorize these; do not call lookup_rule)
+
+### Turn Structure
+1. Awaken Phase — ready all your permanents.
+2. Beginning Phase — score 1 point per battlefield you control (Hold).
+3. Channel Phase — take top 2 Runes from your Rune Deck onto the board.
+4. Draw Phase — draw 1 card; both players' Rune Pools empty.
+5. Main Phase — your primary action window (Neutral Open state).
+6. Ending Phase — heal all units; expire "this turn" effects; Rune Pool empties.
+
+### Resources
+- Cards have an Energy Cost (number) and optional Power Cost (domain symbols).
+- **play_card auto-pays**: the engine automatically taps and/or recycles your
+  runes to cover the full cost.  You never manually manage runes — just play_card.
+- Rune Pool (Energy + domain Power) empties at end of Draw Phase and each turn.
+
+### Reading your resources (IMPORTANT)
+- The brief state shows one resource line: `Resources: XE playable  [N untapped ...]`
+- **XE playable is the number to use for affordability.** It equals untapped runes
+  plus any floating energy already in the pool (rare, from card/ability effects).
+- Each untapped rune auto-taps when you play_card, giving +1E and +1 domain power.
+- Domain power (FUR, MIN, etc.) works the same way — the displayed totals already
+  include both rune contributions and any floating pool power.
+- Cards in hand are pre-labelled [PLAYABLE] or [too costly] based on this.
+  Trust those labels; do not recompute from raw pool fields.
+- "Floating" energy/power (from ability effects, not runes) is called out
+  explicitly when present; otherwise the pool is empty and runes are the resource.
+
+### Units
+- Permanents — stay on board after play.
+  Units are ALWAYS played to base.  Use `destination: "base"` or omit the field
+  entirely.
+- Enter exhausted when played to base (cannot act that turn), unless Accelerate.
+- Use `move_unit` on a later action to send a ready base unit to a Battlefield.
+- Standard Move: exhaust a unit to move it Base ↔ Battlefield (cost: Exhaust).
+- Die during Cleanup when damage ≥ Might.
+- Damage heals at end of each player's turn and after Combat.
+
+### Runes
+- Channeled each turn (2 per turn, 3 for the second player on their first turn).
+- Payment is handled automatically when you play a card or use an ability.
+
+### Battlefields
+- Moving a unit into a battlefield you don't control triggers a Showdown.
+- Opponent already there → Combat Showdown (combat starts).
+- Empty uncontrolled → Non-Combat Showdown.
+
+### Combat (summary)
+- Attacker and Defender units engage.
+- Both sides can play Action/Reaction cards (Showdown window).
+- Damage step: Attacker assigns Might across enemy units (lethal damage first;
+  Tank units must receive lethal before others).
+- After damage, units heal; Attacker recalls if Defenders survive.
+- Win: only your units remain → you gain Control of the battlefield.
+
+### Turn States
+- Neutral Open: Main Phase, no Chain.  Only Turn Player acts.
+- Neutral Closed: Chain exists, no Showdown.  Only Reactions.
+- Showdown Open: Showdown/Combat active, no Chain.  Player with Focus acts.
+- Showdown Closed: Showdown/Combat active, Chain exists.  Only Reactions.
+
+### Win Condition (1v1 Duel)
+- Victory Score: 8 points.
+- Score via Hold (start-of-turn, per controlled battlefield) or Conquer
+  (first time you take a battlefield each turn).
+- Win is checked on every Cleanup: ≥ 8 points AND more points than your
+  opponent → you win immediately.
+- Conquer + last point: only counts if you also scored every battlefield that turn.
+
+### Priority / Focus
+- Priority: right to act.  One player holds it at a time.
+- Focus: right to act during Showdown.  Passes between players alternately.
+- "pass" gives up Priority or Focus.
+- When all players pass in sequence during a Showdown → Showdown closes.
+
+### Key Keywords
+- Assault [X]: +X Might while attacking.
+- Shield [X]: +X Might while defending.
+- Tank: must receive lethal damage before non-Tank friendly units.
+- Ganking: unit may Standard Move Battlefield → Battlefield.
+- Accelerate: pay +1 Energy + 1 Power to enter Ready instead of Exhausted.
+- Legion: cost reduced by 2 if you played another card this turn.
+- Reaction: can be played during Closed states on any player's turn.
+- Action: can be played during Showdown Open states.
+- Deflect [X]: enemy spells/abilities targeting this cost X more Power.
+- Deathknell: triggers when the unit dies.
+
+
+
+## Output Contract — STRICTLY REQUIRED
+
+You MUST always respond with a single JSON object and NOTHING ELSE.
+No markdown fences, no explanatory text, no trailing notes — only raw JSON.
+
+Required shape:
+{
+  "reasoning": "A concise explanation of why this move was chosen: the
+                situation as you read it, the options you considered, the
+                expected outcome, and any assumptions or uncertainty.",
+  "move": {
+    "action": "<one of the action names below>",
+    "parameters": { ... action-specific fields ... }
+  },
+  "confidence": "(optional) high / medium / low",
+  "alternatives_considered": "(optional) ONE plain string sentence describing other moves weighed — NOT an array"
+}
+
+Action names and their required parameters:
+  mulligan_keep          {}
+  mulligan               {"card_ids": ["<id>", ...]}     # 1 or 2 card IDs
+  play_card              {"card_id": "<id>",
+                          "destination": "<base|"">",
+                          "target_id": "<id or "">",
+                          "from_champion": false,
+                          "from_hidden": false,
+                          "accelerate": false}
+  move_unit              {"unit_ids": ["<id>", ...],
+                          "destination": "<battlefield-a|battlefield-b|base>"}
+  pass                   {}
+  end_turn               {}
+  use_ability            {"card_id": "<id>", "target_id": "<id or "">"}
+  react                  {"card_id": "<id>", "target_id": "<id or "">"}
+  assign_damage          {"amount": <int>, "target_id": "<id>"}
+  assign_done            {}
+  choose                 {"target_id": "<id>"}
+  choose_none            {}
+
+IMPORTANT — Rune payment is automatic:
+- play_card auto-pays its full cost by tapping and/or recycling your runes as
+  needed.  You cannot manually tap or recycle runes — go straight to play_card.
+
+Rules for output:
+- Exactly ONE move per decision.  Multi-step plans happen across turns.
+- "reasoning" and "move" are MANDATORY.
+- If you are uncertain, still commit to one move and state the uncertainty
+  in reasoning rather than refusing or omitting the move.
+- On a rejected move, produce a NEW move that accounts for the rejection.
+
+[USER]
+## Recent game history (oldest first)
+  Turn 4 #11 [main_phase]: play_card(card_id=blazing-scorcher, destination=base, accelerate=True) → REJECTED
+    Rejection: Game engine rejected the command.
+    Reasoning: Given the current board state, I have several options to increase my board presence and potentially gain control of a battlefield. Playing 'Blazing Scorcher' is a strong move because it has 5 Might an
+  Turn 4 #12 [main_phase]: pass() → ?
+    Reasoning: Fallback: could not produce a valid decision within retry budget.
+  Turn 4 #13 [chain_reaction]: pass() → ?
+    Reasoning: In the current Neutral Closed state, I can only play reactions. However, I have no reaction cards in hand, and all cards in my hand are too costly to play with my current resources. Therefore, the onl
+  Turn 2 #14 [main_phase]: pass() → OK
+    Reasoning: Fallback: could not produce a valid decision within retry budget.
+  Turn 5 #15 [pending_choice]: choose_none() → OK
+    Reasoning: Given the current state, I have no playable cards due to exhausted resources and no available actions that can be taken. The only legal move is to 'choose none', which indicates that there are no pend
+  Turn 1 #0 [mulligan]: mulligan(card_ids=[blazing-scorcher-2,undercover-agent]) → OK
+    Reasoning: In the current mulligan phase, I need to decide whether to keep my initial hand or exchange some cards for potentially more useful ones. My current hand consists of cards that are too costly to play i
+  Turn 2 #1 [main_phase]: play_card(card_id=cemetery-attendant, destination=base) → OK
+    Reasoning: Given the current board state and available resources, I aim to establish a stronger board presence by playing a unit. The 'Cemetery Attendant' is a good choice because it has 3 Might and its ability 
+  Turn 2 #2 [main_phase]: end_turn() → OK
+    Reasoning: I have no playable cards due to exhausted resources, and I cannot move any units since my Cemetery Attendant is already at the base and exhausted. The only legal move available is to end the turn. Thi
+  Turn 3 #3 [showdown_focus]: pass() → OK
+    Reasoning: Currently, we are in a Showdown Open state, and I hold the focus. However, I have no playable cards in my hand due to exhausted resources, and the only legal move available is to pass. This is a non-c
+  Turn 4 #4 [main_phase]: play_card(card_id=chemtech-enforcer, destination=base) → OK
+    Reasoning: Given the current board state and my resources, I aim to establish a stronger board presence and potentially contest a battlefield. Playing 'Chemtech Enforcer' is a strategic move because it has Assau
+
+[USER]
+## Opponent actions (recent, oldest first)
+  Turn 1: ended their turn
+  Turn 3: passed
+  Turn 1: played vi-destructive
+  Turn 1: ended their turn
+  Turn 3: moved unit to battlefield-a
+  Turn 3: passed
+  Turn 3: played raging-soul-3
+  Turn 3: ended their turn
+
+[USER]
+## Current Decision
+
+Turn 4 | Phase: Main Phase | State: Neutral Open | Decision type: **main_phase**
+My score: 0 | Opponent score: 1 | Victory: 8 pts
+
+Resources: 3E playable  CHA×2 FUR×1  [3 untapped (2 chaos, 1 fury) | 2 exhausted (1 chaos, 1 fury)]
+
+Hand (2 cards):
+  fading-memories-2 — Fading Memories [spell] (4E) [too costly] 
+    Effect: Give a unit at a battlefield or a gear Temporary. (Kill it at the start of its controller's Beginning Phase, before scoring.)
+  brazen-buccaneer — Brazen Buccaneer [unit] (6E) Might:5 [too costly] 
+    Effect: As you play me, you may discard 1 as an additional cost. If you do, reduce my cost by [2].
+
+My base units: cemetery-attendant(3MHT), chemtech-enforcer(2MHT*)
+Opponent base units: raging-soul-3(4MHT*)
+Opponent hand size: 4
+
+[battlefield-a] Zaun Warrens — P1
+  Effect: When you conquer here, discard 1, then draw 1.
+  Opp units: vi-destructive(3MHT)
+[battlefield-b] Targon's Peak — uncontrolled
+  Effect: When you conquer here, ready up to 2 runes at the end of this turn.
+
+Legal moves (4 total, first 4 shown):
+  move cemetery-attendant to battlefield-a
+  move cemetery-attendant to battlefield-b
+  play jinx-demolitionist from champion
+  end turn
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 4  Type: showdown_focus  Game: Player 1-vs-Player 2  [2026-05-31T21:29:10Z]
+────────────────────────────────────────────────────────────────────────
+[SYSTEM]
+## Goal
+Win the game of Riftbound by reaching 8 victory points before your opponent.
+Control battlefields to score points each turn.  Contest your opponent's
+battlefields.  Protect your own.  Play to win; do not stall.
+
+## Role and Boundaries
+- You are a player agent for one seat (my_player_index in the brief state).
+- You propose exactly one legal move per decision.
+- Godot owns the rules engine and validates every move.
+- If a move is rejected as illegal, read the rejection reason and propose a
+  different legal move.
+- Never try to access or infer hidden information you are not entitled to.
+
+## Behavioral Guidance
+- Be decisive.  Uncertainty about the best play is not a reason to pass;
+  prefer a plausible advancing move over a pass.
+- When uncertain about a rules interaction, call lookup_rule rather than guess.
+- Call list_legal_moves when you want a concrete option set to reason over;
+  the brief state already includes one, but list_legal_moves is always fresh.
+- Keep reasoning concise — two to four sentences focused on why this move,
+  not a full game recap.
+- Prioritize board presence and score advancement over hand hoarding.
+- State assumptions explicitly in reasoning so errors are reviewable.
+
+
+
+## Riftbound — High-Frequency Rules (memorize these; do not call lookup_rule)
+
+### Turn Structure
+1. Awaken Phase — ready all your permanents.
+2. Beginning Phase — score 1 point per battlefield you control (Hold).
+3. Channel Phase — take top 2 Runes from your Rune Deck onto the board.
+4. Draw Phase — draw 1 card; both players' Rune Pools empty.
+5. Main Phase — your primary action window (Neutral Open state).
+6. Ending Phase — heal all units; expire "this turn" effects; Rune Pool empties.
+
+### Resources
+- Cards have an Energy Cost (number) and optional Power Cost (domain symbols).
+- **play_card auto-pays**: the engine automatically taps and/or recycles your
+  runes to cover the full cost.  You never manually manage runes — just play_card.
+- Rune Pool (Energy + domain Power) empties at end of Draw Phase and each turn.
+
+### Reading your resources (IMPORTANT)
+- The brief state shows one resource line: `Resources: XE playable  [N untapped ...]`
+- **XE playable is the number to use for affordability.** It equals untapped runes
+  plus any floating energy already in the pool (rare, from card/ability effects).
+- Each untapped rune auto-taps when you play_card, giving +1E and +1 domain power.
+- Domain power (FUR, MIN, etc.) works the same way — the displayed totals already
+  include both rune contributions and any floating pool power.
+- Cards in hand are pre-labelled [PLAYABLE] or [too costly] based on this.
+  Trust those labels; do not recompute from raw pool fields.
+- "Floating" energy/power (from ability effects, not runes) is called out
+  explicitly when present; otherwise the pool is empty and runes are the resource.
+
+### Units
+- Permanents — stay on board after play.
+  Units are ALWAYS played to base.  Use `destination: "base"` or omit the field
+  entirely.
+- Enter exhausted when played to base (cannot act that turn), unless Accelerate.
+- Use `move_unit` on a later action to send a ready base unit to a Battlefield.
+- Standard Move: exhaust a unit to move it Base ↔ Battlefield (cost: Exhaust).
+- Die during Cleanup when damage ≥ Might.
+- Damage heals at end of each player's turn and after Combat.
+
+### Runes
+- Channeled each turn (2 per turn, 3 for the second player on their first turn).
+- Payment is handled automatically when you play a card or use an ability.
+
+### Battlefields
+- Moving a unit into a battlefield you don't control triggers a Showdown.
+- Opponent already there → Combat Showdown (combat starts).
+- Empty uncontrolled → Non-Combat Showdown.
+
+### Combat (summary)
+- Attacker and Defender units engage.
+- Both sides can play Action/Reaction cards (Showdown window).
+- Damage step: Attacker assigns Might across enemy units (lethal damage first;
+  Tank units must receive lethal before others).
+- After damage, units heal; Attacker recalls if Defenders survive.
+- Win: only your units remain → you gain Control of the battlefield.
+
+### Turn States
+- Neutral Open: Main Phase, no Chain.  Only Turn Player acts.
+- Neutral Closed: Chain exists, no Showdown.  Only Reactions.
+- Showdown Open: Showdown/Combat active, no Chain.  Player with Focus acts.
+- Showdown Closed: Showdown/Combat active, Chain exists.  Only Reactions.
+
+### Win Condition (1v1 Duel)
+- Victory Score: 8 points.
+- Score via Hold (start-of-turn, per controlled battlefield) or Conquer
+  (first time you take a battlefield each turn).
+- Win is checked on every Cleanup: ≥ 8 points AND more points than your
+  opponent → you win immediately.
+- Conquer + last point: only counts if you also scored every battlefield that turn.
+
+### Priority / Focus
+- Priority: right to act.  One player holds it at a time.
+- Focus: right to act during Showdown.  Passes between players alternately.
+- "pass" gives up Priority or Focus.
+- When all players pass in sequence during a Showdown → Showdown closes.
+
+### Key Keywords
+- Assault [X]: +X Might while attacking.
+- Shield [X]: +X Might while defending.
+- Tank: must receive lethal damage before non-Tank friendly units.
+- Ganking: unit may Standard Move Battlefield → Battlefield.
+- Accelerate: pay +1 Energy + 1 Power to enter Ready instead of Exhausted.
+- Legion: cost reduced by 2 if you played another card this turn.
+- Reaction: can be played during Closed states on any player's turn.
+- Action: can be played during Showdown Open states.
+- Deflect [X]: enemy spells/abilities targeting this cost X more Power.
+- Deathknell: triggers when the unit dies.
+
+
+
+## Output Contract — STRICTLY REQUIRED
+
+You MUST always respond with a single JSON object and NOTHING ELSE.
+No markdown fences, no explanatory text, no trailing notes — only raw JSON.
+
+Required shape:
+{
+  "reasoning": "A concise explanation of why this move was chosen: the
+                situation as you read it, the options you considered, the
+                expected outcome, and any assumptions or uncertainty.",
+  "move": {
+    "action": "<one of the action names below>",
+    "parameters": { ... action-specific fields ... }
+  },
+  "confidence": "(optional) high / medium / low",
+  "alternatives_considered": "(optional) ONE plain string sentence describing other moves weighed — NOT an array"
+}
+
+Action names and their required parameters:
+  mulligan_keep          {}
+  mulligan               {"card_ids": ["<id>", ...]}     # 1 or 2 card IDs
+  play_card              {"card_id": "<id>",
+                          "destination": "<base|"">",
+                          "target_id": "<id or "">",
+                          "from_champion": false,
+                          "from_hidden": false,
+                          "accelerate": false}
+  move_unit              {"unit_ids": ["<id>", ...],
+                          "destination": "<battlefield-a|battlefield-b|base>"}
+  pass                   {}
+  end_turn               {}
+  use_ability            {"card_id": "<id>", "target_id": "<id or "">"}
+  react                  {"card_id": "<id>", "target_id": "<id or "">"}
+  assign_damage          {"amount": <int>, "target_id": "<id>"}
+  assign_done            {}
+  choose                 {"target_id": "<id>"}
+  choose_none            {}
+
+IMPORTANT — Rune payment is automatic:
+- play_card auto-pays its full cost by tapping and/or recycling your runes as
+  needed.  You cannot manually tap or recycle runes — go straight to play_card.
+
+Rules for output:
+- Exactly ONE move per decision.  Multi-step plans happen across turns.
+- "reasoning" and "move" are MANDATORY.
+- If you are uncertain, still commit to one move and state the uncertainty
+  in reasoning rather than refusing or omitting the move.
+- On a rejected move, produce a NEW move that accounts for the rejection.
+
+[USER]
+## Recent game history (oldest first)
+  Turn 4 #12 [main_phase]: pass() → ?
+    Reasoning: Fallback: could not produce a valid decision within retry budget.
+  Turn 4 #13 [chain_reaction]: pass() → ?
+    Reasoning: In the current Neutral Closed state, I can only play reactions. However, I have no reaction cards in hand, and all cards in my hand are too costly to play with my current resources. Therefore, the onl
+  Turn 2 #14 [main_phase]: pass() → OK
+    Reasoning: Fallback: could not produce a valid decision within retry budget.
+  Turn 5 #15 [pending_choice]: choose_none() → OK
+    Reasoning: Given the current state, I have no playable cards due to exhausted resources and no available actions that can be taken. The only legal move is to 'choose none', which indicates that there are no pend
+  Turn 1 #0 [mulligan]: mulligan(card_ids=[blazing-scorcher-2,undercover-agent]) → OK
+    Reasoning: In the current mulligan phase, I need to decide whether to keep my initial hand or exchange some cards for potentially more useful ones. My current hand consists of cards that are too costly to play i
+  Turn 2 #1 [main_phase]: play_card(card_id=cemetery-attendant, destination=base) → OK
+    Reasoning: Given the current board state and available resources, I aim to establish a stronger board presence by playing a unit. The 'Cemetery Attendant' is a good choice because it has 3 Might and its ability 
+  Turn 2 #2 [main_phase]: end_turn() → OK
+    Reasoning: I have no playable cards due to exhausted resources, and I cannot move any units since my Cemetery Attendant is already at the base and exhausted. The only legal move available is to end the turn. Thi
+  Turn 3 #3 [showdown_focus]: pass() → OK
+    Reasoning: Currently, we are in a Showdown Open state, and I hold the focus. However, I have no playable cards in my hand due to exhausted resources, and the only legal move available is to pass. This is a non-c
+  Turn 4 #4 [main_phase]: play_card(card_id=chemtech-enforcer, destination=base) → OK
+    Reasoning: Given the current board state and my resources, I aim to establish a stronger board presence and potentially contest a battlefield. Playing 'Chemtech Enforcer' is a strategic move because it has Assau
+  Turn 4 #5 [main_phase]: move_unit(unit_ids=[cemetery-attendant], destination=battlefield-a) → OK
+    Reasoning: Given the current board state, I have the opportunity to contest battlefield-a, which is currently controlled by the opponent. Moving the Cemetery Attendant there will initiate a showdown, potentially
+
+[USER]
+## Opponent actions (recent, oldest first)
+  Turn 1: ended their turn
+  Turn 3: passed
+  Turn 1: played vi-destructive
+  Turn 1: ended their turn
+  Turn 3: moved unit to battlefield-a
+  Turn 3: passed
+  Turn 3: played raging-soul-3
+  Turn 3: ended their turn
+
+[USER]
+## Current Decision
+
+Turn 4 | Phase: Main Phase | State: Showdown Open | Decision type: **showdown_focus**
+My score: 0 | Opponent score: 1 | Victory: 8 pts
+
+Resources: 3E playable  CHA×2 FUR×1  [3 untapped (2 chaos, 1 fury) | 2 exhausted (1 chaos, 1 fury)]
+
+Hand (2 cards):
+  fading-memories-2 — Fading Memories [spell] (4E) [too costly] 
+    Effect: Give a unit at a battlefield or a gear Temporary. (Kill it at the start of its controller's Beginning Phase, before scoring.)
+  brazen-buccaneer — Brazen Buccaneer [unit] (6E) Might:5 [too costly] 
+    Effect: As you play me, you may discard 1 as an additional cost. If you do, reduce my cost by [2].
+
+My base units: chemtech-enforcer(2MHT*)
+Opponent base units: raging-soul-3(4MHT*)
+Opponent hand size: 4
+
+[battlefield-a] Zaun Warrens — P1
+  Effect: When you conquer here, discard 1, then draw 1.
+  My units: cemetery-attendant(3MHT)
+  Opp units: vi-destructive(3MHT)
+[battlefield-b] Targon's Peak — uncontrolled
+  Effect: When you conquer here, ready up to 2 runes at the end of this turn.
+
+Legal moves (1 total, first 1 shown):
+  pass
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 4  Type: main_phase  Game: Player 1-vs-Player 2  [2026-05-31T21:29:49Z]
+────────────────────────────────────────────────────────────────────────
+[SYSTEM]
+## Goal
+Win the game of Riftbound by reaching 8 victory points before your opponent.
+Control battlefields to score points each turn.  Contest your opponent's
+battlefields.  Protect your own.  Play to win; do not stall.
+
+## Role and Boundaries
+- You are a player agent for one seat (my_player_index in the brief state).
+- You propose exactly one legal move per decision.
+- Godot owns the rules engine and validates every move.
+- If a move is rejected as illegal, read the rejection reason and propose a
+  different legal move.
+- Never try to access or infer hidden information you are not entitled to.
+
+## Behavioral Guidance
+- Be decisive.  Uncertainty about the best play is not a reason to pass;
+  prefer a plausible advancing move over a pass.
+- When uncertain about a rules interaction, call lookup_rule rather than guess.
+- Call list_legal_moves when you want a concrete option set to reason over;
+  the brief state already includes one, but list_legal_moves is always fresh.
+- Keep reasoning concise — two to four sentences focused on why this move,
+  not a full game recap.
+- Prioritize board presence and score advancement over hand hoarding.
+- State assumptions explicitly in reasoning so errors are reviewable.
+
+
+
+## Riftbound — High-Frequency Rules (memorize these; do not call lookup_rule)
+
+### Turn Structure
+1. Awaken Phase — ready all your permanents.
+2. Beginning Phase — score 1 point per battlefield you control (Hold).
+3. Channel Phase — take top 2 Runes from your Rune Deck onto the board.
+4. Draw Phase — draw 1 card; both players' Rune Pools empty.
+5. Main Phase — your primary action window (Neutral Open state).
+6. Ending Phase — heal all units; expire "this turn" effects; Rune Pool empties.
+
+### Resources
+- Cards have an Energy Cost (number) and optional Power Cost (domain symbols).
+- **play_card auto-pays**: the engine automatically taps and/or recycles your
+  runes to cover the full cost.  You never manually manage runes — just play_card.
+- Rune Pool (Energy + domain Power) empties at end of Draw Phase and each turn.
+
+### Reading your resources (IMPORTANT)
+- The brief state shows one resource line: `Resources: XE playable  [N untapped ...]`
+- **XE playable is the number to use for affordability.** It equals untapped runes
+  plus any floating energy already in the pool (rare, from card/ability effects).
+- Each untapped rune auto-taps when you play_card, giving +1E and +1 domain power.
+- Domain power (FUR, MIN, etc.) works the same way — the displayed totals already
+  include both rune contributions and any floating pool power.
+- Cards in hand are pre-labelled [PLAYABLE] or [too costly] based on this.
+  Trust those labels; do not recompute from raw pool fields.
+- "Floating" energy/power (from ability effects, not runes) is called out
+  explicitly when present; otherwise the pool is empty and runes are the resource.
+
+### Units
+- Permanents — stay on board after play.
+  Units are ALWAYS played to base.  Use `destination: "base"` or omit the field
+  entirely.
+- Enter exhausted when played to base (cannot act that turn), unless Accelerate.
+- Use `move_unit` on a later action to send a ready base unit to a Battlefield.
+- Standard Move: exhaust a unit to move it Base ↔ Battlefield (cost: Exhaust).
+- Die during Cleanup when damage ≥ Might.
+- Damage heals at end of each player's turn and after Combat.
+
+### Runes
+- Channeled each turn (2 per turn, 3 for the second player on their first turn).
+- Payment is handled automatically when you play a card or use an ability.
+
+### Battlefields
+- Moving a unit into a battlefield you don't control triggers a Showdown.
+- Opponent already there → Combat Showdown (combat starts).
+- Empty uncontrolled → Non-Combat Showdown.
+
+### Combat (summary)
+- Attacker and Defender units engage.
+- Both sides can play Action/Reaction cards (Showdown window).
+- Damage step: Attacker assigns Might across enemy units (lethal damage first;
+  Tank units must receive lethal before others).
+- After damage, units heal; Attacker recalls if Defenders survive.
+- Win: only your units remain → you gain Control of the battlefield.
+
+### Turn States
+- Neutral Open: Main Phase, no Chain.  Only Turn Player acts.
+- Neutral Closed: Chain exists, no Showdown.  Only Reactions.
+- Showdown Open: Showdown/Combat active, no Chain.  Player with Focus acts.
+- Showdown Closed: Showdown/Combat active, Chain exists.  Only Reactions.
+
+### Win Condition (1v1 Duel)
+- Victory Score: 8 points.
+- Score via Hold (start-of-turn, per controlled battlefield) or Conquer
+  (first time you take a battlefield each turn).
+- Win is checked on every Cleanup: ≥ 8 points AND more points than your
+  opponent → you win immediately.
+- Conquer + last point: only counts if you also scored every battlefield that turn.
+
+### Priority / Focus
+- Priority: right to act.  One player holds it at a time.
+- Focus: right to act during Showdown.  Passes between players alternately.
+- "pass" gives up Priority or Focus.
+- When all players pass in sequence during a Showdown → Showdown closes.
+
+### Key Keywords
+- Assault [X]: +X Might while attacking.
+- Shield [X]: +X Might while defending.
+- Tank: must receive lethal damage before non-Tank friendly units.
+- Ganking: unit may Standard Move Battlefield → Battlefield.
+- Accelerate: pay +1 Energy + 1 Power to enter Ready instead of Exhausted.
+- Legion: cost reduced by 2 if you played another card this turn.
+- Reaction: can be played during Closed states on any player's turn.
+- Action: can be played during Showdown Open states.
+- Deflect [X]: enemy spells/abilities targeting this cost X more Power.
+- Deathknell: triggers when the unit dies.
+
+
+
+## Output Contract — STRICTLY REQUIRED
+
+You MUST always respond with a single JSON object and NOTHING ELSE.
+No markdown fences, no explanatory text, no trailing notes — only raw JSON.
+
+Required shape:
+{
+  "reasoning": "A concise explanation of why this move was chosen: the
+                situation as you read it, the options you considered, the
+                expected outcome, and any assumptions or uncertainty.",
+  "move": {
+    "action": "<one of the action names below>",
+    "parameters": { ... action-specific fields ... }
+  },
+  "confidence": "(optional) high / medium / low",
+  "alternatives_considered": "(optional) ONE plain string sentence describing other moves weighed — NOT an array"
+}
+
+Action names and their required parameters:
+  mulligan_keep          {}
+  mulligan               {"card_ids": ["<id>", ...]}     # 1 or 2 card IDs
+  play_card              {"card_id": "<id>",
+                          "destination": "<base|"">",
+                          "target_id": "<id or "">",
+                          "from_champion": false,
+                          "from_hidden": false,
+                          "accelerate": false}
+  move_unit              {"unit_ids": ["<id>", ...],
+                          "destination": "<battlefield-a|battlefield-b|base>"}
+  pass                   {}
+  end_turn               {}
+  use_ability            {"card_id": "<id>", "target_id": "<id or "">"}
+  react                  {"card_id": "<id>", "target_id": "<id or "">"}
+  assign_damage          {"amount": <int>, "target_id": "<id>"}
+  assign_done            {}
+  choose                 {"target_id": "<id>"}
+  choose_none            {}
+
+IMPORTANT — Rune payment is automatic:
+- play_card auto-pays its full cost by tapping and/or recycling your runes as
+  needed.  You cannot manually tap or recycle runes — go straight to play_card.
+
+Rules for output:
+- Exactly ONE move per decision.  Multi-step plans happen across turns.
+- "reasoning" and "move" are MANDATORY.
+- If you are uncertain, still commit to one move and state the uncertainty
+  in reasoning rather than refusing or omitting the move.
+- On a rejected move, produce a NEW move that accounts for the rejection.
+
+[USER]
+## Recent game history (oldest first)
+  Turn 4 #13 [chain_reaction]: pass() → ?
+    Reasoning: In the current Neutral Closed state, I can only play reactions. However, I have no reaction cards in hand, and all cards in my hand are too costly to play with my current resources. Therefore, the onl
+  Turn 2 #14 [main_phase]: pass() → OK
+    Reasoning: Fallback: could not produce a valid decision within retry budget.
+  Turn 5 #15 [pending_choice]: choose_none() → OK
+    Reasoning: Given the current state, I have no playable cards due to exhausted resources and no available actions that can be taken. The only legal move is to 'choose none', which indicates that there are no pend
+  Turn 1 #0 [mulligan]: mulligan(card_ids=[blazing-scorcher-2,undercover-agent]) → OK
+    Reasoning: In the current mulligan phase, I need to decide whether to keep my initial hand or exchange some cards for potentially more useful ones. My current hand consists of cards that are too costly to play i
+  Turn 2 #1 [main_phase]: play_card(card_id=cemetery-attendant, destination=base) → OK
+    Reasoning: Given the current board state and available resources, I aim to establish a stronger board presence by playing a unit. The 'Cemetery Attendant' is a good choice because it has 3 Might and its ability 
+  Turn 2 #2 [main_phase]: end_turn() → OK
+    Reasoning: I have no playable cards due to exhausted resources, and I cannot move any units since my Cemetery Attendant is already at the base and exhausted. The only legal move available is to end the turn. Thi
+  Turn 3 #3 [showdown_focus]: pass() → OK
+    Reasoning: Currently, we are in a Showdown Open state, and I hold the focus. However, I have no playable cards in my hand due to exhausted resources, and the only legal move available is to pass. This is a non-c
+  Turn 4 #4 [main_phase]: play_card(card_id=chemtech-enforcer, destination=base) → OK
+    Reasoning: Given the current board state and my resources, I aim to establish a stronger board presence and potentially contest a battlefield. Playing 'Chemtech Enforcer' is a strategic move because it has Assau
+  Turn 4 #5 [main_phase]: move_unit(unit_ids=[cemetery-attendant], destination=battlefield-a) → OK
+    Reasoning: Given the current board state, I have the opportunity to contest battlefield-a, which is currently controlled by the opponent. Moving the Cemetery Attendant there will initiate a showdown, potentially
+  Turn 4 #6 [showdown_focus]: pass() → OK
+    Reasoning: We are currently in a Showdown Open state at battlefield-a, where my Cemetery Attendant is facing off against the opponent's Vi-Destructive. I have no playable cards in hand due to resource constraint
+
+[USER]
+## Opponent actions (recent, oldest first)
+  Turn 3: passed
+  Turn 1: played vi-destructive
+  Turn 1: ended their turn
+  Turn 3: moved unit to battlefield-a
+  Turn 3: passed
+  Turn 3: played raging-soul-3
+  Turn 3: ended their turn
+  Turn 4: passed
+
+[USER]
+## Current Decision
+
+Turn 4 | Phase: Main Phase | State: Neutral Open | Decision type: **main_phase**
+My score: 0 | Opponent score: 1 | Victory: 8 pts
+
+Resources: 3E playable  CHA×2 FUR×1  [3 untapped (2 chaos, 1 fury) | 2 exhausted (1 chaos, 1 fury)]
+
+Hand (2 cards):
+  fading-memories-2 — Fading Memories [spell] (4E) [too costly] 
+    Effect: Give a unit at a battlefield or a gear Temporary. (Kill it at the start of its controller's Beginning Phase, before scoring.)
+  brazen-buccaneer — Brazen Buccaneer [unit] (6E) Might:5 [too costly] 
+    Effect: As you play me, you may discard 1 as an additional cost. If you do, reduce my cost by [2].
+
+My base units: chemtech-enforcer(2MHT*), cemetery-attendant(3MHT*)
+Opponent base units: raging-soul-3(4MHT*)
+Opponent hand size: 4
+
+[battlefield-a] Zaun Warrens — P1
+  Effect: When you conquer here, discard 1, then draw 1.
+  Opp units: vi-destructive(3MHT)
+[battlefield-b] Targon's Peak — uncontrolled
+  Effect: When you conquer here, ready up to 2 runes at the end of this turn.
+
+Legal moves (2 total, first 2 shown):
+  play jinx-demolitionist from champion
+  end turn
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 4  Type: pending_choice  Game: Player 1-vs-Player 2  [2026-05-31T21:29:54Z]
+────────────────────────────────────────────────────────────────────────
+[SYSTEM]
+## Goal
+Win the game of Riftbound by reaching 8 victory points before your opponent.
+Control battlefields to score points each turn.  Contest your opponent's
+battlefields.  Protect your own.  Play to win; do not stall.
+
+## Role and Boundaries
+- You are a player agent for one seat (my_player_index in the brief state).
+- You propose exactly one legal move per decision.
+- Godot owns the rules engine and validates every move.
+- If a move is rejected as illegal, read the rejection reason and propose a
+  different legal move.
+- Never try to access or infer hidden information you are not entitled to.
+
+## Behavioral Guidance
+- Be decisive.  Uncertainty about the best play is not a reason to pass;
+  prefer a plausible advancing move over a pass.
+- When uncertain about a rules interaction, call lookup_rule rather than guess.
+- Call list_legal_moves when you want a concrete option set to reason over;
+  the brief state already includes one, but list_legal_moves is always fresh.
+- Keep reasoning concise — two to four sentences focused on why this move,
+  not a full game recap.
+- Prioritize board presence and score advancement over hand hoarding.
+- State assumptions explicitly in reasoning so errors are reviewable.
+
+
+
+## Riftbound — High-Frequency Rules (memorize these; do not call lookup_rule)
+
+### Turn Structure
+1. Awaken Phase — ready all your permanents.
+2. Beginning Phase — score 1 point per battlefield you control (Hold).
+3. Channel Phase — take top 2 Runes from your Rune Deck onto the board.
+4. Draw Phase — draw 1 card; both players' Rune Pools empty.
+5. Main Phase — your primary action window (Neutral Open state).
+6. Ending Phase — heal all units; expire "this turn" effects; Rune Pool empties.
+
+### Resources
+- Cards have an Energy Cost (number) and optional Power Cost (domain symbols).
+- **play_card auto-pays**: the engine automatically taps and/or recycles your
+  runes to cover the full cost.  You never manually manage runes — just play_card.
+- Rune Pool (Energy + domain Power) empties at end of Draw Phase and each turn.
+
+### Reading your resources (IMPORTANT)
+- The brief state shows one resource line: `Resources: XE playable  [N untapped ...]`
+- **XE playable is the number to use for affordability.** It equals untapped runes
+  plus any floating energy already in the pool (rare, from card/ability effects).
+- Each untapped rune auto-taps when you play_card, giving +1E and +1 domain power.
+- Domain power (FUR, MIN, etc.) works the same way — the displayed totals already
+  include both rune contributions and any floating pool power.
+- Cards in hand are pre-labelled [PLAYABLE] or [too costly] based on this.
+  Trust those labels; do not recompute from raw pool fields.
+- "Floating" energy/power (from ability effects, not runes) is called out
+  explicitly when present; otherwise the pool is empty and runes are the resource.
+
+### Units
+- Permanents — stay on board after play.
+  Units are ALWAYS played to base.  Use `destination: "base"` or omit the field
+  entirely.
+- Enter exhausted when played to base (cannot act that turn), unless Accelerate.
+- Use `move_unit` on a later action to send a ready base unit to a Battlefield.
+- Standard Move: exhaust a unit to move it Base ↔ Battlefield (cost: Exhaust).
+- Die during Cleanup when damage ≥ Might.
+- Damage heals at end of each player's turn and after Combat.
+
+### Runes
+- Channeled each turn (2 per turn, 3 for the second player on their first turn).
+- Payment is handled automatically when you play a card or use an ability.
+
+### Battlefields
+- Moving a unit into a battlefield you don't control triggers a Showdown.
+- Opponent already there → Combat Showdown (combat starts).
+- Empty uncontrolled → Non-Combat Showdown.
+
+### Combat (summary)
+- Attacker and Defender units engage.
+- Both sides can play Action/Reaction cards (Showdown window).
+- Damage step: Attacker assigns Might across enemy units (lethal damage first;
+  Tank units must receive lethal before others).
+- After damage, units heal; Attacker recalls if Defenders survive.
+- Win: only your units remain → you gain Control of the battlefield.
+
+### Turn States
+- Neutral Open: Main Phase, no Chain.  Only Turn Player acts.
+- Neutral Closed: Chain exists, no Showdown.  Only Reactions.
+- Showdown Open: Showdown/Combat active, no Chain.  Player with Focus acts.
+- Showdown Closed: Showdown/Combat active, Chain exists.  Only Reactions.
+
+### Win Condition (1v1 Duel)
+- Victory Score: 8 points.
+- Score via Hold (start-of-turn, per controlled battlefield) or Conquer
+  (first time you take a battlefield each turn).
+- Win is checked on every Cleanup: ≥ 8 points AND more points than your
+  opponent → you win immediately.
+- Conquer + last point: only counts if you also scored every battlefield that turn.
+
+### Priority / Focus
+- Priority: right to act.  One player holds it at a time.
+- Focus: right to act during Showdown.  Passes between players alternately.
+- "pass" gives up Priority or Focus.
+- When all players pass in sequence during a Showdown → Showdown closes.
+
+### Key Keywords
+- Assault [X]: +X Might while attacking.
+- Shield [X]: +X Might while defending.
+- Tank: must receive lethal damage before non-Tank friendly units.
+- Ganking: unit may Standard Move Battlefield → Battlefield.
+- Accelerate: pay +1 Energy + 1 Power to enter Ready instead of Exhausted.
+- Legion: cost reduced by 2 if you played another card this turn.
+- Reaction: can be played during Closed states on any player's turn.
+- Action: can be played during Showdown Open states.
+- Deflect [X]: enemy spells/abilities targeting this cost X more Power.
+- Deathknell: triggers when the unit dies.
+
+
+
+## Output Contract — STRICTLY REQUIRED
+
+You MUST always respond with a single JSON object and NOTHING ELSE.
+No markdown fences, no explanatory text, no trailing notes — only raw JSON.
+
+Required shape:
+{
+  "reasoning": "A concise explanation of why this move was chosen: the
+                situation as you read it, the options you considered, the
+                expected outcome, and any assumptions or uncertainty.",
+  "move": {
+    "action": "<one of the action names below>",
+    "parameters": { ... action-specific fields ... }
+  },
+  "confidence": "(optional) high / medium / low",
+  "alternatives_considered": "(optional) ONE plain string sentence describing other moves weighed — NOT an array"
+}
+
+Action names and their required parameters:
+  mulligan_keep          {}
+  mulligan               {"card_ids": ["<id>", ...]}     # 1 or 2 card IDs
+  play_card              {"card_id": "<id>",
+                          "destination": "<base|"">",
+                          "target_id": "<id or "">",
+                          "from_champion": false,
+                          "from_hidden": false,
+                          "accelerate": false}
+  move_unit              {"unit_ids": ["<id>", ...],
+                          "destination": "<battlefield-a|battlefield-b|base>"}
+  pass                   {}
+  end_turn               {}
+  use_ability            {"card_id": "<id>", "target_id": "<id or "">"}
+  react                  {"card_id": "<id>", "target_id": "<id or "">"}
+  assign_damage          {"amount": <int>, "target_id": "<id>"}
+  assign_done            {}
+  choose                 {"target_id": "<id>"}
+  choose_none            {}
+
+IMPORTANT — Rune payment is automatic:
+- play_card auto-pays its full cost by tapping and/or recycling your runes as
+  needed.  You cannot manually tap or recycle runes — go straight to play_card.
+
+Rules for output:
+- Exactly ONE move per decision.  Multi-step plans happen across turns.
+- "reasoning" and "move" are MANDATORY.
+- If you are uncertain, still commit to one move and state the uncertainty
+  in reasoning rather than refusing or omitting the move.
+- On a rejected move, produce a NEW move that accounts for the rejection.
+
+[USER]
+## Recent game history (oldest first)
+  Turn 2 #14 [main_phase]: pass() → OK
+    Reasoning: Fallback: could not produce a valid decision within retry budget.
+  Turn 5 #15 [pending_choice]: choose_none() → OK
+    Reasoning: Given the current state, I have no playable cards due to exhausted resources and no available actions that can be taken. The only legal move is to 'choose none', which indicates that there are no pend
+  Turn 1 #0 [mulligan]: mulligan(card_ids=[blazing-scorcher-2,undercover-agent]) → OK
+    Reasoning: In the current mulligan phase, I need to decide whether to keep my initial hand or exchange some cards for potentially more useful ones. My current hand consists of cards that are too costly to play i
+  Turn 2 #1 [main_phase]: play_card(card_id=cemetery-attendant, destination=base) → OK
+    Reasoning: Given the current board state and available resources, I aim to establish a stronger board presence by playing a unit. The 'Cemetery Attendant' is a good choice because it has 3 Might and its ability 
+  Turn 2 #2 [main_phase]: end_turn() → OK
+    Reasoning: I have no playable cards due to exhausted resources, and I cannot move any units since my Cemetery Attendant is already at the base and exhausted. The only legal move available is to end the turn. Thi
+  Turn 3 #3 [showdown_focus]: pass() → OK
+    Reasoning: Currently, we are in a Showdown Open state, and I hold the focus. However, I have no playable cards in my hand due to exhausted resources, and the only legal move available is to pass. This is a non-c
+  Turn 4 #4 [main_phase]: play_card(card_id=chemtech-enforcer, destination=base) → OK
+    Reasoning: Given the current board state and my resources, I aim to establish a stronger board presence and potentially contest a battlefield. Playing 'Chemtech Enforcer' is a strategic move because it has Assau
+  Turn 4 #5 [main_phase]: move_unit(unit_ids=[cemetery-attendant], destination=battlefield-a) → OK
+    Reasoning: Given the current board state, I have the opportunity to contest battlefield-a, which is currently controlled by the opponent. Moving the Cemetery Attendant there will initiate a showdown, potentially
+  Turn 4 #6 [showdown_focus]: pass() → OK
+    Reasoning: We are currently in a Showdown Open state at battlefield-a, where my Cemetery Attendant is facing off against the opponent's Vi-Destructive. I have no playable cards in hand due to resource constraint
+  Turn 4 #7 [main_phase]: play_card(card_id=jinx-demolitionist, destination=base, from_champion=True) → OK
+    Reasoning: With limited resources and costly cards in hand, playing 'jinx-demolitionist' from the champion is the only actionable move. This could help establish board presence or provide utility for future turn
+
+[USER]
+## Opponent actions (recent, oldest first)
+  Turn 3: passed
+  Turn 1: played vi-destructive
+  Turn 1: ended their turn
+  Turn 3: moved unit to battlefield-a
+  Turn 3: passed
+  Turn 3: played raging-soul-3
+  Turn 3: ended their turn
+  Turn 4: passed
+
+[USER]
+## Current Decision
+
+Turn 4 | Phase: Main Phase | State: Neutral Open | Decision type: **pending_choice**
+My score: 0 | Opponent score: 1 | Victory: 8 pts
+
+Resources: 0E playable  [0 untapped (none) | 5 exhausted (3 chaos, 2 fury)]
+
+Hand (0 cards):
+
+My base units: chemtech-enforcer(2MHT*), cemetery-attendant(3MHT*), jinx-demolitionist(4MHT)
+Opponent base units: raging-soul-3(4MHT*)
+Opponent hand size: 4
+
+[battlefield-a] Zaun Warrens — P1
+  Effect: When you conquer here, discard 1, then draw 1.
+  Opp units: vi-destructive(3MHT)
+[battlefield-b] Targon's Peak — uncontrolled
+  Effect: When you conquer here, ready up to 2 runes at the end of this turn.
+
+Legal moves (3 total, first 3 shown):
+  choose yes
+  choose no
+  choose none
+
+=== PENDING CHOICE ===
+Options (use choose <option>): ['yes', 'no']
+======================
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 4  Type: main_phase  Game: Player 1-vs-Player 2  [2026-05-31T21:29:57Z]
+────────────────────────────────────────────────────────────────────────
+[SYSTEM]
+## Goal
+Win the game of Riftbound by reaching 8 victory points before your opponent.
+Control battlefields to score points each turn.  Contest your opponent's
+battlefields.  Protect your own.  Play to win; do not stall.
+
+## Role and Boundaries
+- You are a player agent for one seat (my_player_index in the brief state).
+- You propose exactly one legal move per decision.
+- Godot owns the rules engine and validates every move.
+- If a move is rejected as illegal, read the rejection reason and propose a
+  different legal move.
+- Never try to access or infer hidden information you are not entitled to.
+
+## Behavioral Guidance
+- Be decisive.  Uncertainty about the best play is not a reason to pass;
+  prefer a plausible advancing move over a pass.
+- When uncertain about a rules interaction, call lookup_rule rather than guess.
+- Call list_legal_moves when you want a concrete option set to reason over;
+  the brief state already includes one, but list_legal_moves is always fresh.
+- Keep reasoning concise — two to four sentences focused on why this move,
+  not a full game recap.
+- Prioritize board presence and score advancement over hand hoarding.
+- State assumptions explicitly in reasoning so errors are reviewable.
+
+
+
+## Riftbound — High-Frequency Rules (memorize these; do not call lookup_rule)
+
+### Turn Structure
+1. Awaken Phase — ready all your permanents.
+2. Beginning Phase — score 1 point per battlefield you control (Hold).
+3. Channel Phase — take top 2 Runes from your Rune Deck onto the board.
+4. Draw Phase — draw 1 card; both players' Rune Pools empty.
+5. Main Phase — your primary action window (Neutral Open state).
+6. Ending Phase — heal all units; expire "this turn" effects; Rune Pool empties.
+
+### Resources
+- Cards have an Energy Cost (number) and optional Power Cost (domain symbols).
+- **play_card auto-pays**: the engine automatically taps and/or recycles your
+  runes to cover the full cost.  You never manually manage runes — just play_card.
+- Rune Pool (Energy + domain Power) empties at end of Draw Phase and each turn.
+
+### Reading your resources (IMPORTANT)
+- The brief state shows one resource line: `Resources: XE playable  [N untapped ...]`
+- **XE playable is the number to use for affordability.** It equals untapped runes
+  plus any floating energy already in the pool (rare, from card/ability effects).
+- Each untapped rune auto-taps when you play_card, giving +1E and +1 domain power.
+- Domain power (FUR, MIN, etc.) works the same way — the displayed totals already
+  include both rune contributions and any floating pool power.
+- Cards in hand are pre-labelled [PLAYABLE] or [too costly] based on this.
+  Trust those labels; do not recompute from raw pool fields.
+- "Floating" energy/power (from ability effects, not runes) is called out
+  explicitly when present; otherwise the pool is empty and runes are the resource.
+
+### Units
+- Permanents — stay on board after play.
+  Units are ALWAYS played to base.  Use `destination: "base"` or omit the field
+  entirely.
+- Enter exhausted when played to base (cannot act that turn), unless Accelerate.
+- Use `move_unit` on a later action to send a ready base unit to a Battlefield.
+- Standard Move: exhaust a unit to move it Base ↔ Battlefield (cost: Exhaust).
+- Die during Cleanup when damage ≥ Might.
+- Damage heals at end of each player's turn and after Combat.
+
+### Runes
+- Channeled each turn (2 per turn, 3 for the second player on their first turn).
+- Payment is handled automatically when you play a card or use an ability.
+
+### Battlefields
+- Moving a unit into a battlefield you don't control triggers a Showdown.
+- Opponent already there → Combat Showdown (combat starts).
+- Empty uncontrolled → Non-Combat Showdown.
+
+### Combat (summary)
+- Attacker and Defender units engage.
+- Both sides can play Action/Reaction cards (Showdown window).
+- Damage step: Attacker assigns Might across enemy units (lethal damage first;
+  Tank units must receive lethal before others).
+- After damage, units heal; Attacker recalls if Defenders survive.
+- Win: only your units remain → you gain Control of the battlefield.
+
+### Turn States
+- Neutral Open: Main Phase, no Chain.  Only Turn Player acts.
+- Neutral Closed: Chain exists, no Showdown.  Only Reactions.
+- Showdown Open: Showdown/Combat active, no Chain.  Player with Focus acts.
+- Showdown Closed: Showdown/Combat active, Chain exists.  Only Reactions.
+
+### Win Condition (1v1 Duel)
+- Victory Score: 8 points.
+- Score via Hold (start-of-turn, per controlled battlefield) or Conquer
+  (first time you take a battlefield each turn).
+- Win is checked on every Cleanup: ≥ 8 points AND more points than your
+  opponent → you win immediately.
+- Conquer + last point: only counts if you also scored every battlefield that turn.
+
+### Priority / Focus
+- Priority: right to act.  One player holds it at a time.
+- Focus: right to act during Showdown.  Passes between players alternately.
+- "pass" gives up Priority or Focus.
+- When all players pass in sequence during a Showdown → Showdown closes.
+
+### Key Keywords
+- Assault [X]: +X Might while attacking.
+- Shield [X]: +X Might while defending.
+- Tank: must receive lethal damage before non-Tank friendly units.
+- Ganking: unit may Standard Move Battlefield → Battlefield.
+- Accelerate: pay +1 Energy + 1 Power to enter Ready instead of Exhausted.
+- Legion: cost reduced by 2 if you played another card this turn.
+- Reaction: can be played during Closed states on any player's turn.
+- Action: can be played during Showdown Open states.
+- Deflect [X]: enemy spells/abilities targeting this cost X more Power.
+- Deathknell: triggers when the unit dies.
+
+
+
+## Output Contract — STRICTLY REQUIRED
+
+You MUST always respond with a single JSON object and NOTHING ELSE.
+No markdown fences, no explanatory text, no trailing notes — only raw JSON.
+
+Required shape:
+{
+  "reasoning": "A concise explanation of why this move was chosen: the
+                situation as you read it, the options you considered, the
+                expected outcome, and any assumptions or uncertainty.",
+  "move": {
+    "action": "<one of the action names below>",
+    "parameters": { ... action-specific fields ... }
+  },
+  "confidence": "(optional) high / medium / low",
+  "alternatives_considered": "(optional) ONE plain string sentence describing other moves weighed — NOT an array"
+}
+
+Action names and their required parameters:
+  mulligan_keep          {}
+  mulligan               {"card_ids": ["<id>", ...]}     # 1 or 2 card IDs
+  play_card              {"card_id": "<id>",
+                          "destination": "<base|"">",
+                          "target_id": "<id or "">",
+                          "from_champion": false,
+                          "from_hidden": false,
+                          "accelerate": false}
+  move_unit              {"unit_ids": ["<id>", ...],
+                          "destination": "<battlefield-a|battlefield-b|base>"}
+  pass                   {}
+  end_turn               {}
+  use_ability            {"card_id": "<id>", "target_id": "<id or "">"}
+  react                  {"card_id": "<id>", "target_id": "<id or "">"}
+  assign_damage          {"amount": <int>, "target_id": "<id>"}
+  assign_done            {}
+  choose                 {"target_id": "<id>"}
+  choose_none            {}
+
+IMPORTANT — Rune payment is automatic:
+- play_card auto-pays its full cost by tapping and/or recycling your runes as
+  needed.  You cannot manually tap or recycle runes — go straight to play_card.
+
+Rules for output:
+- Exactly ONE move per decision.  Multi-step plans happen across turns.
+- "reasoning" and "move" are MANDATORY.
+- If you are uncertain, still commit to one move and state the uncertainty
+  in reasoning rather than refusing or omitting the move.
+- On a rejected move, produce a NEW move that accounts for the rejection.
+
+[USER]
+## Recent game history (oldest first)
+  Turn 5 #15 [pending_choice]: choose_none() → OK
+    Reasoning: Given the current state, I have no playable cards due to exhausted resources and no available actions that can be taken. The only legal move is to 'choose none', which indicates that there are no pend
+  Turn 1 #0 [mulligan]: mulligan(card_ids=[blazing-scorcher-2,undercover-agent]) → OK
+    Reasoning: In the current mulligan phase, I need to decide whether to keep my initial hand or exchange some cards for potentially more useful ones. My current hand consists of cards that are too costly to play i
+  Turn 2 #1 [main_phase]: play_card(card_id=cemetery-attendant, destination=base) → OK
+    Reasoning: Given the current board state and available resources, I aim to establish a stronger board presence by playing a unit. The 'Cemetery Attendant' is a good choice because it has 3 Might and its ability 
+  Turn 2 #2 [main_phase]: end_turn() → OK
+    Reasoning: I have no playable cards due to exhausted resources, and I cannot move any units since my Cemetery Attendant is already at the base and exhausted. The only legal move available is to end the turn. Thi
+  Turn 3 #3 [showdown_focus]: pass() → OK
+    Reasoning: Currently, we are in a Showdown Open state, and I hold the focus. However, I have no playable cards in my hand due to exhausted resources, and the only legal move available is to pass. This is a non-c
+  Turn 4 #4 [main_phase]: play_card(card_id=chemtech-enforcer, destination=base) → OK
+    Reasoning: Given the current board state and my resources, I aim to establish a stronger board presence and potentially contest a battlefield. Playing 'Chemtech Enforcer' is a strategic move because it has Assau
+  Turn 4 #5 [main_phase]: move_unit(unit_ids=[cemetery-attendant], destination=battlefield-a) → OK
+    Reasoning: Given the current board state, I have the opportunity to contest battlefield-a, which is currently controlled by the opponent. Moving the Cemetery Attendant there will initiate a showdown, potentially
+  Turn 4 #6 [showdown_focus]: pass() → OK
+    Reasoning: We are currently in a Showdown Open state at battlefield-a, where my Cemetery Attendant is facing off against the opponent's Vi-Destructive. I have no playable cards in hand due to resource constraint
+  Turn 4 #7 [main_phase]: play_card(card_id=jinx-demolitionist, destination=base, from_champion=True) → OK
+    Reasoning: With limited resources and costly cards in hand, playing 'jinx-demolitionist' from the champion is the only actionable move. This could help establish board presence or provide utility for future turn
+  Turn 4 #8 [pending_choice]: choose(target_id=no) → OK
+    Reasoning: Given the current board state, I have no cards in hand and no energy resources available to play any cards. The pending choice likely relates to an optional action or effect that I can choose to activ
+
+[USER]
+## Opponent actions (recent, oldest first)
+  Turn 3: passed
+  Turn 1: played vi-destructive
+  Turn 1: ended their turn
+  Turn 3: moved unit to battlefield-a
+  Turn 3: passed
+  Turn 3: played raging-soul-3
+  Turn 3: ended their turn
+  Turn 4: passed
+
+[USER]
+## Current Decision
+
+Turn 4 | Phase: Main Phase | State: Neutral Open | Decision type: **main_phase**
+My score: 0 | Opponent score: 1 | Victory: 8 pts
+
+Resources: 0E playable  [0 untapped (none) | 5 exhausted (3 chaos, 2 fury)]
+
+Hand (0 cards):
+
+My base units: chemtech-enforcer(2MHT*), cemetery-attendant(3MHT*), jinx-demolitionist(4MHT)
+Opponent base units: raging-soul-3(4MHT*)
+Opponent hand size: 4
+
+[battlefield-a] Zaun Warrens — P1
+  Effect: When you conquer here, discard 1, then draw 1.
+  Opp units: vi-destructive(3MHT)
+[battlefield-b] Targon's Peak — uncontrolled
+  Effect: When you conquer here, ready up to 2 runes at the end of this turn.
+
+Legal moves (3 total, first 3 shown):
+  move jinx-demolitionist to battlefield-a
+  move jinx-demolitionist to battlefield-b
+  end turn
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 4  Type: showdown_focus  Game: Player 1-vs-Player 2  [2026-05-31T21:30:00Z]
+────────────────────────────────────────────────────────────────────────
+[SYSTEM]
+## Goal
+Win the game of Riftbound by reaching 8 victory points before your opponent.
+Control battlefields to score points each turn.  Contest your opponent's
+battlefields.  Protect your own.  Play to win; do not stall.
+
+## Role and Boundaries
+- You are a player agent for one seat (my_player_index in the brief state).
+- You propose exactly one legal move per decision.
+- Godot owns the rules engine and validates every move.
+- If a move is rejected as illegal, read the rejection reason and propose a
+  different legal move.
+- Never try to access or infer hidden information you are not entitled to.
+
+## Behavioral Guidance
+- Be decisive.  Uncertainty about the best play is not a reason to pass;
+  prefer a plausible advancing move over a pass.
+- When uncertain about a rules interaction, call lookup_rule rather than guess.
+- Call list_legal_moves when you want a concrete option set to reason over;
+  the brief state already includes one, but list_legal_moves is always fresh.
+- Keep reasoning concise — two to four sentences focused on why this move,
+  not a full game recap.
+- Prioritize board presence and score advancement over hand hoarding.
+- State assumptions explicitly in reasoning so errors are reviewable.
+
+
+
+## Riftbound — High-Frequency Rules (memorize these; do not call lookup_rule)
+
+### Turn Structure
+1. Awaken Phase — ready all your permanents.
+2. Beginning Phase — score 1 point per battlefield you control (Hold).
+3. Channel Phase — take top 2 Runes from your Rune Deck onto the board.
+4. Draw Phase — draw 1 card; both players' Rune Pools empty.
+5. Main Phase — your primary action window (Neutral Open state).
+6. Ending Phase — heal all units; expire "this turn" effects; Rune Pool empties.
+
+### Resources
+- Cards have an Energy Cost (number) and optional Power Cost (domain symbols).
+- **play_card auto-pays**: the engine automatically taps and/or recycles your
+  runes to cover the full cost.  You never manually manage runes — just play_card.
+- Rune Pool (Energy + domain Power) empties at end of Draw Phase and each turn.
+
+### Reading your resources (IMPORTANT)
+- The brief state shows one resource line: `Resources: XE playable  [N untapped ...]`
+- **XE playable is the number to use for affordability.** It equals untapped runes
+  plus any floating energy already in the pool (rare, from card/ability effects).
+- Each untapped rune auto-taps when you play_card, giving +1E and +1 domain power.
+- Domain power (FUR, MIN, etc.) works the same way — the displayed totals already
+  include both rune contributions and any floating pool power.
+- Cards in hand are pre-labelled [PLAYABLE] or [too costly] based on this.
+  Trust those labels; do not recompute from raw pool fields.
+- "Floating" energy/power (from ability effects, not runes) is called out
+  explicitly when present; otherwise the pool is empty and runes are the resource.
+
+### Units
+- Permanents — stay on board after play.
+  Units are ALWAYS played to base.  Use `destination: "base"` or omit the field
+  entirely.
+- Enter exhausted when played to base (cannot act that turn), unless Accelerate.
+- Use `move_unit` on a later action to send a ready base unit to a Battlefield.
+- Standard Move: exhaust a unit to move it Base ↔ Battlefield (cost: Exhaust).
+- Die during Cleanup when damage ≥ Might.
+- Damage heals at end of each player's turn and after Combat.
+
+### Runes
+- Channeled each turn (2 per turn, 3 for the second player on their first turn).
+- Payment is handled automatically when you play a card or use an ability.
+
+### Battlefields
+- Moving a unit into a battlefield you don't control triggers a Showdown.
+- Opponent already there → Combat Showdown (combat starts).
+- Empty uncontrolled → Non-Combat Showdown.
+
+### Combat (summary)
+- Attacker and Defender units engage.
+- Both sides can play Action/Reaction cards (Showdown window).
+- Damage step: Attacker assigns Might across enemy units (lethal damage first;
+  Tank units must receive lethal before others).
+- After damage, units heal; Attacker recalls if Defenders survive.
+- Win: only your units remain → you gain Control of the battlefield.
+
+### Turn States
+- Neutral Open: Main Phase, no Chain.  Only Turn Player acts.
+- Neutral Closed: Chain exists, no Showdown.  Only Reactions.
+- Showdown Open: Showdown/Combat active, no Chain.  Player with Focus acts.
+- Showdown Closed: Showdown/Combat active, Chain exists.  Only Reactions.
+
+### Win Condition (1v1 Duel)
+- Victory Score: 8 points.
+- Score via Hold (start-of-turn, per controlled battlefield) or Conquer
+  (first time you take a battlefield each turn).
+- Win is checked on every Cleanup: ≥ 8 points AND more points than your
+  opponent → you win immediately.
+- Conquer + last point: only counts if you also scored every battlefield that turn.
+
+### Priority / Focus
+- Priority: right to act.  One player holds it at a time.
+- Focus: right to act during Showdown.  Passes between players alternately.
+- "pass" gives up Priority or Focus.
+- When all players pass in sequence during a Showdown → Showdown closes.
+
+### Key Keywords
+- Assault [X]: +X Might while attacking.
+- Shield [X]: +X Might while defending.
+- Tank: must receive lethal damage before non-Tank friendly units.
+- Ganking: unit may Standard Move Battlefield → Battlefield.
+- Accelerate: pay +1 Energy + 1 Power to enter Ready instead of Exhausted.
+- Legion: cost reduced by 2 if you played another card this turn.
+- Reaction: can be played during Closed states on any player's turn.
+- Action: can be played during Showdown Open states.
+- Deflect [X]: enemy spells/abilities targeting this cost X more Power.
+- Deathknell: triggers when the unit dies.
+
+
+
+## Output Contract — STRICTLY REQUIRED
+
+You MUST always respond with a single JSON object and NOTHING ELSE.
+No markdown fences, no explanatory text, no trailing notes — only raw JSON.
+
+Required shape:
+{
+  "reasoning": "A concise explanation of why this move was chosen: the
+                situation as you read it, the options you considered, the
+                expected outcome, and any assumptions or uncertainty.",
+  "move": {
+    "action": "<one of the action names below>",
+    "parameters": { ... action-specific fields ... }
+  },
+  "confidence": "(optional) high / medium / low",
+  "alternatives_considered": "(optional) ONE plain string sentence describing other moves weighed — NOT an array"
+}
+
+Action names and their required parameters:
+  mulligan_keep          {}
+  mulligan               {"card_ids": ["<id>", ...]}     # 1 or 2 card IDs
+  play_card              {"card_id": "<id>",
+                          "destination": "<base|"">",
+                          "target_id": "<id or "">",
+                          "from_champion": false,
+                          "from_hidden": false,
+                          "accelerate": false}
+  move_unit              {"unit_ids": ["<id>", ...],
+                          "destination": "<battlefield-a|battlefield-b|base>"}
+  pass                   {}
+  end_turn               {}
+  use_ability            {"card_id": "<id>", "target_id": "<id or "">"}
+  react                  {"card_id": "<id>", "target_id": "<id or "">"}
+  assign_damage          {"amount": <int>, "target_id": "<id>"}
+  assign_done            {}
+  choose                 {"target_id": "<id>"}
+  choose_none            {}
+
+IMPORTANT — Rune payment is automatic:
+- play_card auto-pays its full cost by tapping and/or recycling your runes as
+  needed.  You cannot manually tap or recycle runes — go straight to play_card.
+
+Rules for output:
+- Exactly ONE move per decision.  Multi-step plans happen across turns.
+- "reasoning" and "move" are MANDATORY.
+- If you are uncertain, still commit to one move and state the uncertainty
+  in reasoning rather than refusing or omitting the move.
+- On a rejected move, produce a NEW move that accounts for the rejection.
+
+[USER]
+## Recent game history (oldest first)
+  Turn 1 #0 [mulligan]: mulligan(card_ids=[blazing-scorcher-2,undercover-agent]) → OK
+    Reasoning: In the current mulligan phase, I need to decide whether to keep my initial hand or exchange some cards for potentially more useful ones. My current hand consists of cards that are too costly to play i
+  Turn 2 #1 [main_phase]: play_card(card_id=cemetery-attendant, destination=base) → OK
+    Reasoning: Given the current board state and available resources, I aim to establish a stronger board presence by playing a unit. The 'Cemetery Attendant' is a good choice because it has 3 Might and its ability 
+  Turn 2 #2 [main_phase]: end_turn() → OK
+    Reasoning: I have no playable cards due to exhausted resources, and I cannot move any units since my Cemetery Attendant is already at the base and exhausted. The only legal move available is to end the turn. Thi
+  Turn 3 #3 [showdown_focus]: pass() → OK
+    Reasoning: Currently, we are in a Showdown Open state, and I hold the focus. However, I have no playable cards in my hand due to exhausted resources, and the only legal move available is to pass. This is a non-c
+  Turn 4 #4 [main_phase]: play_card(card_id=chemtech-enforcer, destination=base) → OK
+    Reasoning: Given the current board state and my resources, I aim to establish a stronger board presence and potentially contest a battlefield. Playing 'Chemtech Enforcer' is a strategic move because it has Assau
+  Turn 4 #5 [main_phase]: move_unit(unit_ids=[cemetery-attendant], destination=battlefield-a) → OK
+    Reasoning: Given the current board state, I have the opportunity to contest battlefield-a, which is currently controlled by the opponent. Moving the Cemetery Attendant there will initiate a showdown, potentially
+  Turn 4 #6 [showdown_focus]: pass() → OK
+    Reasoning: We are currently in a Showdown Open state at battlefield-a, where my Cemetery Attendant is facing off against the opponent's Vi-Destructive. I have no playable cards in hand due to resource constraint
+  Turn 4 #7 [main_phase]: play_card(card_id=jinx-demolitionist, destination=base, from_champion=True) → OK
+    Reasoning: With limited resources and costly cards in hand, playing 'jinx-demolitionist' from the champion is the only actionable move. This could help establish board presence or provide utility for future turn
+  Turn 4 #8 [pending_choice]: choose(target_id=no) → OK
+    Reasoning: Given the current board state, I have no cards in hand and no energy resources available to play any cards. The pending choice likely relates to an optional action or effect that I can choose to activ
+  Turn 4 #9 [main_phase]: move_unit(unit_ids=[jinx-demolitionist], destination=battlefield-b) → OK
+    Reasoning: Given the current board state, I have no cards in hand and no energy resources available to play any cards. My opponent controls battlefield-a, and battlefield-b is uncontrolled. Moving the 'jinx-demo
+
+[USER]
+## Opponent actions (recent, oldest first)
+  Turn 3: passed
+  Turn 1: played vi-destructive
+  Turn 1: ended their turn
+  Turn 3: moved unit to battlefield-a
+  Turn 3: passed
+  Turn 3: played raging-soul-3
+  Turn 3: ended their turn
+  Turn 4: passed
+
+[USER]
+## Current Decision
+
+Turn 4 | Phase: Main Phase | State: Showdown Open | Decision type: **showdown_focus**
+My score: 0 | Opponent score: 1 | Victory: 8 pts
+
+Resources: 0E playable  [0 untapped (none) | 5 exhausted (3 chaos, 2 fury)]
+
+Hand (0 cards):
+
+My base units: chemtech-enforcer(2MHT*), cemetery-attendant(3MHT*)
+Opponent base units: raging-soul-3(4MHT*)
+Opponent hand size: 4
+
+[battlefield-a] Zaun Warrens — P1
+  Effect: When you conquer here, discard 1, then draw 1.
+  Opp units: vi-destructive(3MHT)
+[battlefield-b] Targon's Peak — uncontrolled
+  Effect: When you conquer here, ready up to 2 runes at the end of this turn.
+  My units: jinx-demolitionist(4MHT)
+
+Legal moves (1 total, first 1 shown):
+  pass
+

@@ -14,6 +14,7 @@
     "power_cost": [],
     "is_basic": true,
     "keywords": [],
+    "effect_text": "Tap: Add 1 energy to your pool.\nRecycle: Add 1 Fury power to your pool.",
     "abilities": [
       {
         "ability_id": "fury-rune-tap",
@@ -71,6 +72,7 @@
     "power_cost": [],
     "is_basic": true,
     "keywords": [],
+    "effect_text": "Tap: Add 1 energy to your pool.\nRecycle: Add 1 Chaos power to your pool.",
     "abilities": [
       {
         "ability_id": "chaos-rune-tap",

@@ -15,6 +15,7 @@
     "power_cost": [],
     "might_bonus": null,
     "keywords": [],
+    "effect_text": "When this is played, discarded, or killed, draw 1.",
     "abilities": [
       {
         "ability_id": "scrapheap-on-play",

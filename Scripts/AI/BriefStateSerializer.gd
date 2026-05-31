@@ -51,6 +51,7 @@ static func serialize(gs: GameState, player_index: int) -> Dictionary:
 
 		# Pending choice context
 		"pending_choice_options": _pending_choices(gs),
+		"pending_choice_context": _pending_choice_context(gs),
 
 		# Combat assignment context
 		"combat_assignment_active": gs.combat_assignment_active,
@@ -119,6 +120,7 @@ static func _serialize_hand(ps: PlayerState) -> Array:
 			"keywords": keywords,
 			"is_reaction": c.definition.is_reaction,
 			"is_action": c.definition.is_action,
+			"effect_text": c.definition.effect_text,
 		})
 	return result
 
@@ -149,6 +151,7 @@ static func _serialize_unit(u: CardInstance) -> Dictionary:
 		"keywords": keywords,
 		"is_attacker": u.is_attacker,
 		"is_defender": u.is_defender,
+		"effect_text": u.definition.effect_text,
 	}
 
 
@@ -163,6 +166,9 @@ static func _serialize_champion(champion: CardInstance) -> Variant:
 static func _serialize_battlefields(gs: GameState, player_index: int) -> Array:
 	var result: Array = []
 	for bf in gs.board.battlefields:
+		var bf_effect := ""
+		if bf.card_def:
+			bf_effect = bf.card_def.effect_text
 		result.append({
 			"battlefield_id": bf.battlefield_id,
 			"display_name": bf.display_name,
@@ -171,6 +177,7 @@ static func _serialize_battlefields(gs: GameState, player_index: int) -> Array:
 			"opponent_units": _serialize_units(bf.units[1 - player_index]),
 			"is_contested": bf.is_contested,
 			"has_facedown": bf.facedown_card != null,
+			"effect_text": bf_effect,
 		})
 	return result
 
@@ -214,7 +221,50 @@ static func _legal_categories(gs: GameState, player_index: int) -> Array:
 static func _pending_choices(gs: GameState) -> Array:
 	if gs.pending_prompt.is_empty():
 		return []
-	return gs.pending_prompt.get("valid_choices", [])
+	var choices = gs.pending_prompt.get("valid_choices", [])
+	var result: Array = []
+	for c in choices:
+		if c is CardInstance:
+			result.append(c.instance_id)
+		else:
+			result.append(str(c))
+	return result
+
+
+static func _pending_choice_context(gs: GameState) -> Dictionary:
+	if gs.pending_prompt.is_empty():
+		return {}
+
+	var result: Dictionary = {
+		"prompt_text": gs.pending_prompt.get("prompt", ""),
+		"prompt_type": gs.pending_prompt.get("type", ""),
+	}
+
+	# Source card (e.g. the unit whose triggered ability fired)
+	var source = gs.pending_prompt.get("source", null)
+	if source != null and source is CardInstance:
+		result["source_card_name"] = source.definition.name
+		result["source_card_id"] = source.instance_id
+		if source.definition.effect_text:
+			result["source_effect_text"] = source.definition.effect_text
+
+	# Ability description for triggered / optional ability prompts
+	var ab: Dictionary = gs.pending_prompt.get("ability", {})
+	if not ab.is_empty():
+		var parts: Array = []
+		var timing: String = ab.get("timing", "")
+		if timing != "":
+			parts.append("trigger: %s" % timing)
+		var effect_type: String = ab.get("effect_type", "")
+		if effect_type != "":
+			parts.append("effect: %s" % effect_type)
+		var cost: Dictionary = ab.get("cost", {})
+		if not cost.is_empty():
+			parts.append("cost: %s" % CostCalculator.cost_to_string(cost))
+		if not parts.is_empty():
+			result["ability_description"] = "; ".join(parts)
+
+	return result
 
 
 # ── Game ID ───────────────────────────────────────────────────────────────────

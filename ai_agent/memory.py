@@ -42,6 +42,25 @@ CREATE TABLE IF NOT EXISTS decisions (
     timestamp        TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_game_turn ON decisions (game_id, turn, decision_index);
+
+CREATE TABLE IF NOT EXISTS opponent_actions (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id   TEXT    NOT NULL,
+    turn      INTEGER NOT NULL,
+    action    TEXT    NOT NULL,
+    timestamp TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_opp_game ON opponent_actions (game_id, turn);
+
+CREATE TABLE IF NOT EXISTS games (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id      TEXT UNIQUE NOT NULL,
+    outcome      TEXT,          -- 'win' | 'loss' | 'draw' | NULL = in progress
+    my_score     INTEGER,
+    opp_score    INTEGER,
+    turns_played INTEGER,
+    timestamp    TEXT NOT NULL
+);
 """
 
 # Maximum number of recent events to inject into context
@@ -122,6 +141,21 @@ class Memory:
                 (1 if accepted else 0, rejection_reason, row_id),
             )
 
+    def update_acceptance_by_game(self, game_id: str, accepted: bool, rejection_reason: Optional[str] = None) -> None:
+        """Update the most recent unresolved decision for a game. Called via /outcome."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE decisions SET accepted=?, rejection_reason=?
+                WHERE id = (
+                    SELECT id FROM decisions
+                    WHERE game_id=? AND accepted IS NULL
+                    ORDER BY id DESC LIMIT 1
+                )
+                """,
+                (1 if accepted else 0, rejection_reason, game_id),
+            )
+
     def update_outcome(self, row_id: int, outcome_summary: str) -> None:
         with self._connect() as conn:
             conn.execute(
@@ -129,7 +163,56 @@ class Memory:
                 (outcome_summary, row_id),
             )
 
+    def record_opponent_action(self, *, game_id: str, turn: int, action: str) -> None:
+        """Append a visible opponent action. Called via /opponent_action."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO opponent_actions (game_id, turn, action, timestamp) VALUES (?,?,?,?)",
+                (game_id, turn, action, now),
+            )
+
+    def record_game_outcome(
+        self,
+        *,
+        game_id: str,
+        outcome: str,
+        my_score: int,
+        opp_score: int,
+        turns_played: int,
+    ) -> None:
+        """Upsert a completed game record. Called via /game_over."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO games (game_id, outcome, my_score, opp_score, turns_played, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(game_id) DO UPDATE SET
+                    outcome=excluded.outcome,
+                    my_score=excluded.my_score,
+                    opp_score=excluded.opp_score,
+                    turns_played=excluded.turns_played,
+                    timestamp=excluded.timestamp
+                """,
+                (game_id, outcome, my_score, opp_score, turns_played, now),
+            )
+
     # ── Reading ───────────────────────────────────────────────────────────────
+
+    def opponent_slice(self, game_id: str, n: int = 8) -> str:
+        """Return the last n opponent actions for this game as a formatted context string."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT turn, action FROM opponent_actions WHERE game_id=? ORDER BY id DESC LIMIT ?",
+                (game_id, n),
+            ).fetchall()
+        if not rows:
+            return ""
+        lines = ["## Opponent actions (recent, oldest first)"]
+        for row in reversed(rows):
+            lines.append(f"  Turn {row['turn']}: {row['action']}")
+        return "\n".join(lines)
 
     def recent_slice(self, game_id: str, n: int = RECENT_SLICE_SIZE) -> str:
         """Return the last n decisions for this game as a formatted context string."""

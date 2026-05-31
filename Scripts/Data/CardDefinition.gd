@@ -12,6 +12,7 @@ extends Resource
 @export var keywords: Array = []
 @export var abilities: Array = []
 @export var flavor_text: String = ""
+@export var effect_text: String = ""
 
 # Unit fields
 @export var might: int = 0

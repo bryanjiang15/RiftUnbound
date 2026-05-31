@@ -13,6 +13,7 @@
     "power_cost": [],
     "facedown_capacity": 1,
     "keywords": [],
+    "effect_text": "When you conquer here, discard 1, then draw 1.",
     "abilities": [
       {
         "ability_id": "zaun-warrens-conquer",
@@ -46,6 +47,7 @@
     "power_cost": [],
     "facedown_capacity": 1,
     "keywords": [],
+    "effect_text": "When you conquer here, ready up to 2 runes at the end of this turn.",
     "abilities": [
       {
         "ability_id": "targons-peak-conquer",
@@ -79,6 +81,7 @@
     "power_cost": [],
     "facedown_capacity": 1,
     "keywords": [],
+    "effect_text": "When you defend here, you may move a friendly unit here to base.",
     "abilities": [
       {
         "ability_id": "reavers-row-defend",

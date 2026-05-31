@@ -15,6 +15,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from openai import AsyncOpenAI
@@ -26,6 +28,9 @@ from .schemas import Decision, Move
 from .system_prompt import build_system_prompt
 
 logger = logging.getLogger(__name__)
+
+_INPUT_LOG_PATH = Path(__file__).resolve().parent / "agent_inputs.log"
+_LOG_INPUTS: bool = os.environ.get("RIFTBOUND_LOG_INPUTS", "0").strip() not in ("0", "", "false", "no")
 
 # Maximum tool-call rounds before we give up and emit a decision
 MAX_TOOL_ROUNDS = 6
@@ -217,6 +222,34 @@ _PASS_DECISION = Decision(
 )
 
 
+def _log_input(game_id: str, brief_state: dict, messages: list) -> None:
+    """Write a snapshot of the full agent input to agent_inputs.log."""
+    if not _LOG_INPUTS:
+        return
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sep = "─" * 72
+    lines = [
+        "",
+        sep,
+        f"Turn {brief_state.get('turn_number', '?')}  "
+        f"Type: {brief_state.get('decision_type', '?')}  "
+        f"Game: {game_id}  [{ts}]",
+        sep,
+    ]
+    for msg in messages:
+        role = msg.get("role", "?").upper()
+        content = msg.get("content") or ""
+        if content:
+            lines.append(f"[{role}]")
+            lines.append(content)
+            lines.append("")
+    try:
+        with _INPUT_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError as exc:
+        logger.warning("Input log write failed: %s", exc)
+
+
 # ── Main reasoning loop ───────────────────────────────────────────────────────
 
 
@@ -238,10 +271,15 @@ async def decide(
         {"role": "system", "content": system},
     ]
 
-    # Inject memory slice
+    # Inject own decision history for this game
     mem_slice = memory.recent_slice(game_id)
     if mem_slice:
         messages.append({"role": "user", "content": mem_slice})
+
+    # Inject opponent action history for this game
+    opp_slice = memory.opponent_slice(game_id)
+    if opp_slice:
+        messages.append({"role": "user", "content": opp_slice})
 
     # Brief state as the main user message
     brief_summary = _format_brief_state(brief_state)
@@ -251,9 +289,13 @@ async def decide(
             f"\n\n## Previous Move Was Rejected\n"
             f"Rejected move: {json.dumps(rejection_context.get('rejected_move', {}))}\n"
             f"Reason: {rejection_context.get('rejection_reason', 'unknown')}\n"
-            f"Please choose a different legal move."
+            f"In one sentence, state what you misunderstood or assumed incorrectly. "
+            f"Then produce a corrected move."
         )
     messages.append({"role": "user", "content": user_content})
+
+    # Optionally record full input for debugging (set RIFTBOUND_LOG_INPUTS=1)
+    _log_input(game_id, brief_state, messages)
 
     # Tool-use loop
     for round_num in range(MAX_TOOL_ROUNDS):
@@ -335,26 +377,83 @@ def _format_brief_state(bs: dict) -> str:
                  f"Victory: 8 pts")
     lines.append("")
 
-    # Resources
-    lines.append(f"Energy: {bs.get('my_energy', 0)} | Power: {bs.get('my_power', {})}")
-    rune_strs = [
-        f"rune-{r['rune_index']}({r['domain']}{'*' if r['is_exhausted'] else ''})"
-        for r in bs.get("my_runes", [])
-    ]
-    if rune_strs:
-        lines.append(f"Runes: {', '.join(rune_strs)}")
+    # Resources — compute total playable energy from pool + untapped runes
+    runes = bs.get("my_runes", [])
+    untapped_runes = [r for r in runes if not r.get("is_exhausted", False)]
+    exhausted_runes = [r for r in runes if r.get("is_exhausted", False)]
+    pool_energy = bs.get("my_energy", 0)
+    pool_power: dict = bs.get("my_power", {}) or {}
+    total_energy = pool_energy + len(untapped_runes)
+
+    # Domain power available = pool power + one per untapped rune of that domain
+    total_power: dict[str, int] = dict(pool_power)
+    for r in untapped_runes:
+        d = r.get("domain", "")
+        total_power[d] = total_power.get(d, 0) + 1
+
+    # Compact rune summary: "3 untapped (1 fury, 2 mind) | 1 exhausted (1 fury)"
+    untapped_by_domain: dict[str, int] = {}
+    for r in untapped_runes:
+        d = r.get("domain", "")
+        untapped_by_domain[d] = untapped_by_domain.get(d, 0) + 1
+    exhausted_by_domain: dict[str, int] = {}
+    for r in exhausted_runes:
+        d = r.get("domain", "")
+        exhausted_by_domain[d] = exhausted_by_domain.get(d, 0) + 1
+    untapped_summary = ", ".join(
+        f"{n} {d}" for d, n in sorted(untapped_by_domain.items())
+    ) or "none"
+    exhausted_summary = ", ".join(
+        f"{n} {d}" for d, n in sorted(exhausted_by_domain.items())
+    )
+    rune_summary = f"{len(untapped_runes)} untapped ({untapped_summary})"
+    if exhausted_runes:
+        rune_summary += f" | {len(exhausted_runes)} exhausted ({exhausted_summary})"
+    power_str = (
+        "  " + " ".join(f"{d.upper()[:3]}×{n}" for d, n in sorted(total_power.items()))
+        if total_power else ""
+    )
+    lines.append(f"Resources: {total_energy}E playable{power_str}  [{rune_summary}]")
+
+    # Floating energy/power: only shown when the pool has non-zero values from
+    # card effects or abilities (rare — normally the pool is empty at Main Phase).
+    floating_power = {d: v for d, v in pool_power.items() if v > 0}
+    if pool_energy > 0 or floating_power:
+        extra_parts = []
+        if pool_energy > 0:
+            extra_parts.append(f"+{pool_energy}E")
+        for d, v in sorted(floating_power.items()):
+            extra_parts.append(f"+{v} {d.upper()[:3]}")
+        lines.append(f"  (includes {' '.join(extra_parts)} floating from card/ability effects)")
+
     lines.append("")
 
-    # Hand
+    # Hand — annotate each card with affordability given rune situation
     hand = bs.get("my_hand", [])
     lines.append(f"Hand ({len(hand)} cards):")
     for c in hand:
-        cost = f"{c.get('energy_cost', 0)}E"
-        if c.get("power_cost"):
-            cost += "+" + "+".join(f"{pc['amount']}{pc['domain'][:3].upper()}" for pc in c["power_cost"])
+        e_cost = c.get("energy_cost", 0)
+        p_costs: list = c.get("power_cost", []) or []
+        cost_str = f"{e_cost}E"
+        if p_costs:
+            cost_str += "+" + "+".join(
+                f"{pc['amount']}{pc['domain'][:3].upper()}" for pc in p_costs
+            )
         kw = ", ".join(c.get("keywords", []))
         might_str = f" Might:{c['might']}" if c.get("might") is not None else ""
-        lines.append(f"  {c['instance_id']} — {c['name']} [{c['card_type']}] ({cost}){might_str} {kw}")
+        # Affordability: check energy and each domain power requirement
+        energy_ok = e_cost <= total_energy
+        domain_ok = all(
+            total_power.get(pc["domain"], 0) >= pc["amount"] for pc in p_costs
+        )
+        playable = "[PLAYABLE]" if (energy_ok and domain_ok) else "[too costly]"
+        lines.append(
+            f"  {c['instance_id']} — {c['name']} [{c['card_type']}] ({cost_str})"
+            f"{might_str} {playable} {kw}"
+        )
+        effect = c.get("effect_text", "")
+        if effect:
+            lines.append(f"    Effect: {skill_module.format_effect_text(effect)}")
     lines.append("")
 
     # Board
@@ -379,6 +478,9 @@ def _format_brief_state(bs: dict) -> str:
         ctrl_str = "uncontrolled" if ctrl == -1 else f"P{ctrl + 1}"
         contested = " CONTESTED" if bf.get("is_contested") else ""
         lines.append(f"[{bf['battlefield_id']}] {bf['display_name']} — {ctrl_str}{contested}")
+        bf_effect = bf.get("effect_text", "")
+        if bf_effect:
+            lines.append(f"  Effect: {skill_module.format_effect_text(bf_effect)}")
         if bf.get("my_units"):
             lines.append("  My units: " + ", ".join(
                 f"{u['instance_id']}({u['current_might']}MHT)" for u in bf["my_units"]
@@ -399,9 +501,26 @@ def _format_brief_state(bs: dict) -> str:
         if len(legal) > 20:
             lines.append(f"  ... and {len(legal) - 20} more (call list_legal_moves)")
 
-    # Decision context
-    if bs.get("pending_choice_options"):
-        lines.append(f"Pending choice options: {bs['pending_choice_options']}")
+    # Decision context — pending choice
+    ctx = bs.get("pending_choice_context", {})
+    opts = bs.get("pending_choice_options", [])
+    if ctx or opts:
+        lines.append("")
+        lines.append("=== PENDING CHOICE ===")
+        if ctx.get("prompt_text"):
+            lines.append(f"What: {ctx['prompt_text']}")
+        if ctx.get("source_card_name"):
+            lines.append(f"Source: {ctx['source_card_name']} (id: {ctx.get('source_card_id', '?')})")
+        if ctx.get("source_effect_text"):
+            lines.append(
+                f"Source effect: {skill_module.format_effect_text(str(ctx['source_effect_text']))}"
+            )
+        if ctx.get("ability_description"):
+            lines.append(f"Ability: {ctx['ability_description']}")
+        if opts:
+            lines.append(f"Options (use choose <option>): {opts}")
+        lines.append("======================")
+
     if bs.get("combat_assignment_active"):
         lines.append(f"Combat assignment active. Remaining attacker might: {bs.get('remaining_attacker_might', 0)}")
         lines.append(f"Already assigned: {bs.get('damage_assigned', {})}")

@@ -20,6 +20,7 @@
     ],
     "is_action": true,
     "is_reaction": false,
+    "effect_text": "Action (Play on your turn or in showdowns.)\nDiscard 1. Deal its Energy cost as damage to a unit at a battlefield. (Ignore its Power cost.)",
     "abilities": [
       {
         "ability_id": "get-excited-effect",
@@ -63,6 +64,7 @@
     ],
     "is_action": true,
     "is_reaction": false,
+    "effect_text": "Action (Play on your turn or in showdowns.)\nDeal 4 to a unit at a battlefield. Draw 1.",
     "abilities": [
       {
         "ability_id": "void-seeker-damage",
@@ -122,6 +124,7 @@
     ],
     "is_action": true,
     "is_reaction": false,
+    "effect_text": "Hidden (Hide now for a rainbow rune to react with later for [0].)\nAction (Play on your turn or in showdowns.)\nMove a unit from a battlefield to its base.",
     "abilities": [
       {
         "ability_id": "fight-or-flight-effect",
@@ -163,6 +166,7 @@
     ],
     "is_action": false,
     "is_reaction": true,
+    "effect_text": "Reaction (Play any time, even before spells and abilities resolve.)\nReturn a unit at a battlefield with 3 Might or less to its owner's hand.",
     "abilities": [
       {
         "ability_id": "gust-effect",
@@ -204,6 +208,7 @@
     "keywords": [],
     "is_action": false,
     "is_reaction": false,
+    "effect_text": "Give a unit at a battlefield or a gear Temporary. (Kill it at the start of its controller's Beginning Phase, before scoring.)",
     "abilities": [
       {
         "ability_id": "fading-memories-effect",

@@ -84,7 +84,19 @@ def get_card_detail(card_id: str) -> str:
     card = _find_card_definition(def_id)
     if card is None:
         return f"Card '{card_id}' not found in card database."
-    return json.dumps(card, indent=2)
+    summary = {
+        "id": card.get("id"),
+        "name": card.get("name"),
+        "card_type": card.get("card_type"),
+        "energy_cost": card.get("energy_cost"),
+        "power_cost": card.get("power_cost"),
+        "might": card.get("might"),
+        "keywords": card.get("keywords"),
+        "effect_text": card.get("effect_text", ""),
+        "flavor_text": card.get("flavor_text", ""),
+        "abilities": card.get("abilities", []),
+    }
+    return json.dumps(summary, indent=2)
 
 
 def get_opponent_history() -> str:
@@ -224,6 +236,23 @@ def evaluate_position() -> dict[str, Any]:
     points_to_win = victory_score - my_score
     opp_points_to_win = victory_score - opp_score
 
+    # Resource assessment: total playable energy = pool + untapped runes
+    runes = bs.get("my_runes", [])
+    untapped = [r for r in runes if not r.get("is_exhausted", False)]
+    total_energy = bs.get("my_energy", 0) + len(untapped)
+    domain_power: dict[str, int] = dict(bs.get("my_power", {}) or {})
+    for r in untapped:
+        d = r.get("domain", "")
+        domain_power[d] = domain_power.get(d, 0) + 1
+    playable_cards = sum(
+        1 for c in bs.get("my_hand", [])
+        if c.get("energy_cost", 0) <= total_energy
+        and all(
+            domain_power.get(pc["domain"], 0) >= pc["amount"]
+            for pc in (c.get("power_cost") or [])
+        )
+    )
+
     return {
         "score_advantage": score_advantage,
         "my_score": my_score,
@@ -237,11 +266,19 @@ def evaluate_position() -> dict[str, Any]:
         "opponent_battlefields_controlled": opp_bfs,
         "bf_advantage": bf_advantage,
         "hand_size": len(bs.get("my_hand", [])),
+        "total_playable_energy": total_energy,
+        "domain_power_available": domain_power,
+        "playable_cards_in_hand": playable_cards,
         "assessment": assessment,
     }
 
 
 # ── Formatting helpers ────────────────────────────────────────────────────────
+
+
+def format_effect_text(text: str) -> str:
+    """Render multi-line effect_text as one effect string."""
+    return " ".join(line.strip() for line in text.splitlines() if line.strip())
 
 
 def _format_hand(hand: list[dict]) -> str:
@@ -255,6 +292,9 @@ def _format_hand(hand: list[dict]) -> str:
         kw = ", ".join(c.get("keywords", []))
         might = f" Might:{c['might']}" if c.get("might") is not None else ""
         lines.append(f"  {c['instance_id']} — {c['name']} [{c['card_type']}] ({cost}){might} {kw}")
+        effect = c.get("effect_text", "")
+        if effect:
+            lines.append(f"    Effect: {format_effect_text(effect)}")
     return "\n".join(lines)
 
 
@@ -275,6 +315,9 @@ def _format_units(units: list[dict]) -> str:
             f"  {u['instance_id']} — {u['name']} "
             f"({u['current_might']}/{u['base_might']} Might) @ {u['location']} [{st}]"
         )
+        effect = u.get("effect_text", "")
+        if effect:
+            parts.append(f"    Effect: {format_effect_text(effect)}")
     return "\n".join(parts)
 
 
@@ -292,6 +335,9 @@ def _format_battlefield(bf: dict) -> str:
     ctrl_str = "uncontrolled" if ctrl == -1 else f"P{ctrl + 1}"
     contested = " CONTESTED" if bf.get("is_contested") else ""
     lines = [f"[{bf['battlefield_id']}] {bf['display_name']} — {ctrl_str}{contested}"]
+    bf_effect = bf.get("effect_text", "")
+    if bf_effect:
+        lines.append(f"  Effect: {format_effect_text(bf_effect)}")
     if bf.get("my_units"):
         lines.append("  My units: " + _format_units(bf["my_units"]))
     if bf.get("opponent_units"):

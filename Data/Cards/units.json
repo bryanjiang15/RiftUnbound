@@ -23,6 +23,7 @@
         "value": 2
       }
     ],
+    "effect_text": "Assault 2 (+2 Might while I'm an attacker.)\nWhen you play me, discard 1.",
     "abilities": [
       {
         "ability_id": "chemtech-enforcer-play",
@@ -61,6 +62,7 @@
     "might": 3,
     "might_bonus": null,
     "keywords": [],
+    "effect_text": "When you discard me, you may pay a fury rune to play me.",
     "abilities": [
       {
         "ability_id": "flame-chompers-discard",
@@ -104,6 +106,7 @@
     "might": 8,
     "might_bonus": null,
     "keywords": [],
+    "effect_text": "Other friendly units enter ready.",
     "abilities": [
       {
         "ability_id": "magma-wurm-passive",
@@ -141,6 +144,7 @@
     "might": 4,
     "might_bonus": null,
     "keywords": [],
+    "effect_text": "If you've discarded a card this turn, I have Assault and Ganking. (+1 Might while I'm an attacker. I can move from battlefield to battlefield.)",
     "abilities": [
       {
         "ability_id": "raging-soul-discard-conditional",
@@ -199,6 +203,7 @@
         "value": 2
       }
     ],
+    "effect_text": "Accelerate (You may pay [1] and a fury rune as an additional cost to have me enter ready.)\nAssault 2 (+2 Might while I'm an attacker.)\nWhen you play me, discard 2.",
     "abilities": [
       {
         "ability_id": "jinx-demolitionist-accelerate",
@@ -264,6 +269,7 @@
         "id": "ganking"
       }
     ],
+    "effect_text": "Ganking (I can move from battlefield to battlefield.)\nRecycle 1 from your trash: Give me +1 Might this turn.",
     "abilities": [
       {
         "ability_id": "vi-destructive-recycle",
@@ -311,6 +317,7 @@
         "id": "accelerate"
       }
     ],
+    "effect_text": "Accelerate (You may pay [1] and a fury rune as an additional cost to have me enter ready.)",
     "abilities": [
       {
         "ability_id": "blazing-scorcher-accelerate",
@@ -355,6 +362,7 @@
     "might": 5,
     "might_bonus": null,
     "keywords": [],
+    "effect_text": "As you play me, you may discard 1 as an additional cost. If you do, reduce my cost by [2].",
     "abilities": [
       {
         "ability_id": "brazen-buccaneer-discard-discount",
@@ -398,6 +406,7 @@
     "might": 3,
     "might_bonus": null,
     "keywords": [],
+    "effect_text": "When you play me, return a unit from your trash to your hand.",
     "abilities": [
       {
         "ability_id": "cemetery-attendant-play",
@@ -439,6 +448,7 @@
         "id": "deathknell"
       }
     ],
+    "effect_text": "Deathknell — Discard 2, then draw 2. (When I die, get the effect.)",
     "abilities": [
       {
         "ability_id": "undercover-agent-deathknell",
@@ -478,6 +488,7 @@
     "might": 2,
     "might_bonus": null,
     "keywords": [],
+    "effect_text": "When I move, discard 1, then draw 1.",
     "abilities": [
       {
         "ability_id": "traveling-merchant-move",
@@ -518,6 +529,7 @@
     "might": 6,
     "might_bonus": null,
     "keywords": [],
+    "effect_text": "I cost [1] less for each card in your trash.",
     "abilities": [
       {
         "ability_id": "rhasa-cost-reduction",

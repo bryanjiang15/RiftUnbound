@@ -28,8 +28,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
+from pydantic import BaseModel
+
 from . import skills as skill_module
-from .agent import decide
+from .agent import decide, _INPUT_LOG_PATH, _LOG_INPUTS
 from .memory import DecisionLogger, Memory
 from .schemas import Decision, DecisionRequest, Move
 
@@ -50,8 +52,16 @@ async def _lifespan(app: FastAPI):
     _memory = Memory()
     _decision_logger = DecisionLogger()
     _decision_logger.clear()          # fresh log on every server start
+    if _LOG_INPUTS:
+        _INPUT_LOG_PATH.write_text(
+            f"Riftbound AI Agent — Input Log\nStarted: "
+            f"{__import__('datetime').datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
+            + "═" * 72 + "\n",
+            encoding="utf-8",
+        )
     logger.info("Riftbound AI agent service started.")
     logger.info("OpenAI API key: %s", "set" if os.environ.get("OPENAI_API_KEY") else "NOT SET")
+    logger.info("Input logging: %s", "ENABLED → agent_inputs.log" if _LOG_INPUTS else "disabled")
     yield
     logger.info("Riftbound AI agent service shutting down.")
 
@@ -142,19 +152,88 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
     return decision
 
 
-# ── Outcome reporting (called by Godot after applying / rejecting) ────────────
+# ── Outcome / game-over reporting (called by Godot) ──────────────────────────
+
+
+class GameOverRequest(BaseModel):
+    game_id: str
+    winner_index: int
+    my_player_index: int
+    my_score: int
+    opp_score: int
+    total_turns: int
+
+
+class OpponentActionRequest(BaseModel):
+    game_id: str
+    turn: int
+    action: str
 
 
 @app.post("/outcome")
 async def outcome_endpoint(body: dict) -> dict:
     """
     Godot calls this after applying or rejecting a move.
-    Body: { game_id, accepted: bool, rejection_reason: str|null, outcome_summary: str|null }
-    This is best-effort — the agent continues even if this is never called.
+    Body: { game_id, accepted: bool, rejection_reason: str|null }
+    Updates the most recent unresolved decision row for this game.
     """
     if _memory is None:
         return {"status": "no-op"}
-    logger.info("Outcome: %s", body)
+    game_id = body.get("game_id", "")
+    accepted = bool(body.get("accepted", True))
+    rejection_reason = body.get("rejection_reason") or None
+    if game_id:
+        try:
+            _memory.update_acceptance_by_game(game_id, accepted, rejection_reason)
+        except Exception as exc:
+            logger.warning("Outcome update failed: %s", exc)
+    logger.info("Outcome: game=%s accepted=%s", game_id, accepted)
+    return {"status": "ok"}
+
+
+@app.post("/game_over")
+async def game_over_endpoint(body: GameOverRequest) -> dict:
+    """
+    Godot calls this when a game ends. Records win/loss for future phases.
+    Does not trigger reflection yet (Phase 3).
+    """
+    if _memory is None:
+        return {"status": "no-op"}
+    outcome = "win" if body.winner_index == body.my_player_index else "loss"
+    try:
+        _memory.record_game_outcome(
+            game_id=body.game_id,
+            outcome=outcome,
+            my_score=body.my_score,
+            opp_score=body.opp_score,
+            turns_played=body.total_turns,
+        )
+    except Exception as exc:
+        logger.warning("Game outcome record failed: %s", exc)
+    logger.info(
+        "Game over: game=%s outcome=%s score=%d-%d turns=%d",
+        body.game_id, outcome, body.my_score, body.opp_score, body.total_turns,
+    )
+    return {"status": "ok", "outcome": outcome}
+
+
+@app.post("/opponent_action")
+async def opponent_action_endpoint(body: OpponentActionRequest) -> dict:
+    """
+    Godot calls this whenever an opponent action becomes publicly visible.
+    Stored and injected into agent context as opponent history.
+    """
+    if _memory is None:
+        return {"status": "no-op"}
+    try:
+        _memory.record_opponent_action(
+            game_id=body.game_id,
+            turn=body.turn,
+            action=body.action,
+        )
+    except Exception as exc:
+        logger.warning("Opponent action record failed: %s", exc)
+    logger.debug("Opponent action: game=%s turn=%d action=%s", body.game_id, body.turn, body.action)
     return {"status": "ok"}
 
 

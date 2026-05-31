@@ -90,6 +90,94 @@ static func can_afford(player_index: int, cost: Dictionary, gs: GameState) -> bo
 	return ps.rune_pool.can_pay(cost.get("energy", 0), cost.get("power", []))
 
 
+static func can_afford_with_autopay(player_index: int, cost: Dictionary, gs: GameState) -> bool:
+	# Fast path: pool already covers the cost with no auto-pay needed.
+	if can_afford(player_index, cost, gs):
+		return true
+
+	var ps: PlayerState = gs.players[player_index]
+	if cost.get("discard", 0) > ps.hand.size():
+		return false
+	if cost.get("recycle", 0) > ps.deck.size():
+		return false
+
+	# Simulate auto-pay without mutating game state.
+	# Domain power: auto-pay recycles matching runes (exhausted first, then untapped).
+	# Energy: auto-pay taps untapped runes.
+	# Count what would be available after auto-pay.
+
+	# Pool values as starting point
+	var sim_energy: int = ps.rune_pool.energy
+	var sim_power: Dictionary = ps.rune_pool.power.duplicate()
+
+	# Track runes that would be recycled for domain power (they can't also be tapped)
+	var recycled_instance_ids: Array = []
+
+	for pc in cost.get("power", []):
+		var domain: String = pc.get("domain", "")
+		var needed: int = pc.get("amount", 0)
+		if domain == "any":
+			var total: int = 0
+			for v in sim_power.values():
+				total += v
+			needed = maxi(0, needed - total)
+			for _i in range(needed):
+				# Prefer exhausted rune of any domain
+				var rune = _find_recyclable_rune_any(ps, recycled_instance_ids)
+				if rune == null:
+					return false
+				recycled_instance_ids.append(rune.instance_id)
+				for d in rune.definition.domain:
+					sim_power[d] = sim_power.get(d, 0) + 1
+		else:
+			needed = maxi(0, needed - sim_power.get(domain, 0))
+			for _i in range(needed):
+				var rune = _find_recyclable_rune_domain(ps, domain, recycled_instance_ids)
+				if rune == null:
+					return false
+				recycled_instance_ids.append(rune.instance_id)
+				for d in rune.definition.domain:
+					sim_power[d] = sim_power.get(d, 0) + 1
+
+	# Energy: tap untapped runes that weren't recycled above
+	var energy_need: int = maxi(0, cost.get("energy", 0) - sim_energy)
+	var tapped: int = 0
+	for rune in ps.channeled_runes:
+		if tapped >= energy_need:
+			break
+		if not rune.is_exhausted and rune.instance_id not in recycled_instance_ids:
+			tapped += 1
+	if tapped < energy_need:
+		return false
+
+	return true
+
+
+static func _find_recyclable_rune_domain(ps: PlayerState, domain: String, exclude_ids: Array) -> CardInstance:
+	# Prefer exhausted runes of the domain (they can't tap for energy anyway)
+	for rune in ps.channeled_runes:
+		if rune.instance_id in exclude_ids:
+			continue
+		if rune.is_exhausted and domain in rune.definition.domain:
+			return rune
+	for rune in ps.channeled_runes:
+		if rune.instance_id in exclude_ids:
+			continue
+		if domain in rune.definition.domain:
+			return rune
+	return null
+
+
+static func _find_recyclable_rune_any(ps: PlayerState, exclude_ids: Array) -> CardInstance:
+	for rune in ps.channeled_runes:
+		if rune.instance_id not in exclude_ids and rune.is_exhausted:
+			return rune
+	for rune in ps.channeled_runes:
+		if rune.instance_id not in exclude_ids:
+			return rune
+	return null
+
+
 static func pay_cost(player_index: int, cost: Dictionary, source: CardInstance, gs: GameState) -> void:
 	var ps: PlayerState = gs.players[player_index]
 	ps.rune_pool.pay(cost.get("energy", 0), cost.get("power", []))

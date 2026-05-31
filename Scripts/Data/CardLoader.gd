@@ -84,6 +84,7 @@ static func _parse_definition(d: Dictionary) -> CardDefinition:
 	def.keywords = d.get("keywords", [])
 	def.abilities = d.get("abilities", [])
 	def.flavor_text = d.get("flavor_text", "")
+	def.effect_text = d.get("effect_text", "")
 	def.might = d.get("might", 0)
 	def.might_bonus = d.get("might_bonus", null)
 	def.attached_keywords = d.get("attached_keywords", [])
