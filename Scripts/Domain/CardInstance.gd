@@ -25,6 +25,7 @@ var attached_to: CardInstance = null
 # Temporary (this-turn) effects
 var temp_might_bonus: int = 0
 var temp_keywords: Array = []
+var passive_keywords: Array = []
 
 # Tracking
 var played_this_turn: bool = false
@@ -58,6 +59,9 @@ func has_keyword(keyword_id: String) -> bool:
 	for kw in definition.keywords:
 		if kw.get("id", "") == keyword_id:
 			return true
+	for kw in passive_keywords:
+		if kw.get("id", "") == keyword_id:
+			return true
 	for kw in temp_keywords:
 		if kw.get("id", "") == keyword_id:
 			return true
@@ -71,6 +75,9 @@ func has_keyword(keyword_id: String) -> bool:
 
 func get_keyword_value(keyword_id: String) -> int:
 	for kw in definition.keywords:
+		if kw.get("id", "") == keyword_id:
+			return kw.get("value", 1)
+	for kw in passive_keywords:
 		if kw.get("id", "") == keyword_id:
 			return kw.get("value", 1)
 	for kw in temp_keywords:
@@ -98,6 +105,7 @@ func is_at_base() -> bool:
 func clear_temp_effects() -> void:
 	temp_might_bonus = 0
 	temp_keywords.clear()
+	passive_keywords.clear()
 	played_this_turn = false
 
 

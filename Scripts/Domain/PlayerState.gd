@@ -20,6 +20,8 @@ var score: int = 0
 
 # Turn tracking
 var cards_played_this_turn: int = 0
+var cards_discarded_count: int = 0
+var discarded_this_turn: Array = []
 var battlefields_scored_this_turn: Array = []
 
 # Deck configuration (battlefield IDs from deck file)
@@ -171,6 +173,8 @@ func get_unattached_gear_at_base() -> Array:
 
 func reset_turn_state() -> void:
 	cards_played_this_turn = 0
+	cards_discarded_count = 0
+	discarded_this_turn.clear()
 	battlefields_scored_this_turn.clear()
 	for c in base_permanents:
 		c.played_this_turn = false

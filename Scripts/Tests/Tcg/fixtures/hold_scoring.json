@@ -1,0 +1,27 @@
+{
+  "first_player": 0,
+  "turn_number": 2,
+  "phase": "MAIN",
+  "state": "NEUTRAL_OPEN",
+  "battlefields": ["zaun-warrens", "targons-peak"],
+  "battlefield_control": [0, -1],
+  "players": [
+    {
+      "score": 2,
+      "legend": "jinx-loose-cannon",
+      "pool": {"energy": 0, "power": {}},
+      "hand": [],
+      "base": [{"id": "chemtech-enforcer", "exhausted": false}],
+      "deck_size": 5,
+      "rune_deck_size": 12
+    },
+    {
+      "score": 1,
+      "pool": {"energy": 0, "power": {}},
+      "hand": [],
+      "base": [],
+      "deck_size": 5,
+      "rune_deck_size": 12
+    }
+  ]
+}

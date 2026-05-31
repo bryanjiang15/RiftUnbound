@@ -1,6 +1,10 @@
 class_name GameController
 extends Node
 
+const TriggerDispatcherScript = preload("res://Scripts/Game/TriggerDispatcher.gd")
+const TargetResolverScript = preload("res://Scripts/Game/TargetResolver.gd")
+const ConditionEvaluatorScript = preload("res://Scripts/Game/ConditionEvaluator.gd")
+
 signal board_updated
 signal game_log_message(text: String)
 
@@ -9,6 +13,10 @@ const P2_DECK = "res://Data/Decks/starter-deck-p2.json"
 
 var gs: GameState = GameState.new()
 var ability_resolver: AbilityResolver = AbilityResolver.new()
+var trigger_dispatcher = TriggerDispatcherScript.new()
+
+var skip_auto_start: bool = false
+var log_lines: Array[String] = []
 
 var _ai_player_index: int = 1  # which player is AI (-1 = human vs human)
 
@@ -18,39 +26,53 @@ var last_command_error: bool = false
 
 
 func _ready() -> void:
+	if skip_auto_start:
+		return
 	start_game()
 
 
 func start_game() -> void:
+	start_game_from_config({})
+
+
+func start_game_from_config(config: Dictionary) -> void:
+	log_lines.clear()
 	gs = GameState.new()
 	gs.players.clear()
+	_first_player_cache = -1
 
-	var p1 = DeckLoader.build_player_state(P1_DECK, 0)
-	var p2 = DeckLoader.build_player_state(P2_DECK, 1)
+	if config.has("seed"):
+		seed(int(config["seed"]))
+
+	var p1_path = config.get("p1_deck", P1_DECK)
+	var p2_path = config.get("p2_deck", P2_DECK)
+	var p1 = DeckLoader.build_player_state(p1_path, 0)
+	var p2 = DeckLoader.build_player_state(p2_path, 1)
 	if p1 == null or p2 == null:
 		_log("[ERROR] Failed to load decks. Check Data/Decks/ paths.")
 		return
 	gs.players.append(p1)
 	gs.players.append(p2)
 
-	# Select battlefields (1 random from each player's list)
-	var p1_bf = p1.deck_battlefields[randi() % p1.deck_battlefields.size()]
-	var p2_bf = p2.deck_battlefields[randi() % p2.deck_battlefields.size()]
-	if p1_bf == p2_bf and p1.deck_battlefields.size() > 1:
-		for bf in p1.deck_battlefields:
-			if bf != p2_bf:
-				p1_bf = bf
-				break
+	var bf_list: Array = config.get("battlefields", [])
+	var p1_bf: String
+	var p2_bf: String
+	if bf_list.size() >= 2:
+		p1_bf = str(bf_list[0])
+		p2_bf = str(bf_list[1])
+	else:
+		p1_bf = p1.deck_battlefields[0]
+		p2_bf = p2.deck_battlefields[0]
+		if p1_bf == p2_bf and p1.deck_battlefields.size() > 1:
+			p2_bf = p1.deck_battlefields[1]
 	gs.board.setup(p1_bf, p2_bf)
 
-	# Randomly choose who goes first
-	gs.turn_player_index = randi() % 2
+	gs.turn_player_index = int(config.get("first_player", randi() % 2))
 	gs.priority_player_index = gs.turn_player_index
-
-	# P2 (second player) gets +1 rune on first channel
-	var second_player = 1 - gs.turn_player_index
+	gs.second_player_index = 1 - gs.turn_player_index if config.is_empty() else int(config.get("second_player", 1 - gs.turn_player_index))
 	gs.first_channel_done[gs.turn_player_index] = false
-	gs.first_channel_done[second_player] = false
+	gs.first_channel_done[1 - gs.turn_player_index] = false
+	_first_player_cache = gs.turn_player_index
 
 	_log("> Riftbound 1v1 — %s vs %s" % [p1.player_name, p2.player_name])
 	_log("> Battlefields: %s and %s" % [
@@ -59,19 +81,24 @@ func start_game() -> void:
 	])
 	_log("> P%d goes first" % (gs.turn_player_index + 1))
 
-	# Deal 4 cards each
+	if config.get("skip_mulligan", false):
+		gs.mulligan_phase = false
+		gs.mulligan_done = [true, true]
+		if config.has("turn_number"):
+			gs.turn_number = int(config["turn_number"])
+		return
+
 	for ps in gs.players:
 		for _i in range(4):
 			var drawn = ps.draw_card()
 			if drawn:
 				_log("> [P%d] Drew %s" % [ps.player_index + 1, drawn.display_name()])
 
-	# Enter mulligan phase
 	gs.mulligan_phase = true
 	gs.mulligan_done = [false, false]
 	_log("> Mulligan: each player may set aside up to 2 cards.")
-	_log("[PROMPT] P1 goes first — type: p1 mulligan keep  |  p1 mulligan <id> [id]")
-	_log("[PROMPT] P2 goes after  — type: p2 mulligan keep  |  p2 mulligan <id> [id]")
+	_log("[PROMPT] P1 goes first — type: mulligan keep  |  mulligan <id> [id]")
+	_log("[PROMPT] P2 goes after  — type: mulligan keep  |  mulligan <id> [id]")
 
 	board_updated.emit()
 
@@ -124,6 +151,10 @@ func submit_command(player_index: int, raw: String) -> void:
 			_cmd_assign(player_index, args)
 		"choose":
 			_cmd_choose(player_index, args)
+		"hide":
+			_cmd_hide(player_index, args)
+		"equip":
+			_cmd_equip(player_index, args)
 		"hand":
 			_cmd_hand(player_index)
 		"board":
@@ -227,10 +258,15 @@ func _execute_start_of_turn() -> void:
 	if ps.champion_zone:
 		ps.champion_zone.ready()
 
-	# Beginning Phase
+	# Beginning Phase — triggers before Hold scoring
 	gs.current_phase = TurnStateMachine.Phase.BEGINNING
 	_log("> Beginning Phase")
-	# Scoring Step: Hold — gain 1 pt per controlled battlefield
+	_kill_temporary_units(turn_pi)
+	var trig_ctx = {"player_index": turn_pi, "controller": self}
+	for line in trigger_dispatcher.emit("beginning_phase_start", trig_ctx, gs, self):
+		_log(line)
+	trigger_dispatcher.emit_passive_auras(gs)
+	# Scoring Step: Hold
 	for i in range(gs.board.battlefields.size()):
 		var bf = gs.board.battlefields[i]
 		if bf.controller_index == turn_pi:
@@ -247,14 +283,9 @@ func _execute_start_of_turn() -> void:
 	var runes_to_channel = 2
 	if not gs.first_channel_done[turn_pi]:
 		gs.first_channel_done[turn_pi] = true
-		if turn_pi != gs.turn_player_index:  # second player bonus is on their first turn
-			# Second player who goes second gets +1 rune on THEIR first turn
-			pass
-	# Second player bonus: on their first channel, get +1
-	var second_pi = 1 - _determine_first_player()
-	if turn_pi == second_pi and gs.turn_number <= 2 and ps.channeled_runes.is_empty():
-		runes_to_channel = 3
-		_log("> P%d (going second) channels 3 Runes this first turn" % (turn_pi + 1))
+		if turn_pi == gs.second_player_index:
+			runes_to_channel = 3
+			_log("> P%d (going second) channels 3 Runes this first turn" % (turn_pi + 1))
 
 	for _i in range(runes_to_channel):
 		var rune = ps.channel_rune()
@@ -308,9 +339,11 @@ func _execute_end_of_turn() -> void:
 	gs.current_phase = TurnStateMachine.Phase.ENDING
 	_log("> Ending Phase")
 
-	# Expiration Step: Heal all units; expire turn effects; empty rune pool
+	# Expiration Step
 	CleanupProcessor.heal_all_units(gs)
 	CleanupProcessor.expire_turn_effects(gs)
+	for line in trigger_dispatcher.process_end_of_turn(gs, self):
+		_log(line)
 	gs.players[turn_pi].rune_pool.empty()
 	gs.players[1 - turn_pi].rune_pool.empty()
 
@@ -446,8 +479,10 @@ func _cmd_recycle_rune(player_index: int, args: Array) -> void:
 func _cmd_play(player_index: int, args: Array) -> void:
 	if not _check_can_act(player_index):
 		return
-	if gs.current_phase != TurnStateMachine.Phase.MAIN:
-		_log("[ERROR] Can only play cards during Main Phase.")
+	var in_main = gs.current_phase == TurnStateMachine.Phase.MAIN
+	var in_showdown = gs.is_showdown_state()
+	if not in_main and not in_showdown:
+		_log("[ERROR] Can only play cards during Main Phase or Showdown.")
 		return
 
 	# Parse: play <id> [to <location>] [target <id>] [from champion|hidden] [accelerate]
@@ -513,11 +548,11 @@ func _cmd_play(player_index: int, args: Array) -> void:
 		_log("[ERROR] Cannot play %s in current state (%s)." % [card.definition.name, gs.get_state_name()])
 		return
 
-	# Units can only be played to base.
-	# Direct battlefield deployment requires the Ambush keyword (not yet implemented).
+	# Units to base unless Ambush allows battlefield deployment
 	if card.definition.card_type == "unit" and destination.begins_with("battlefield"):
-		_log("[ERROR] Units must be played to base. Direct battlefield deployment requires Ambush (not yet implemented).")
-		return
+		if not card.has_keyword("ambush"):
+			_log("[ERROR] Units must be played to base. Direct battlefield deployment requires Ambush.")
+			return
 
 	# Compute cost
 	var cost = CostCalculator.compute_play_cost(card, player_index, gs, use_accelerate)
@@ -556,6 +591,21 @@ func _cmd_play(player_index: int, args: Array) -> void:
 		_fire_on_play_triggers(card)
 
 	_run_cleanup()
+
+
+func _kill_temporary_units(turn_pi: int) -> void:
+	for ps in gs.players:
+		var to_kill: Array = []
+		for u in ps.get_units_at_base():
+			if u.has_keyword("temporary") and u.owner_index == turn_pi:
+				to_kill.append(u)
+		for u in gs.board.get_all_units_on_board(ps.player_index):
+			if u.has_keyword("temporary") and u.owner_index == turn_pi:
+				to_kill.append(u)
+		for u in to_kill:
+			_log("> %s (Temporary) is killed at Beginning Phase" % u.display_name())
+			gs.board.remove_unit_from_battlefield(u)
+			ps.move_to_trash(u)
 
 
 func _place_unit(player_index: int, card: CardInstance, destination: String, use_accelerate: bool) -> void:
@@ -626,6 +676,11 @@ func _play_spell(player_index: int, card: CardInstance, target_id: String, desti
 				item.needs_target = true
 				item.target_prompt = _build_target_prompt(card, ab, player_index, gs)
 				item.target_filter = ab.get("effect_params", {}).get("target", "")
+				var valid = TargetResolverScript.filter_with_params(
+					item.target_filter, ab.get("effect_params", {}), card, gs,
+					{"player_index": player_index}
+				)
+				item.valid_targets = valid
 				break
 
 	gs.push_to_chain(item)
@@ -637,11 +692,21 @@ func _play_spell(player_index: int, card: CardInstance, target_id: String, desti
 
 
 func _fire_on_play_triggers(card: CardInstance) -> void:
+	var ctx = {"player_index": card.owner_index, "controller": self, "source": card}
 	for ab in card.definition.abilities:
-		if ab.get("timing", "") == "on_play":
-			var lines = ability_resolver.resolve_ability(ab, card, null, gs)
-			for l in lines:
-				_log(l)
+		if ab.get("timing", "") != "on_play":
+			continue
+		if ab.get("effect_type", "") == "cost_reduction":
+			continue
+		for line in ability_resolver.resolve_ability(ab, card, null, gs, ctx):
+			_log(line)
+	for line in trigger_dispatcher.emit("on_play", ctx, gs, self):
+		_log(line)
+	# Passive on-enter effects
+	for ab in card.definition.abilities:
+		if ab.get("effect_type", "") == "other_friendly_units_enter_ready":
+			for line in ability_resolver.resolve_ability(ab, card, null, gs, ctx):
+				_log(line)
 
 
 # ─── Move ─────────────────────────────────────────────────────────────────────
@@ -725,6 +790,14 @@ func _cmd_move(player_index: int, args: Array) -> void:
 				bf.is_contested = true
 				gs.attacker_player_index = player_index
 				_log("> %s is now Contested" % bf.display_name)
+			var move_ctx = {
+				"player_index": player_index,
+				"source": unit,
+				"battlefield_index": dest_bf_idx if destination != "base" else -1,
+				"controller": self,
+			}
+			for line in trigger_dispatcher.emit("on_move", move_ctx, gs, self):
+				_log(line)
 
 	_run_cleanup()
 
@@ -759,10 +832,10 @@ func _cmd_use(player_index: int, args: Array) -> void:
 		_log("[ERROR] '%s' not found or not yours." % card_id)
 		return
 
-	# Find an activated ability
+	# Find an activated ability (including attach)
 	var ab: Dictionary = {}
 	for a in card.definition.abilities:
-		if a.get("ability_type", "") == "activated" and a.get("effect_type", "") != "attach":
+		if a.get("ability_type", "") == "activated":
 			ab = a
 			break
 	if ab.is_empty():
@@ -776,6 +849,8 @@ func _cmd_use(player_index: int, args: Array) -> void:
 	var target: CardInstance = null
 	if not target_id.is_empty():
 		target = gs.find_instance_anywhere(target_id)
+	if target == null and ab.get("effect_params", {}).get("target", "") == "self":
+		target = card
 
 	var cost = CostCalculator.compute_ability_cost(ab, card, target, gs)
 	if not CostCalculator.can_afford(player_index, cost, gs):
@@ -850,7 +925,39 @@ func _cmd_react(player_index: int, args: Array) -> void:
 # ─── Assign damage ────────────────────────────────────────────────────────────
 
 func _cmd_assign(player_index: int, args: Array) -> void:
-	_log("[INFO] Manual damage assignment not yet required — combat damage is auto-assigned.")
+	if not gs.combat_assignment_active:
+		_log("[ERROR] Not in combat damage assignment.")
+		return
+	if player_index != gs.attacker_player_index:
+		_log("[ERROR] Only the attacker assigns damage.")
+		return
+	if args.is_empty():
+		_log("[ERROR] Usage: assign <amount> to <id>  |  assign done")
+		return
+	if args[0] == "done":
+		var lines = CombatProcessor.finalize_assignments(gs)
+		for l in lines:
+			_log(l)
+		_run_cleanup()
+		return
+	if args.size() < 3 or args[1] != "to":
+		_log("[ERROR] Usage: assign <amount> to <id>")
+		return
+	var amount = int(args[0])
+	var target_id = args[2]
+	var bf = gs.board.battlefields[gs.combat_bf_index]
+	var defender = 1 - gs.attacker_player_index
+	var target = null
+	for u in bf.units[defender]:
+		if u.instance_id == target_id:
+			target = u
+			break
+	if target == null:
+		_log("[ERROR] Target '%s' not found." % target_id)
+		return
+	gs.damage_assignments[target_id] = int(gs.damage_assignments.get(target_id, 0)) + amount
+	gs.remaining_attacker_might -= amount
+	_log("> Assigned %d damage to %s (%d remaining)" % [amount, target.display_name(), gs.remaining_attacker_might])
 
 
 # ─── Choose ───────────────────────────────────────────────────────────────────
@@ -872,32 +979,160 @@ func _cmd_choose(player_index: int, args: Array) -> void:
 		_run_cleanup()
 		return
 
-	if prompt_type == "choose_target":
-		var item: ChainItem = gs.pending_prompt.get("chain_item")
-		if item == null:
-			gs.pending_prompt.clear()
-			return
-		var target = gs.find_instance_anywhere(choice)
-		if target == null:
-			_log("[ERROR] Target '%s' not found." % choice)
-			return
-		item.targets = [target]
-		item.needs_target = false
+	match prompt_type:
+		"choose_target":
+			_handle_choose_target(player_index, choice)
+		"choose_discard":
+			_handle_choose_discard(player_index, choice)
+		"choose_trash_return":
+			_handle_choose_trash_return(player_index, choice)
+		"choose_optional":
+			_handle_choose_optional(player_index, choice)
+		"choose_battlefield":
+			_handle_choose_battlefield(player_index, choice)
+		_:
+			_log("[ERROR] Unknown prompt type: %s" % prompt_type)
+
+
+func _handle_choose_target(player_index: int, choice: String) -> void:
+	var item: ChainItem = gs.pending_prompt.get("chain_item")
+	if item == null:
 		gs.pending_prompt.clear()
-		_log("> P%d chose %s as target" % [player_index + 1, target.display_name()])
-		# Execute the chain item now
-		var lines = ChainProcessor.handle_pass(gs, ability_resolver)
-		for l in lines:
-			_log(l)
-		_run_cleanup()
+		return
+	var target = gs.find_instance_anywhere(choice)
+	if target == null:
+		_log("[ERROR] Target '%s' not found." % choice)
+		return
+	var ab_params = {}
+	for ab in item.source_card.definition.abilities:
+		if ab.get("timing", "") == "resolution":
+			ab_params = ab.get("effect_params", {})
+			break
+	if not ab_params.is_empty() and not ConditionEvaluatorScript.evaluate_target_filter(ab_params, target, item.source_card, gs):
+		_log("[ERROR] Invalid target '%s'." % choice)
+		return
+	item.targets = [target]
+	item.needs_target = false
+	gs.pending_prompt.clear()
+	_log("> P%d chose %s as target" % [player_index + 1, target.display_name()])
+	var resolve_lines = ChainProcessor.resolve_chain_item(item, gs, ability_resolver)
+	for l in resolve_lines:
+		_log(l)
+	_run_cleanup()
+
+
+func _handle_choose_discard(player_index: int, choice: String) -> void:
+	var ps = gs.players[player_index]
+	var card = ps.get_hand_instance(choice)
+	if card == null:
+		_log("[ERROR] '%s' not in hand." % choice)
+		return
+	ps.hand.erase(card)
+	ps.move_to_trash(card)
+	ps.cards_discarded_count += 1
+	ps.discarded_this_turn.append(card)
+	gs.pending_prompt.clear()
+	_log("> P%d discarded %s" % [player_index + 1, card.display_name()])
+	for line in trigger_dispatcher.emit("on_discard", {
+		"discarded_card": card, "player_index": player_index, "controller": self
+	}, gs, self):
+		_log(line)
+	var cb: Callable = gs.pending_prompt.get("callback") if false else gs.pending_prompt.get("on_complete")
+	_run_cleanup()
+
+
+func _handle_choose_trash_return(player_index: int, choice: String) -> void:
+	var ps = gs.players[player_index]
+	var card = ps.find_instance(choice)
+	if card == null or not card in ps.trash:
+		_log("[ERROR] '%s' not in trash." % choice)
+		return
+	ps.move_to_hand(card)
+	gs.pending_prompt.clear()
+	_log("> P%d returned %s from trash" % [player_index + 1, card.display_name()])
+	_run_cleanup()
+
+
+func _handle_choose_optional(player_index: int, choice: String) -> void:
+	var ab: Dictionary = gs.pending_prompt.get("ability", {})
+	var source = gs.pending_prompt.get("source")
+	var ctx: Dictionary = gs.pending_prompt.get("ctx", {})
+	gs.pending_prompt.clear()
+	if choice == "yes" or choice == "true":
+		var target = trigger_dispatcher._resolve_trigger_target(ab, source, ctx, gs)
+		var effect_ctx = ctx.duplicate()
+		effect_ctx["controller"] = self
+		for line in ability_resolver.resolve_ability(ab, source, target, gs, effect_ctx):
+			_log(line)
 	else:
-		_log("[ERROR] Unknown prompt type: %s" % prompt_type)
+		_log("> P%d declined optional ability" % (player_index + 1))
+	_run_cleanup()
+
+
+func _handle_choose_battlefield(player_index: int, choice: String) -> void:
+	var bf_idx = gs.board.get_battlefield_index(choice)
+	if bf_idx < 0:
+		_log("[ERROR] Unknown battlefield '%s'." % choice)
+		return
+	gs.pending_prompt.clear()
+	if bf_idx in gs.board.staged_combats:
+		gs.board.staged_combats.erase(bf_idx)
+		for line in CombatProcessor.begin_combat(bf_idx, gs.attacker_player_index, gs, self):
+			_log(line)
+	elif bf_idx in gs.board.staged_showdowns:
+		gs.board.staged_showdowns.erase(bf_idx)
+		for line in ShowdownProcessor.begin_showdown(bf_idx, gs.turn_player_index, gs):
+			_log(line)
+	_run_cleanup()
+
+
+func _cmd_hide(player_index: int, args: Array) -> void:
+	if not _check_can_act(player_index):
+		return
+	# hide <id> at <battlefield>
+	if args.size() < 3 or args[1] != "at":
+		_log("[ERROR] Usage: hide <card-id> at <battlefield-a|battlefield-b>")
+		return
+	var card_id = args[0]
+	var bf_id = args[2]
+	var ps = gs.players[player_index]
+	var card = ps.get_hand_instance(card_id)
+	if card == null:
+		_log("[ERROR] '%s' not in hand." % card_id)
+		return
+	if not card.has_keyword("hidden") and not card.definition.has_keyword("hidden"):
+		_log("[ERROR] %s does not have Hidden." % card.definition.name)
+		return
+	var bf_idx = gs.board.get_battlefield_index(bf_id)
+	if bf_idx < 0:
+		_log("[ERROR] Unknown battlefield.")
+		return
+	var bf = gs.board.battlefields[bf_idx]
+	if bf.controller_index != player_index:
+		_log("[ERROR] You must control that battlefield to hide a card there.")
+		return
+	if bf.facedown_card != null:
+		_log("[ERROR] Facedown zone already occupied.")
+		return
+	ps.hand.erase(card)
+	card.is_face_down = true
+	card.location = bf_id
+	bf.facedown_card = card
+	_log("> P%d hid %s at %s" % [player_index + 1, card.definition.name, bf.display_name])
+	_run_cleanup()
+
+
+func _cmd_equip(player_index: int, args: Array) -> void:
+	if args.size() >= 3 and args[1] == "target":
+		_cmd_use(player_index, [args[0], "target", args[2]])
+	else:
+		_log("[ERROR] Usage: equip <gear-id> target <unit-id>")
 
 
 # ─── Cleanup helper ─────────────────────────────────────────────────────────
 
 func _run_cleanup() -> void:
-	var lines = CleanupProcessor.run(gs, ability_resolver)
+	var lines = CleanupProcessor.run(gs, ability_resolver, self)
 	for l in lines:
 		_log(l)
 	if gs.game_over:
@@ -1029,8 +1264,12 @@ func _find_player_permanent(player_index: int, inst_id: String) -> CardInstance:
 
 func _build_target_prompt(card: CardInstance, ab: Dictionary, player_index: int, game_state: GameState) -> String:
 	var target_filter = ab.get("effect_params", {}).get("target", "any")
-	return "[PROMPT] Choose a target for %s (filter: %s) — use: choose <id>" % [
-		card.definition.name, target_filter
+	var valid = TargetResolverScript.filter_with_params(target_filter, ab.get("effect_params", {}), card, game_state, {"player_index": player_index})
+	var ids: Array[String] = []
+	for t in valid:
+		ids.append(t.instance_id)
+	return "[PROMPT] Choose a target for %s — use: choose <%s>" % [
+		card.definition.name, "|".join(ids) if not ids.is_empty() else "id"
 	]
 
 
@@ -1121,6 +1360,7 @@ func _auto_recycle_rune(player_index: int, rune: CardInstance) -> void:
 
 
 func _log(text: String) -> void:
+	log_lines.append(text)
 	if text.begins_with("[ERROR]"):
 		last_command_error = true
 	game_log_message.emit(text)

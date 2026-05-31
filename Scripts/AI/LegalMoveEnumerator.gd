@@ -28,20 +28,23 @@ static func enumerate(gs: GameState, player_index: int) -> Array:
 				moves.append("mulligan %s %s" % [ps.hand[i].instance_id, ps.hand[j].instance_id])
 		return moves
 
-	# ── Pending choice ────────────────────────────────────────────────────────
-	if not gs.pending_prompt.is_empty():
-		if gs.pending_prompt.get("player_index", -1) != player_index:
-			return []
-		for choice in gs.pending_prompt.get("valid_choices", []):
-			moves.append("choose %s" % choice)
-		moves.append("choose none")
-		return moves
-
 	# ── Combat damage assignment ──────────────────────────────────────────────
 	if gs.combat_assignment_active:
 		if gs.attacker_player_index != player_index:
 			return []
 		return _enumerate_combat_assignments(gs)
+
+	# ── Pending choice ────────────────────────────────────────────────────────
+	if not gs.pending_prompt.is_empty():
+		if gs.pending_prompt.get("player_index", -1) != player_index:
+			return []
+		for choice in gs.pending_prompt.get("valid_choices", []):
+			if choice is CardInstance:
+				moves.append("choose %s" % choice.instance_id)
+			else:
+				moves.append("choose %s" % choice)
+		moves.append("choose none")
+		return moves
 
 	# ── Showdown / closed chain ───────────────────────────────────────────────
 	if gs.is_showdown_state():
@@ -83,6 +86,12 @@ static func enumerate(gs: GameState, player_index: int) -> Array:
 		if CostCalculator.can_afford(player_index, cost, gs):
 			moves.append("play %s from champion" % champ.instance_id)
 
+	# Hidden units in hand
+	for card in ps.hand:
+		if card.has_keyword("hidden"):
+			for bf in gs.board.battlefields:
+				moves.append("hide %s at %s" % [card.instance_id, bf.battlefield_id])
+
 	moves.append("end turn")
 	return moves
 
@@ -105,15 +114,19 @@ static func _add_playable_cards(gs: GameState, ps: PlayerState, player_index: in
 			continue
 
 		if card.definition.card_type == "unit":
-			# Units must be played to base (Ambush keyword not yet implemented).
 			moves.append("play %s" % card.instance_id)
-			# Accelerate option (still goes to base, just enters Ready)
+			if card.has_keyword("ambush"):
+				for bf_id in bf_ids:
+					moves.append("play %s to %s" % [card.instance_id, bf_id])
 			if card.has_keyword("accelerate"):
 				var accel_cost = CostCalculator.compute_play_cost(card, player_index, gs, true)
 				if CostCalculator.can_afford(player_index, accel_cost, gs):
 					moves.append("play %s accelerate" % card.instance_id)
 		elif card.definition.card_type == "gear":
 			moves.append("play %s" % card.instance_id)
+			for perm in ps.base_permanents:
+				if perm.definition.card_type == "unit":
+					moves.append("equip %s to %s" % [card.instance_id, perm.instance_id])
 		elif card.definition.card_type == "spell":
 			if card.definition.is_action:
 				# action spells can be played in main phase

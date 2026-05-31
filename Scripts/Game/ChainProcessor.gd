@@ -20,6 +20,20 @@ static func on_card_added_to_chain(gs: GameState) -> Array:
 	return log_lines
 
 
+static func resolve_chain_item(item: ChainItem, gs: GameState, ability_resolver: AbilityResolver) -> Array:
+	var log_lines: Array[String] = []
+	log_lines.append("> Resolving: %s" % item.describe())
+	var resolve_lines = _execute_chain_item(item, gs, ability_resolver)
+	log_lines.append_array(resolve_lines)
+	if gs.chain.is_empty():
+		log_lines.append_array(_return_to_open(gs))
+	else:
+		gs.passes_in_sequence = 0
+		gs.priority_player_index = 1 - item.owner_index
+		log_lines.append("[PROMPT] P%d: play Reaction or 'pass'" % (gs.priority_player_index + 1))
+	return log_lines
+
+
 static func handle_pass(gs: GameState, ability_resolver: AbilityResolver) -> Array:
 	var log_lines: Array[String] = []
 	gs.passes_in_sequence += 1
@@ -78,7 +92,14 @@ static func _execute_chain_item(item: ChainItem, gs: GameState, ability_resolver
 		for ab in card.definition.abilities:
 			if ab.get("timing", "") == "resolution":
 				var target = item.targets[0] if not item.targets.is_empty() else null
-				var ab_lines = ability_resolver.resolve_ability(ab, card, target, gs)
+				var owner_pi = card.owner_index
+				var cost = ab.get("cost", {})
+				if not cost.is_empty():
+					var computed = CostCalculator.compute_ability_cost(cost, card, target, gs)
+					if CostCalculator.can_afford(owner_pi, computed, gs):
+						CostCalculator.pay_cost(owner_pi, computed, card, gs)
+				var ctx = {"controller": null, "player_index": owner_pi}
+				var ab_lines = ability_resolver.resolve_ability(ab, card, target, gs, ctx)
 				log_lines.append_array(ab_lines)
 		# If spell → move to trash
 		if card.definition.card_type == "spell":
@@ -88,7 +109,8 @@ static func _execute_chain_item(item: ChainItem, gs: GameState, ability_resolver
 
 	elif item.item_type == ChainItem.ItemType.ABILITY:
 		var target = item.targets[0] if not item.targets.is_empty() else null
-		var ab_lines = ability_resolver.resolve_ability(item.ability_def, item.source_card, target, gs)
+		var ctx = {"player_index": item.source_card.owner_index if item.source_card else 0}
+		var ab_lines = ability_resolver.resolve_ability(item.ability_def, item.source_card, target, gs, ctx)
 		log_lines.append_array(ab_lines)
 
 	return log_lines

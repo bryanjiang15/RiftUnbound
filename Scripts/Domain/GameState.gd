@@ -40,6 +40,10 @@ var assigned_targets: Array = []
 
 # First turn bonus
 var first_channel_done: Array = [false, false]
+var second_player_index: int = 1
+
+# Combat mode: true = auto-assign damage (AI/default), false = manual assign
+var auto_combat_damage: bool = true
 
 
 func get_turn_player() -> PlayerState:

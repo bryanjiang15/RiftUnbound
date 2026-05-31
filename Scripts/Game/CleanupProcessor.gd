@@ -3,7 +3,7 @@ class_name CleanupProcessor
 # Runs the 8-step cleanup sequence described in §17 of the implementation rules.
 # Returns an array of log lines describing what happened.
 
-static func run(gs: GameState, ability_resolver: AbilityResolver) -> Array:
+static func run(gs: GameState, ability_resolver: AbilityResolver, controller: GameController = null) -> Array:
 	var log_lines: Array[String] = []
 
 	# Step 1: Check win condition
@@ -20,7 +20,7 @@ static func run(gs: GameState, ability_resolver: AbilityResolver) -> Array:
 	_update_combat_designations(gs)
 
 	# Step 3a + 3b: Deathknell triggers then kill units with lethal damage
-	var killed_lines = _process_deaths(gs, ability_resolver)
+	var killed_lines = _process_deaths(gs, ability_resolver, controller)
 	log_lines.append_array(killed_lines)
 
 	# Step 4: Battlefields with no units in Open State → Uncontrolled
@@ -45,7 +45,7 @@ static func run(gs: GameState, ability_resolver: AbilityResolver) -> Array:
 	# Step 8: If Neutral Open and there are staged combats/showdowns, prompt turn player to start one
 	if gs.current_state == TurnStateMachine.State.NEUTRAL_OPEN:
 		if not gs.board.staged_combats.is_empty() or not gs.board.staged_showdowns.is_empty():
-			log_lines.append_array(_prompt_staged(gs))
+			log_lines.append_array(_prompt_staged(gs, controller))
 
 	return log_lines
 
@@ -82,11 +82,10 @@ static func _update_combat_designations(gs: GameState) -> void:
 				u.is_defender = in_combat and (pi != gs.attacker_player_index if gs.combat_bf_index >= 0 else false)
 
 
-static func _process_deaths(gs: GameState, ability_resolver: AbilityResolver) -> Array:
+static func _process_deaths(gs: GameState, ability_resolver: AbilityResolver, controller: GameController = null) -> Array:
 	var log_lines: Array[String] = []
 	var units_to_kill: Array = []
 
-	# Collect all units with lethal damage
 	for ps in gs.players:
 		for u in ps.get_units_at_base():
 			if u.has_lethal_damage():
@@ -97,16 +96,20 @@ static func _process_deaths(gs: GameState, ability_resolver: AbilityResolver) ->
 				if u.has_lethal_damage():
 					units_to_kill.append(u)
 
-	# Fire Deathknell before removing
 	for u in units_to_kill:
-		if u.has_keyword("deathknell"):
-			log_lines.append("> %s Deathknell triggers" % u.display_name())
-			for ab in u.definition.abilities:
-				if ab.get("timing", "") == "on_death":
-					var ab_lines = ability_resolver.resolve_ability(ab, u, null, gs)
-					log_lines.append_array(ab_lines)
+		for ab in u.definition.abilities:
+			if ab.get("timing", "") == "on_death":
+				var dk_line = "> %s Deathknell triggers" % u.display_name()
+				log_lines.append(dk_line)
+				if controller != null:
+					controller.log_lines.append(dk_line)
+				var ctx = {"player_index": u.owner_index, "controller": controller}
+				var ab_lines = ability_resolver.resolve_ability(ab, u, null, gs, ctx)
+				log_lines.append_array(ab_lines)
+				if controller != null:
+					for line in ab_lines:
+						controller.log_lines.append(line)
 
-	# Kill units
 	for u in units_to_kill:
 		log_lines.append("> %s (P%d) was killed" % [u.display_name(), u.owner_index + 1])
 		gs.board.remove_unit_from_battlefield(u)
@@ -117,23 +120,15 @@ static func _process_deaths(gs: GameState, ability_resolver: AbilityResolver) ->
 
 
 static func _recall_unattached_gear(gs: GameState, log_lines: Array) -> void:
-	for bf in gs.board.battlefields:
-		for pi in range(bf.units.size()):
-			var units_copy = Array(bf.units[pi])
-			for u in units_copy:
-				for gear in Array(u.attached_gear):
-					# Gear stays attached as long as unit is on the battlefield
-					pass
-	# Unattached gear at battlefields (not attached to any unit)
 	for pi in range(gs.players.size()):
 		var ps: PlayerState = gs.players[pi]
 		for gear in Array(ps.base_permanents):
-			if gear.definition.card_type == "gear" and gear.attached_to == null:
-				if gear.is_at_battlefield():
-					# Recall to base
-					gs.board.remove_unit_from_battlefield(gear)
-					gear.location = "base"
-					log_lines.append("> %s recalled to P%d base" % [gear.display_name(), pi + 1])
+			if gear.definition.card_type != "gear":
+				continue
+			if gear.is_at_battlefield() and gear.attached_to == null:
+				gs.board.remove_unit_from_battlefield(gear)
+				gear.location = "base"
+				log_lines.append("> %s recalled to P%d base" % [gear.display_name(), pi + 1])
 
 
 static func _mark_staged(gs: GameState, log_lines: Array) -> void:
@@ -155,34 +150,42 @@ static func _mark_staged(gs: GameState, log_lines: Array) -> void:
 				log_lines.append("> Showdown staged at %s" % bf.display_name)
 
 
-static func _prompt_staged(gs: GameState) -> Array:
+static func _prompt_staged(gs: GameState, controller: GameController = null) -> Array:
 	var log_lines: Array[String] = []
-	# Auto-start the first staged combat or showdown
+	var total_staged = gs.board.staged_combats.size() + gs.board.staged_showdowns.size()
+	if total_staged > 1:
+		var choices: Array = []
+		for idx in gs.board.staged_combats:
+			choices.append(gs.board.battlefields[idx].battlefield_id)
+		for idx in gs.board.staged_showdowns:
+			var bid = gs.board.battlefields[idx].battlefield_id
+			if not bid in choices:
+				choices.append(bid)
+		gs.pending_prompt = {
+			"player_index": gs.turn_player_index,
+			"type": "choose_battlefield",
+			"valid_choices": choices,
+			"prompt": "[PROMPT] Choose battlefield to resolve — use: choose <id>",
+		}
+		log_lines.append(gs.pending_prompt["prompt"])
+		return log_lines
+
 	if not gs.board.staged_combats.is_empty():
 		var bf_idx = gs.board.staged_combats[0]
 		gs.board.staged_combats.erase(bf_idx)
 		gs.board.staged_showdowns.erase(bf_idx)
 		gs.board.battlefields[bf_idx].is_contested = false
-		gs.combat_bf_index = bf_idx
-		gs.current_state = TurnStateMachine.State.SHOWDOWN_OPEN
-		# Focus goes to the player who moved in (contested applicant)
-		# We track attacker index set during movement
-		gs.focus_player_index = gs.attacker_player_index if gs.attacker_player_index >= 0 else gs.turn_player_index
-		log_lines.append("> Combat begins at %s — P%d has Focus" % [
-			gs.board.battlefields[bf_idx].display_name, gs.focus_player_index + 1
-		])
-		log_lines.append("[PROMPT] P%d: Play an Action/Reaction card or 'pass' to continue to combat damage." % (gs.focus_player_index + 1))
+		log_lines.append_array(CombatProcessor.begin_combat(
+			bf_idx,
+			gs.attacker_player_index if gs.attacker_player_index >= 0 else gs.turn_player_index,
+			gs,
+			controller
+		))
 	elif not gs.board.staged_showdowns.is_empty():
 		var bf_idx = gs.board.staged_showdowns[0]
 		gs.board.staged_showdowns.erase(bf_idx)
 		gs.board.battlefields[bf_idx].is_contested = false
-		gs.board.active_showdown_bf = bf_idx
-		gs.current_state = TurnStateMachine.State.SHOWDOWN_OPEN
-		gs.focus_player_index = gs.turn_player_index
-		log_lines.append("> Non-combat Showdown at %s — P%d has Focus" % [
-			gs.board.battlefields[bf_idx].display_name, gs.focus_player_index + 1
-		])
-		log_lines.append("[PROMPT] P%d: Play an Action/Reaction card or 'pass'." % (gs.focus_player_index + 1))
+		log_lines.append_array(ShowdownProcessor.begin_showdown(bf_idx, gs.turn_player_index, gs))
 	return log_lines
 
 

@@ -77,3 +77,41 @@ static func build_player_state(deck_path: String, player_index: int) -> PlayerSt
 	ps.deck_battlefields = data.get("battlefields", [])
 
 	return ps
+
+
+static func validate(deck_data: Dictionary) -> Array:
+	var errors: Array[String] = []
+	var main_count = 0
+	var name_counts: Dictionary = {}
+	var legend_id = deck_data.get("legend", "")
+	var legend_def = CardLoader.get_card(legend_id) if not legend_id.is_empty() else null
+	var allowed_domains: Array = legend_def.domain if legend_def else []
+
+	for entry in deck_data.get("main_deck", []):
+		var count = int(entry.get("count", 1))
+		main_count += count
+		var cid = entry.get("card_id", "")
+		name_counts[cid] = int(name_counts.get(cid, 0)) + count
+		var def = CardLoader.get_card(cid)
+		if def == null:
+			errors.append("Unknown card: %s" % cid)
+			continue
+		if not allowed_domains.is_empty():
+			for d in def.domain:
+				if not d in allowed_domains:
+					errors.append("Domain violation: %s uses %s not in legend" % [cid, d])
+
+	if main_count < 40:
+		errors.append("Main deck has %d cards (need 40+)" % main_count)
+
+	for cid in name_counts:
+		if name_counts[cid] > 3:
+			errors.append("Too many copies of %s (%d)" % [cid, name_counts[cid]])
+
+	var rune_count = 0
+	for entry in deck_data.get("rune_deck", []):
+		rune_count += int(entry.get("count", 1))
+	if rune_count != 12:
+		errors.append("Rune deck has %d runes (need 12)" % rune_count)
+
+	return errors

@@ -1,0 +1,27 @@
+{
+  "first_player": 0,
+  "turn_number": 1,
+  "phase": "BEGINNING",
+  "state": "NEUTRAL_OPEN",
+  "battlefields": ["zaun-warrens", "targons-peak"],
+  "battlefield_control": [-1, -1],
+  "players": [
+    {
+      "score": 0,
+      "legend": "jinx-loose-cannon",
+      "pool": {"energy": 0, "power": {}},
+      "hand": ["fury-rune"],
+      "base": [],
+      "deck_size": 10,
+      "rune_deck_size": 12
+    },
+    {
+      "score": 0,
+      "pool": {"energy": 0, "power": {}},
+      "hand": [],
+      "base": [],
+      "deck_size": 10,
+      "rune_deck_size": 12
+    }
+  ]
+}

@@ -25,7 +25,7 @@
   ],
   "rune_deck": [
     {"card_id": "fury-rune", "count": 7},
-    {"card_id": "chaos-rune", "count": 6}
+    {"card_id": "chaos-rune", "count": 5}
   ],
   "battlefields": ["zaun-warrens", "targons-peak", "reavers-row"]
 }
