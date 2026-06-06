@@ -29,7 +29,6 @@ static func run(assertions) -> void:
 	_test_flame_chompers_discard_prompts(assertions)
 	_test_flame_chompers_not_on_other_discard(assertions)
 	_test_scrapheap_on_discard_effect(assertions)
-	_test_scrapheap_discard_clears_prompt(assertions)
 	_test_p2_can_act_after_chemtech_scrapheap_turn(assertions)
 
 
@@ -326,12 +325,6 @@ static func _test_scrapheap_on_discard_effect(assertions) -> void:
 	var h = _harness_with_play({}, ["scrapheap", "void-seeker"], "chemtech-enforcer", 5)
 	h.cmd_with_choices(0, "play chemtech-enforcer", ["scrapheap"])
 	assertions.assert_log_contains(h.controller, "drew", "scrapheap draws on discard")
-
-
-# BUG-002: stale choose_discard prompt blocked AI after on_discard draw (scrapheap).
-static func _test_scrapheap_discard_clears_prompt(assertions) -> void:
-	var h = _harness_with_play({}, ["scrapheap", "void-seeker"], "chemtech-enforcer", 5)
-	h.cmd_with_choices(0, "play chemtech-enforcer", ["scrapheap"])
 	assertions.assert_true(h.gs().pending_prompt.is_empty(), "scrapheap on_discard draw clears discard prompt")
 
 
