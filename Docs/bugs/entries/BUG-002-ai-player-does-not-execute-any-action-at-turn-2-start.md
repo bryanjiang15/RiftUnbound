@@ -1,10 +1,11 @@
 ---
 id: BUG-002
 title: AI player does not execute any action at turn 2 start
-status: open
+status: fixed
 severity: medium
 area: ai
 reported: 2026-06-06
+fixed_in: GameController._handle_choose_discard + CardScenarioTests
 cards: scrapheap, chemtech-enforcer
 commands: 
 github_issue: 2

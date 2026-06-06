@@ -29,6 +29,7 @@ static func run(assertions) -> void:
 	_test_flame_chompers_discard_prompts(assertions)
 	_test_flame_chompers_not_on_other_discard(assertions)
 	_test_scrapheap_on_discard_effect(assertions)
+	_test_p2_can_act_after_chemtech_scrapheap_turn(assertions)
 
 
 static func _test_magma_wurm_aura(assertions) -> void:
@@ -324,6 +325,26 @@ static func _test_scrapheap_on_discard_effect(assertions) -> void:
 	var h = _harness_with_play({}, ["scrapheap", "void-seeker"], "chemtech-enforcer", 5)
 	h.cmd_with_choices(0, "play chemtech-enforcer", ["scrapheap"])
 	assertions.assert_log_contains(h.controller, "drew", "scrapheap draws on discard")
+	assertions.assert_true(h.gs().pending_prompt.is_empty(), "scrapheap on_discard draw clears discard prompt")
+
+
+static func _test_p2_can_act_after_chemtech_scrapheap_turn(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN", "turn_number": 1,
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 5, "power": {}}, "hand": ["chemtech-enforcer", "scrapheap", "void-seeker"],
+			 "runes": [{"id": "fury-rune"}, {"id": "chaos-rune"}],
+			 "deck_size": 10, "rune_deck_size": 12},
+			{"deck_size": 10, "rune_deck_size": 12}
+		]
+	})
+	h.cmd_with_choices(0, "play chemtech-enforcer", ["scrapheap"])
+	h.cmd(0, "end turn")
+	assertions.assert_true(h.gs().pending_prompt.is_empty(), "no stale prompt after p1 end turn")
+	assertions.assert_eq(h.gs().turn_player_index, 1, "turn passes to p2")
+	assertions.assert_true(h.gs().can_player_act(1), "p2 can act at turn 2 start for ai trigger")
 
 
 static func _harness_with_play(base_ally: Dictionary, extra_hand: Array, play_id: String = "", energy: int = 10) -> TcgTestHarness:
