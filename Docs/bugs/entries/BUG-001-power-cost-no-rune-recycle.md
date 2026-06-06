@@ -8,7 +8,7 @@ reported: 2026-06-06
 fixed_in: try_pay_cost wired through all cost paths
 cards: flame-chompers, blazing-scorcher
 commands: choose yes (Flame Chompers on_discard); play blazing-scorcher accelerate
-github_issue:
+github_issue: 1
 ---
 
 ## Summary

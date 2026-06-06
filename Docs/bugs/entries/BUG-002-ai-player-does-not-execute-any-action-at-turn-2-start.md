@@ -6,8 +6,8 @@ severity: medium
 area: ai
 reported: 2026-06-06
 cards: scrapheap, chemtech-enforcer
-commands:
-github_issue:
+commands: 
+github_issue: 2
 ---
 
 ## Summary

@@ -26,4 +26,7 @@ static func _test_spell_adds_to_chain(assertions) -> void:
 		]
 	})
 	h.cmd_with_choices(0, "play void-seeker", ["blazing-scorcher"])
-	assertions.assert_true(h.gs().chain.is_empty() or not h.controller.last_command_error, "spell play resolves or chains")
+	assertions.assert_no_error(h.controller, "void seeker plays without error")
+	assertions.assert_true(h.gs().chain.is_empty(), "void seeker chain resolves")
+	var enemy = h.gs().board.battlefields[0].units[1][0]
+	assertions.assert_true(enemy.damage > 0, "void seeker deals damage to target")

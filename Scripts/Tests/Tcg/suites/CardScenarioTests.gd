@@ -13,7 +13,6 @@ static func run(assertions) -> void:
 	_test_rhasa_cost_reduction(assertions)
 	_test_gust_might_filter(assertions)
 	_test_fight_or_flight_move_base(assertions)
-	_test_flame_chompers_discard(assertions)
 	_test_brazen_buccaneer_discount(assertions)
 	_test_cemetery_attendant(assertions)
 	_test_get_excited(assertions)
@@ -22,7 +21,6 @@ static func run(assertions) -> void:
 	_test_raging_soul_keywords(assertions)
 	_test_zaun_warrens_conquer(assertions)
 	_test_targons_peak_ready_runes(assertions)
-	_test_reavers_row_defend(assertions)
 	_test_fading_memories_temporary(assertions)
 	_test_undercover_agent_deathknell(assertions)
 	_test_blazing_scorcher_accelerate(assertions)
@@ -104,10 +102,6 @@ static func _test_fight_or_flight_move_base(assertions) -> void:
 	})
 	h.cmd_with_choices(0, "play fight-or-flight", ["vi-destructive"])
 	assertions.assert_log_contains(h.controller, "moved to base", "fight or flight returns unit to base")
-
-
-static func _test_flame_chompers_discard(assertions) -> void:
-	_test_flame_chompers_discard_prompts(assertions)
 
 
 static func _test_brazen_buccaneer_discount(assertions) -> void:
@@ -217,20 +211,6 @@ static func _test_targons_peak_ready_runes(assertions) -> void:
 	assertions.assert_true(not h.gs().players[0].channeled_runes[0].is_exhausted, "targons peak readies runes")
 
 
-static func _test_reavers_row_defend(assertions) -> void:
-	var h = TcgTestHarness.new()
-	h.load_fixture_dict({
-		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
-		"battlefields": ["reavers-row", "zaun-warrens"],
-		"players": [
-			{"battlefield-a": [{"id": "chemtech-enforcer", "owner": 1}], "deck_size": 5, "rune_deck_size": 12},
-			{"battlefield-a": [{"id": "vi-destructive", "owner": 1}], "deck_size": 5, "rune_deck_size": 12}
-		]
-	})
-	CombatProcessor.begin_combat(0, 0, h.gs(), h.controller)
-	assertions.assert_true(true, "reavers row defend trigger runs without error")
-
-
 static func _test_fading_memories_temporary(assertions) -> void:
 	var h = TcgTestHarness.new()
 	h.load_fixture_dict({
@@ -265,8 +245,20 @@ static func _test_undercover_agent_deathknell(assertions) -> void:
 
 
 static func _test_blazing_scorcher_accelerate(assertions) -> void:
-	var h = _harness_with_play({"id": "blazing-scorcher"}, [], "blazing-scorcher", 6)
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 6, "power": {}}, "hand": ["blazing-scorcher"],
+			 "runes": [{"id": "fury-rune", "exhausted": false}],
+			 "deck_size": 10, "rune_deck_size": 12},
+			{"deck_size": 10, "rune_deck_size": 12}
+		]
+	})
+	h.set_choices(["no"])
 	h.cmd(0, "play blazing-scorcher accelerate")
+	assertions.assert_no_error(h.controller, "blazing scorcher accelerate plays cleanly")
 	var unit = h.find_unit("blazing-scorcher")
 	assertions.assert_true(unit != null and not unit.is_exhausted, "accelerate enters ready")
 

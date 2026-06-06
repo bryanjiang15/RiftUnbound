@@ -1,102 +1,35 @@
 #!/usr/bin/env python3
-"""Local bug backlog — create, list, and update entries under Docs/bugs/."""
+"""Bug backlog — create local entries and sync to GitHub by default."""
 
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from datetime import date
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-BUGS_DIR = ROOT / "Docs" / "bugs"
-ENTRIES_DIR = BUGS_DIR / "entries"
-LOGS_DIR = BUGS_DIR / "logs"
-BACKLOG = BUGS_DIR / "backlog.md"
-
-STATUSES = ("open", "investigating", "confirmed", "fixed", "wontfix", "duplicate")
-SEVERITIES = ("critical", "high", "medium", "low")
-AREAS = ("engine", "ui", "ai", "cards", "tests", "docs")
-
-
-def slugify(text: str) -> str:
-    text = text.lower().strip()
-    text = re.sub(r"[^a-z0-9]+", "-", text)
-    return text.strip("-")[:60] or "untitled"
-
-
-def next_bug_id() -> str:
-    max_n = 0
-    for path in ENTRIES_DIR.glob("BUG-*.md"):
-        m = re.match(r"BUG-(\d+)", path.name)
-        if m:
-            max_n = max(max_n, int(m.group(1)))
-    return f"BUG-{max_n + 1:03d}"
-
-
-def parse_frontmatter(text: str) -> dict[str, str]:
-    if not text.startswith("---"):
-        return {}
-    end = text.find("\n---", 3)
-    if end == -1:
-        return {}
-    block = text[3:end].strip()
-    data: dict[str, str] = {}
-    for line in block.splitlines():
-        if ":" in line:
-            key, val = line.split(":", 1)
-            data[key.strip()] = val.strip()
-    return data
+from bug_io import (
+    AREAS,
+    ENTRIES_DIR,
+    LOGS_DIR,
+    ROOT,
+    SEVERITIES,
+    STATUSES,
+    ensure_github_issue,
+    find_entry_by_id,
+    next_bug_id,
+    promote_entry,
+    rebuild_backlog,
+    slugify,
+    sync_status_to_github,
+    update_meta,
+)
 
 
 def load_entries() -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
-    for path in sorted(ENTRIES_DIR.glob("BUG-*.md")):
-        meta = parse_frontmatter(path.read_text(encoding="utf-8"))
-        meta["_path"] = str(path.relative_to(ROOT))
-        meta["_file"] = path.name
-        if "id" not in meta:
-            meta["id"] = path.stem.split("-")[0] + "-" + path.stem.split("-")[1]
-        rows.append(meta)
-    rows.sort(key=lambda r: r.get("id", ""))
-    return rows
+    from bug_io import load_entries as _load
 
-
-def rebuild_backlog() -> None:
-    entries = load_entries()
-    counts = {s: 0 for s in STATUSES}
-    lines = [
-        "# Bug Backlog Index",
-        "",
-        "> Auto-updated by `python3 Scripts/bugs/report_bug.py`. Edit entries in `entries/`, not this table.",
-        "",
-        "| ID | Status | Sev | Area | Title | Reported |",
-        "|----|--------|-----|------|-------|----------|",
-    ]
-    for e in entries:
-        status = e.get("status", "open")
-        counts[status] = counts.get(status, 0) + 1
-        link = f"[{e['id']}](entries/{e['_file']})"
-        lines.append(
-            f"| {link} | {status} | {e.get('severity', '?')} | {e.get('area', '?')} "
-            f"| {e.get('title', e['_file'])} | {e.get('reported', '?')} |"
-        )
-    if not entries:
-        lines.append("| — | — | — | — | *No bugs filed yet* | — |")
-    lines.extend(
-        [
-            "",
-            "**Counts:** "
-            + f"{counts.get('open', 0)} open · "
-            + f"{counts.get('investigating', 0)} investigating · "
-            + f"{counts.get('confirmed', 0)} confirmed · "
-            + f"{counts.get('fixed', 0)} fixed · "
-            + f"{counts.get('wontfix', 0)} wontfix",
-            "",
-        ]
-    )
-    BACKLOG.write_text("\n".join(lines), encoding="utf-8")
+    return _load()
 
 
 def cmd_list(_: argparse.Namespace) -> int:
@@ -115,33 +48,42 @@ def cmd_list(_: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     bug_id = args.bug_id.upper()
-    path = _find_entry(bug_id)
+    path = find_entry_by_id(bug_id)
     if not path:
         print(f"Not found: {bug_id}", file=sys.stderr)
         return 1
-    text = path.read_text(encoding="utf-8")
     if args.status not in STATUSES:
         print(f"Invalid status. Choose: {', '.join(STATUSES)}", file=sys.stderr)
         return 1
-    if re.search(r"^status:.*$", text, re.MULTILINE):
-        text = re.sub(r"^status:.*$", f"status: {args.status}", text, count=1, flags=re.MULTILINE)
-    else:
-        text = text.replace("---\n", f"---\nstatus: {args.status}\n", 1)
+
+    fields: dict[str, str] = {"status": args.status}
     if args.fixed_in:
-        if re.search(r"^fixed_in:.*$", text, re.MULTILINE):
-            text = re.sub(r"^fixed_in:.*$", f"fixed_in: {args.fixed_in}", text, count=1, flags=re.MULTILINE)
-        else:
-            text = text.replace("---\n", f"---\nfixed_in: {args.fixed_in}\n", 1)
-    path.write_text(text, encoding="utf-8")
+        fields["fixed_in"] = args.fixed_in
+    meta = update_meta(path, **fields)
     rebuild_backlog()
     print(f"Updated {bug_id} → {args.status}")
+
+    if args.no_github:
+        return 0
+
+    issue = ensure_github_issue(path)
+    if not issue:
+        print("GitHub sync skipped (promote failed or gh unavailable).", file=sys.stderr)
+        return 0
+
+    try:
+        sync_status_to_github(
+            issue,
+            args.status,
+            bug_id=bug_id,
+            entry_name=path.name,
+            fixed_in=args.fixed_in or meta.get("fixed_in", ""),
+        )
+        print(f"GitHub: https://github.com/bryanjiang15/RiftUnbound/issues/{issue}")
+    except Exception:
+        print("Local status saved; GitHub sync failed.", file=sys.stderr)
+        return 0
     return 0
-
-
-def _find_entry(bug_id: str) -> Path | None:
-    for path in ENTRIES_DIR.glob(f"{bug_id}*.md"):
-        return path
-    return None
 
 
 def cmd_new(args: argparse.Namespace) -> int:
@@ -220,7 +162,21 @@ def cmd_new(args: argparse.Namespace) -> int:
     print(f"Created {entry_path.relative_to(ROOT)}")
     if console_log.strip():
         print(f"Log saved to {log_path.relative_to(ROOT)}")
-    print(f"View index: Docs/bugs/backlog.md")
+
+    if args.no_github:
+        print("Skipped GitHub (--no-github).")
+        return 0
+
+    result = promote_entry(entry_path)
+    if result:
+        issue_num, url = result
+        print(f"GitHub issue #{issue_num}: {url}")
+    else:
+        print(
+            "Local entry saved; GitHub issue not created. "
+            f"Retry: python3 Scripts/bugs/promote_to_github.py {bug_id}",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -244,10 +200,12 @@ def _multiline_input(prompt: str) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Riftbound local bug backlog")
+    parser = argparse.ArgumentParser(
+        description="Riftbound bug backlog (local entry + GitHub issue by default)"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_new = sub.add_parser("new", help="File a new bug")
+    p_new = sub.add_parser("new", help="File a new bug (creates GitHub issue by default)")
     p_new.add_argument("--title", "-t")
     p_new.add_argument("--severity", "-s", choices=SEVERITIES)
     p_new.add_argument("--area", "-a", choices=AREAS)
@@ -259,15 +217,25 @@ def main() -> int:
     p_new.add_argument("--commands")
     p_new.add_argument("--log-file", "-l", help="Path to console log text file")
     p_new.add_argument("--no-log-prompt", action="store_true")
+    p_new.add_argument(
+        "--no-github",
+        action="store_true",
+        help="Local entry only (offline / skip gh)",
+    )
     p_new.set_defaults(func=cmd_new)
 
     p_list = sub.add_parser("list", help="List all bugs")
     p_list.set_defaults(func=cmd_list)
 
-    p_status = sub.add_parser("status", help="Update bug status")
+    p_status = sub.add_parser("status", help="Update bug status (syncs GitHub by default)")
     p_status.add_argument("bug_id", help="e.g. BUG-003")
     p_status.add_argument("status", choices=STATUSES)
     p_status.add_argument("--fixed-in", help="Commit hash or PR reference")
+    p_status.add_argument(
+        "--no-github",
+        action="store_true",
+        help="Update local entry only",
+    )
     p_status.set_defaults(func=cmd_status)
 
     p_rebuild = sub.add_parser("rebuild", help="Regenerate backlog.md from entries")
