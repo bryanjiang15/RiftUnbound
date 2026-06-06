@@ -264,6 +264,10 @@ static func _pending_choice_context(gs: GameState) -> Dictionary:
 		if not parts.is_empty():
 			result["ability_description"] = "; ".join(parts)
 
+	if gs.pending_prompt.get("type", "") == "choose_discard":
+		result["remaining_discards"] = gs.pending_prompt.get("remaining", 1)
+		result["mandatory"] = gs.pending_prompt.get("mandatory", true)
+
 	return result
 
 

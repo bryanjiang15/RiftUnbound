@@ -216,16 +216,22 @@ func _recycle(params: Dictionary, source: CardInstance, gs: GameState, owner: in
 
 
 func _discard(params: Dictionary, source: CardInstance, gs: GameState, owner: int, ctx: Dictionary) -> Array:
-	var log_lines: Array[String] = []
 	var amount: int = params.get("amount", 1)
+	var ps: PlayerState = gs.players[owner]
+	var controller: GameController = ctx.get("controller")
+	if controller != null and amount > 0 and not ps.hand.is_empty():
+		return controller.begin_discard(owner, amount, ctx.get("continuation", {}), source, ctx.get("ability", {}))
+	return _discard_sync(amount, source, gs, owner, ctx)
+
+
+func _discard_sync(amount: int, source: CardInstance, gs: GameState, owner: int, ctx: Dictionary) -> Array:
+	var log_lines: Array[String] = []
 	var ps: PlayerState = gs.players[owner]
 	var controller: GameController = ctx.get("controller")
 	for _i in range(amount):
 		if ps.hand.is_empty():
 			break
 		var card = ps.hand[0]
-		if controller != null and ps.hand.size() > 1:
-			card = ps.hand[0]
 		ps.move_to_trash(card)
 		ps.cards_discarded_count += 1
 		ps.discarded_this_turn.append(card)
@@ -234,14 +240,25 @@ func _discard(params: Dictionary, source: CardInstance, gs: GameState, owner: in
 			log_lines.append_array(controller.trigger_dispatcher.emit("on_discard", {
 				"discarded_card": card, "player_index": owner, "controller": controller
 			}, gs, controller))
+			if not gs.pending_prompt.is_empty():
+				return log_lines
 	return log_lines
 
 
 func _discard_then_draw(params: Dictionary, source: CardInstance, gs: GameState, owner: int, ctx: Dictionary) -> Array:
-	var log_lines: Array[String] = []
 	var discard_n = int(params.get("discard_amount", 1))
 	var draw_n = int(params.get("draw_amount", discard_n))
-	log_lines.append_array(_discard({"amount": discard_n}, source, gs, owner, ctx))
+	var controller: GameController = ctx.get("controller")
+	if controller != null and discard_n > 0 and not gs.players[owner].hand.is_empty():
+		var draw_ctx = ctx.duplicate()
+		draw_ctx["continuation"] = {
+			"kind": "discard_then_draw",
+			"draw_amount": draw_n,
+			"owner": owner,
+		}
+		return controller.begin_discard(owner, discard_n, draw_ctx["continuation"], source, ctx.get("ability", {}))
+	var log_lines: Array[String] = []
+	log_lines.append_array(_discard_sync(discard_n, source, gs, owner, ctx))
 	log_lines.append_array(_draw({"amount": draw_n}, source, gs, owner))
 	return log_lines
 
@@ -385,11 +402,8 @@ func _deal_damage_discarded_cost(params: Dictionary, source: CardInstance, targe
 	var energy = 0
 	if not ps.discarded_this_turn.is_empty():
 		energy = ps.discarded_this_turn[ps.discarded_this_turn.size() - 1].definition.energy_cost
-	elif not ps.hand.is_empty():
-		energy = ps.hand[0].definition.energy_cost
-		log_lines.append_array(_discard({"amount": 1}, source, gs, owner, ctx))
 	else:
-		return ["> P%d has no cards to discard" % (owner + 1)]
+		return ["> P%d has no discarded card for damage" % (owner + 1)]
 	if target == null:
 		return log_lines
 	target.add_damage(energy)

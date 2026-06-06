@@ -93,7 +93,8 @@ Schema version 1.0. Fields visible to the agent:
 | `battlefields` | Per-battlefield: controller, my_units, opponent_units, contested flag |
 | `legal_moves` | Pre-enumerated list of all legal command strings for this decision |
 | `legal_action_categories` | High-level action types available |
-| `pending_choice_options` | Options for `pending_choice` decisions |
+| `pending_choice_options` | Options for `pending_choice` decisions (`choose <id>`, `choose yes`/`no`, etc.) |
+| `pending_choice_context` | Prompt text, source card, ability description; for discards includes `remaining_discards` |
 | `combat_assignment_active`, `remaining_attacker_might`, `damage_assigned` | Combat context |
 | `full_state_text` | Human-readable board description from Godot |
 

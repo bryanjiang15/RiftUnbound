@@ -192,14 +192,11 @@ static func pay_cost(player_index: int, cost: Dictionary, source: CardInstance, 
 			break
 		var card = ps.deck.pop_back()
 		ps.recycle_to_bottom(card, false)
-	var discard_n = int(cost.get("discard", 0))
-	for _i in range(discard_n):
-		if ps.hand.is_empty():
-			break
-		var card = ps.hand[0]
-		ps.move_to_trash(card)
-		ps.cards_discarded_count += 1
-		ps.discarded_this_turn.append(card)
+	# Discard leg is handled via GameController.begin_discard (player choice + on_discard triggers).
+
+
+static func discard_count(cost: Dictionary) -> int:
+	return int(cost.get("discard", 0))
 
 
 static func _copy_power_cost(power_cost: Array) -> Array:

@@ -26,6 +26,11 @@ static func run(assertions) -> void:
 	_test_fading_memories_temporary(assertions)
 	_test_undercover_agent_deathknell(assertions)
 	_test_blazing_scorcher_accelerate(assertions)
+	_test_chemtech_discards_once(assertions)
+	_test_blazing_scorcher_discard_no_prompt(assertions)
+	_test_flame_chompers_discard_prompts(assertions)
+	_test_flame_chompers_not_on_other_discard(assertions)
+	_test_scrapheap_on_discard_effect(assertions)
 
 
 static func _test_magma_wurm_aura(assertions) -> void:
@@ -46,7 +51,7 @@ static func _test_traveling_merchant_on_move(assertions) -> void:
 			{"deck_size": 5, "rune_deck_size": 12}
 		]
 	})
-	h.cmd(0, "move traveling-merchant to battlefield-a")
+	h.cmd_with_choices(0, "move traveling-merchant to battlefield-a", ["fury-rune"])
 	assertions.assert_log_contains(h.controller, "discarded", "traveling merchant discards on move")
 
 
@@ -102,23 +107,7 @@ static func _test_fight_or_flight_move_base(assertions) -> void:
 
 
 static func _test_flame_chompers_discard(assertions) -> void:
-	var h = TcgTestHarness.new()
-	h.load_fixture_dict({
-		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
-		"battlefields": ["zaun-warrens", "targons-peak"],
-		"players": [
-			{"pool": {"energy": 0, "power": {"fury": 1}}, "hand": ["flame-chompers", "fury-rune"],
-			 "deck_size": 5, "rune_deck_size": 12},
-			{"deck_size": 5, "rune_deck_size": 12}
-		]
-	})
-	var card = h.gs().players[0].hand[0]
-	h.gs().players[0].move_to_trash(card)
-	h.set_choices(["yes"])
-	for line in h.controller.trigger_dispatcher.emit("on_discard", {"discarded_card": card, "player_index": 0, "controller": h.controller}, h.gs(), h.controller):
-		h.controller.log_lines.append(line)
-	h.cmd(0, "choose yes")
-	assertions.assert_log_contains(h.controller, "played itself", "flame chompers play_self on discard")
+	_test_flame_chompers_discard_prompts(assertions)
 
 
 static func _test_brazen_buccaneer_discount(assertions) -> void:
@@ -153,13 +142,13 @@ static func _test_get_excited(assertions) -> void:
 			{"deck_size": 5, "rune_deck_size": 12}
 		]
 	})
-	h.cmd_with_choices(0, "play get-excited", ["blazing-scorcher"])
+	h.cmd_with_choices(0, "play get-excited", ["blazing-scorcher", "void-seeker"])
 	assertions.assert_log_contains(h.controller, "damage", "get excited deals damage")
 
 
 static func _test_jinx_demolitionist_discard(assertions) -> void:
-	var h = _harness_with_play({}, [{"id": "fury-rune"}, {"id": "fury-rune"}], "jinx-demolitionist", 10)
-	h.cmd(0, "play jinx-demolitionist")
+	var h = _harness_with_play({}, [{"id": "fury-rune"}, {"id": "fury-rune"}, {"id": "void-seeker"}], "jinx-demolitionist", 10)
+	h.cmd_with_choices(0, "play jinx-demolitionist", ["no", "fury-rune", "void-seeker"])
 	assertions.assert_log_contains(h.controller, "discarded", "jinx demolitionist discards on play")
 
 
@@ -206,7 +195,9 @@ static func _test_zaun_warrens_conquer(assertions) -> void:
 			{"deck_size": 5, "rune_deck_size": 12}
 		]
 	})
+	h.set_choices(["fury-rune"])
 	ShowdownProcessor.establish_control(h.gs(), 0, 0, true, h.controller)
+	h._drain_prompts(0)
 	assertions.assert_log_contains(h.controller, "discarded", "zaun warrens discard_then_draw on conquer")
 
 
@@ -267,7 +258,9 @@ static func _test_undercover_agent_deathknell(assertions) -> void:
 			{"deck_size": 5, "rune_deck_size": 12}
 		]
 	})
+	h.set_choices(["fury-rune", "fury-rune"])
 	CleanupProcessor.run(h.gs(), h.controller.ability_resolver, h.controller)
+	h._drain_prompts(0)
 	assertions.assert_log_contains(h.controller, "discarded", "undercover agent deathknell discard_then_draw")
 
 
@@ -276,6 +269,69 @@ static func _test_blazing_scorcher_accelerate(assertions) -> void:
 	h.cmd(0, "play blazing-scorcher accelerate")
 	var unit = h.find_unit("blazing-scorcher")
 	assertions.assert_true(unit != null and not unit.is_exhausted, "accelerate enters ready")
+
+
+static func _test_chemtech_discards_once(assertions) -> void:
+	var h = _harness_with_play({}, ["fight-or-flight", "blazing-scorcher"], "chemtech-enforcer", 5)
+	var hand_before = h.gs().players[0].hand.size()
+	h.cmd_with_choices(0, "play chemtech-enforcer", ["fight-or-flight"])
+	assertions.assert_eq(h.gs().players[0].trash.size(), 1, "chemtech discards exactly one card")
+	assertions.assert_eq(h.gs().players[0].hand.size(), hand_before - 2, "one card played, one discarded")
+
+
+static func _test_blazing_scorcher_discard_no_prompt(assertions) -> void:
+	var h = _harness_with_play({}, ["blazing-scorcher", "void-seeker"], "chemtech-enforcer", 5)
+	h.cmd_with_choices(0, "play chemtech-enforcer", ["blazing-scorcher"])
+	var has_accel_prompt = false
+	for line in h.controller.log_lines:
+		if "Optional ability (Blazing Scorcher)" in line:
+			has_accel_prompt = true
+			break
+	assertions.assert_true(not has_accel_prompt, "blazing scorcher discard does not prompt accelerate")
+	assertions.assert_true(h.gs().players[0].trash.size() >= 1, "blazing scorcher discarded")
+
+
+static func _test_flame_chompers_discard_prompts(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 5, "power": {"fury": 1}}, "hand": ["chemtech-enforcer", "flame-chompers", "void-seeker"],
+			 "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd_with_choices(0, "play chemtech-enforcer", ["flame-chompers", "yes"])
+	assertions.assert_log_contains(h.controller, "Flame Chompers", "flame chompers named in optional prompt")
+	assertions.assert_log_contains(h.controller, "played itself", "flame chompers play_self on discard")
+
+
+static func _test_flame_chompers_not_on_other_discard(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 10, "power": {"fury": 2}},
+			 "hand": ["jinx-demolitionist", "brazen-buccaneer", "fury-rune", "void-seeker"],
+			 "base": [{"id": "flame-chompers"}], "deck_size": 5, "rune_deck_size": 12},
+			{"base": [{"id": "flame-chompers"}], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd_with_choices(0, "play jinx-demolitionist", ["no", "brazen-buccaneer", "void-seeker"])
+	var has_chompers_prompt = false
+	for line in h.controller.log_lines:
+		if "Optional ability (Flame Chompers)" in line:
+			has_chompers_prompt = true
+			break
+	assertions.assert_true(not has_chompers_prompt, "flame chompers on board does not trigger when another card is discarded")
+
+
+static func _test_scrapheap_on_discard_effect(assertions) -> void:
+	var h = _harness_with_play({}, ["scrapheap", "void-seeker"], "chemtech-enforcer", 5)
+	h.cmd_with_choices(0, "play chemtech-enforcer", ["scrapheap"])
+	assertions.assert_log_contains(h.controller, "drew", "scrapheap draws on discard")
 
 
 static func _harness_with_play(base_ally: Dictionary, extra_hand: Array, play_id: String = "", energy: int = 10) -> TcgTestHarness:

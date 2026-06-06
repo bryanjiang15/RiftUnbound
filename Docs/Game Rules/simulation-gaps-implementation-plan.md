@@ -203,16 +203,16 @@ Legend: ✅ works · ⚠️ partial · ❌ broken/missing
 | Card | Status | Gap |
 |---|---|---|
 | Blazing Scorcher | ✅ | Accelerate works |
-| Brazen Buccaneer | ❌ | Optional discard cost reduction not applied at play |
-| Chemtech Enforcer | ⚠️ | `discard` on play works but discards arbitrary first card, no choice |
-| Flame Chompers | ❌ | `on_discard` → `play_self` not implemented |
+| Brazen Buccaneer | ✅ | Optional discard cost reduction at play with player choice |
+| Chemtech Enforcer | ✅ | `discard` on play with player-chosen card |
+| Flame Chompers | ✅ | `on_discard` → optional `play_self` |
 | Magma Wurm | ❌ | Passive `other_friendly_units_enter_ready` not applied |
 | Raging Soul | ❌ | Conditional `gain_keywords` not evaluated |
 | Jinx — Demolitionist | ⚠️ | Accelerate + discard on play work; discard not player-chosen |
 | Vi — Destructive | ❌ | Activated `give_might` works but `cost.recycle: 1` not paid |
 | Cemetery Attendant | ⚠️ | `return_from_trash` works but no target choice (returns last unit in trash) |
-| Undercover Agent | ❌ | Deathknell fires but `discard_then_draw` effect missing |
-| Traveling Merchant | ❌ | `on_move` trigger not fired |
+| Undercover Agent | ✅ | Deathknell `discard_then_draw` with player choice |
+| Traveling Merchant | ✅ | `on_move` `discard_then_draw` with player choice |
 | Rhasa the Sunderer | ❌ | `cost_reduction` per card in trash not applied |
 
 ### Spells
@@ -220,7 +220,7 @@ Legend: ✅ works · ⚠️ partial · ❌ broken/missing
 | Card | Status | Gap |
 |---|---|---|
 | Void Seeker | ✅ | Damage + draw on resolution |
-| Get Excited! | ❌ | Discard cost + variable damage effect missing |
+| Get Excited! | ✅ | Player-chosen discard cost + variable damage |
 | Fight or Flight | ❌ | `move_unit_to_base` not implemented; Hidden not placeable |
 | Gust | ⚠️ | `return_to_hand` works; Might ≤ 3 filter not enforced |
 | Fading Memories | ⚠️ | `give_keyword` param shape mismatch; Temporary not enforced after grant |
@@ -281,7 +281,7 @@ Fix existing handlers:
 
 1. Extend `CostCalculator.pay_cost` for `discard`, `recycle` (non-self), `kill_friendly`.
 2. Prompt flow for optional abilities (`is_optional`) and discard-for-cost (Get Excited!, Brazen Buccaneer).
-3. Player choice for discard targets and trash-return targets.
+3. ~~Player choice for discard targets~~ ✅ and trash-return targets.
 4. `TargetResolver` for Gust (`might_lte`), Fading Memories (`unit_or_gear_at_battlefield`).
 
 **Unlocks:** Correct interactive play for half the spell pool and several units.

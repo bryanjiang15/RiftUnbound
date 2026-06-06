@@ -43,8 +43,8 @@ Action names and their required parameters:
   react                  {"card_id": "<id>", "target_id": "<id or "">"}
   assign_damage          {"amount": <int>, "target_id": "<id>"}
   assign_done            {}
-  choose                 {"target_id": "<id>"}
-  choose_none            {}
+  choose                 {"target_id": "<id>"}   # hand card ID, target ID, yes/no, etc.
+  choose_none            {}                      # optional prompts only; not for mandatory discards
 
 IMPORTANT — Rune payment is automatic:
 - play_card auto-pays its full cost by tapping and/or recycling your runes as

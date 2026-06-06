@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Local bug backlog guide
+    url: https://github.com/bryanjiang15/RiftUnbound/blob/main/Docs/bugs/README.md
+    about: How to file bugs with report_bug.py during playtests

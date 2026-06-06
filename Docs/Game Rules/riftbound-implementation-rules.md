@@ -351,7 +351,7 @@ A Cleanup is triggered automatically after most game events (moves, state change
 | **Play** | Discretionary | Play a card from hand or Champion Zone (pay costs, follow chain). |
 | **Recycle** | Limited | Put card(s) on bottom of their deck. Multiple simultaneously → random order (Main), chosen order (Rune). |
 | **Kill** | Limited | Move a Permanent from board to Trash. |
-| **Discard** | Limited | Move cards from Hand to Trash without activating text. |
+| **Discard** | Limited | Move cards from Hand to Trash without *playing* the card. **`on_discard` triggered abilities** on the discarded card still fire (e.g. Flame Chompers, Scrapheap). |
 | **Banish** | Limited | Move card to Banishment zone. |
 | **Stun** | Limited | Mark unit Stunned (loses combat Might contribution; clears next Ending Step). |
 | **Heal** | Limited | Clear damage from Units. |
@@ -488,8 +488,17 @@ When the engine requires a choice (e.g. choosing a target on resolution, picking
 
 | Command | Example | Description |
 |---|---|---|
-| `choose <id>` | `choose noxus-hopeful` | Respond to an engine-prompted choice |
-| `choose none` | `choose none` | Decline an optional choice |
+| `choose <id>` | `choose noxus-hopeful` | Respond to an engine-prompted choice (target, hand card to discard, etc.) |
+| `choose yes` / `choose no` | `choose yes` | Accept or decline an optional ability prompt |
+| `choose none` | `choose none` | Decline an optional choice (not valid for mandatory discards) |
+
+Discard prompts appear when an effect or cost requires discarding from hand:
+
+```
+[PROMPT] Choose a card to discard (1 remaining) (use: choose <id>)
+```
+
+Multi-card discards (e.g. Jinx) prompt sequentially until all required discards are chosen.
 
 #### Information
 

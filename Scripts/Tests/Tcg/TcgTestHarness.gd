@@ -89,6 +89,8 @@ func _drain_prompts(player_index: int) -> void:
 			var valid: Array = controller.gs.pending_prompt.get("valid_choices", [])
 			choice = str(valid[0]) if not valid.is_empty() else "none"
 		controller.submit_command(prompt_pi, "choose %s" % choice)
+		if controller.last_command_error:
+			break
 
 
 func gs() -> GameState:

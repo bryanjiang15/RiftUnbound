@@ -20,10 +20,10 @@ static func on_card_added_to_chain(gs: GameState) -> Array:
 	return log_lines
 
 
-static func resolve_chain_item(item: ChainItem, gs: GameState, ability_resolver: AbilityResolver) -> Array:
+static func resolve_chain_item(item: ChainItem, gs: GameState, ability_resolver: AbilityResolver, controller: GameController = null) -> Array:
 	var log_lines: Array[String] = []
 	log_lines.append("> Resolving: %s" % item.describe())
-	var resolve_lines = _execute_chain_item(item, gs, ability_resolver)
+	var resolve_lines = _execute_chain_item(item, gs, ability_resolver, controller)
 	log_lines.append_array(resolve_lines)
 	if gs.chain.is_empty():
 		log_lines.append_array(_return_to_open(gs))
@@ -34,7 +34,7 @@ static func resolve_chain_item(item: ChainItem, gs: GameState, ability_resolver:
 	return log_lines
 
 
-static func handle_pass(gs: GameState, ability_resolver: AbilityResolver) -> Array:
+static func handle_pass(gs: GameState, ability_resolver: AbilityResolver, controller: GameController = null) -> Array:
 	var log_lines: Array[String] = []
 	gs.passes_in_sequence += 1
 
@@ -66,8 +66,10 @@ static func handle_pass(gs: GameState, ability_resolver: AbilityResolver) -> Arr
 		return log_lines
 
 	# Resolve effects
-	var resolve_lines = _execute_chain_item(item, gs, ability_resolver)
+	var resolve_lines = _execute_chain_item(item, gs, ability_resolver, controller)
 	log_lines.append_array(resolve_lines)
+	if not gs.pending_prompt.is_empty():
+		return log_lines
 
 	# If chain is empty, return to open state
 	if gs.chain.is_empty():
@@ -81,7 +83,7 @@ static func handle_pass(gs: GameState, ability_resolver: AbilityResolver) -> Arr
 	return log_lines
 
 
-static func _execute_chain_item(item: ChainItem, gs: GameState, ability_resolver: AbilityResolver) -> Array:
+static func _execute_chain_item(item: ChainItem, gs: GameState, ability_resolver: AbilityResolver, controller: GameController = null) -> Array:
 	var log_lines: Array[String] = []
 
 	if item.item_type == ChainItem.ItemType.CARD:
@@ -96,11 +98,29 @@ static func _execute_chain_item(item: ChainItem, gs: GameState, ability_resolver
 				var cost = ab.get("cost", {})
 				if not cost.is_empty():
 					var computed = CostCalculator.compute_ability_cost(cost, card, target, gs)
-					if CostCalculator.can_afford(owner_pi, computed, gs):
+					var discard_n = CostCalculator.discard_count(computed)
+					if discard_n > 0 and controller != null:
+						log_lines.append_array(controller.begin_discard(owner_pi, discard_n, {
+							"kind": "chain_after_discard_cost",
+							"chain_item": item,
+							"ability": ab,
+							"target": target,
+							"computed": computed,
+						}, card, ab))
+						return log_lines
+					var paid := false
+					if controller != null:
+						paid = controller.try_pay_cost(owner_pi, computed, card)
+					elif CostCalculator.can_afford(owner_pi, computed, gs):
 						CostCalculator.pay_cost(owner_pi, computed, card, gs)
-				var ctx = {"controller": null, "player_index": owner_pi}
+						paid = true
+					if not paid:
+						continue
+				var ctx = {"controller": controller, "player_index": owner_pi}
 				var ab_lines = ability_resolver.resolve_ability(ab, card, target, gs, ctx)
 				log_lines.append_array(ab_lines)
+				if not gs.pending_prompt.is_empty():
+					return log_lines
 		# If spell → move to trash
 		if card.definition.card_type == "spell":
 			gs.players[card.owner_index].move_to_trash(card)

@@ -134,7 +134,7 @@ Each `effect_type` string maps to a handler in `AbilityResolver.gd`. The followi
 | `"stun_unit"` | Stun a unit | `{ "target": "enemy_unit" }` |
 | `"banish"` | Banish card(s) | `{ "target": "top_of_deck", "amount": 1 }` |
 | `"recycle"` | Recycle card(s) to deck | `{ "from": "trash", "amount": 1 }` |
-| `"discard"` | Discard N cards from hand | `{ "amount": 1 }` |
+| `"discard"` | Discard N cards from hand (player chooses which cards; `on_discard` triggers fire) | `{ "amount": 1 }` |
 | `"channel_rune"` | Channel additional rune(s) | `{ "amount": 1, "exhausted": false }` |
 | `"ready_permanent"` | Ready a permanent | `{ "target": "friendly_unit" }` |
 | `"play_token"` | Create and play a token | `{ "token_type": "recruit_1m", "location": "base" }` |

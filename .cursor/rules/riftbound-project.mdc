@@ -1,0 +1,96 @@
+---
+description: Riftbound TCG simulation — architecture, conventions, and extension patterns
+alwaysApply: true
+---
+
+# Riftbound Project Context
+
+Godot 4.6 GDScript TCG engine with text-console commands, JSON card data, and an optional Python AI agent.
+
+## Layout
+
+| Path | Purpose |
+|------|---------|
+| `Scripts/Domain/` | State models: `GameState`, `PlayerState`, `CardInstance`, `RunePool`, `ChainItem` |
+| `Scripts/Game/` | Engine: `GameController`, processors, `CostCalculator`, `AbilityResolver` |
+| `Scripts/Data/` | `CardLoader`, `CardDefinition`, deck loading |
+| `Data/Cards/*.json` | Card definitions (units, spells, runes, etc.) |
+| `Docs/Game Rules/` | Authoritative specs — read before changing rules behavior |
+| `Scripts/Tests/Tcg/` | Headless tests via `TcgTestHarness` + JSON fixtures |
+| `ai_agent/` | FastAPI OpenAI service (`localhost:8765`) used by `Scripts/AI/AIPlayer.gd` |
+
+## Architecture Flow
+
+```
+submit_command() → GameController
+  → validate timing (TurnStateMachine) + pay cost (try_pay_cost)
+  → mutate zones / push ChainItem
+  → ChainProcessor (priority + resolve)
+  → TriggerDispatcher.emit() / AbilityResolver.resolve_ability()
+  → CleanupProcessor at phase boundaries
+```
+
+`GameController` owns `gs`, `ability_resolver`, `trigger_dispatcher`. Pass `self` as `controller` into processors so prompts, discard choice, and auto-pay work.
+
+## IDs
+
+- **Definition ID** (JSON): kebab-case card name (`flame-chompers`, `fury-rune`)
+- **Instance ID** (runtime): first copy = definition ID; duplicates get `-2`, `-3`
+- **Rune console ID**: `rune-0`, `rune-1` (index in `channeled_runes`)
+
+## Resource / Cost Payment
+
+Two-step model — pool counters are separate from physical rune cards:
+
+1. **Add** resources: `tap rune-N` → energy; `recycle rune-N` → domain power (moves rune to rune deck via `recycle_self`)
+2. **Spend** resources: `RunePool.pay()` deducts pool only
+
+**Always use `GameController.try_pay_cost()`** for any cost with energy/power. Never call `CostCalculator.pay_cost()` directly except inside `try_pay_cost`, manual `recycle rune-N`, or `_auto_recycle_rune`. `try_pay_cost` auto-recycles/taps channeled runes when the pool is short.
+
+Discard costs use `begin_discard()` (player choice + `on_discard` triggers), not `pay_cost`.
+
+Card `power_cost` in JSON is explicit; `domain` is identity only (not auto-added to play cost). Accelerate adds `+1 ENG + 1 domain power` via `compute_play_cost(use_accelerate=true)`.
+
+## Adding Card Behavior
+
+1. Define ability in `Data/Cards/*.json` with `effect_type`, `timing`, `cost`, `effect_params`
+2. Add handler in `AbilityResolver.gd` `match effect_type` (or extend `ConditionEvaluator` / `TargetResolver`)
+3. Add test in `Scripts/Tests/Tcg/suites/CardScenarioTests.gd` using `TcgTestHarness`
+
+Unhandled `effect_type` logs `[INFO]` — check `Docs/Game Rules/riftbound-card-data-schema.md` §2.5 for the registry.
+
+## Prompts (`gs.pending_prompt`)
+
+| type | Resolved by |
+|------|-------------|
+| `choose_target` | `choose <instance-id>` |
+| `choose_discard` | `choose <hand-card-id>` |
+| `choose_optional` | `choose yes` / `choose no` |
+| `choose_battlefield` | `choose <battlefield-id>` |
+
+After any mutation that may prompt, check `gs.pending_prompt.is_empty()` before continuing. Tests use `cmd_with_choices()` or `set_choices()` + `_drain_prompts()`.
+
+## GDScript Conventions
+
+- `class_name` PascalCase; private helpers prefixed `_`
+- Static utility classes (`CostCalculator`, `ChainProcessor`) use `static func`
+- Preload: `preload("res://Scripts/...")`
+- Minimize diff scope; match surrounding style; no drive-by refactors
+
+## Key Docs (read first for rule changes)
+
+- `Docs/Game Rules/riftbound-implementation-rules.md` — engine behavior, console commands
+- `Docs/Game Rules/riftbound-card-data-schema.md` — JSON schema, effect registry
+- `Docs/Game Rules/simulation-gaps-implementation-plan.md` — known gaps / status
+
+## Testing
+
+```bash
+./Scripts/run_tcg_tests.sh   # headless Godot test run
+```
+
+Fixture pattern: `TcgTestHarness.load_fixture_dict()` sets phase/state/zones; include channeled `runes` when testing power costs without pre-filled pool.
+
+## Bug backlog
+
+File playtest bugs locally: `python3 Scripts/bugs/report_bug.py new` → `Docs/bugs/entries/BUG-NNN-*.md` + `logs/BUG-NNN-console.log`. Promote to GitHub: `promote_to_github.py BUG-NNN`. See `Docs/bugs/README.md`.

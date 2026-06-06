@@ -1,0 +1,32 @@
+> === Turn 1 — P1's turn ===
+> Awaken Phase
+> Beginning Phase
+> Channel Phase
+> P1 channeled a CHS Rune
+> P1 channeled a CHS Rune
+> P1 drew Scrapheap
+> Main Phase — P1 has Priority
+[PROMPT] P1: tap runes, play cards, move units, or 'end turn'
+[P1] > play chemtech-enforcer-3
+> P1 added 1 energy to pool
+> P1 added 1 energy to pool
+> [P1] Played Chemtech Enforcer
+> Chemtech Enforcer placed at P1 base (exhausted)
+[PROMPT] Choose a card to discard (1 remaining) (use: choose <id>)
+[P1] > choose scrapheap-2
+> P1 discarded Scrapheap
+> P1 drew a card (hand: 4)
+[P1] > end turn
+> Ending Phase
+> P1 ended their turn.
+> === Turn 2 — P2's turn ===
+> Awaken Phase
+> Beginning Phase
+> Channel Phase
+> P2 (going second) channels 3 Runes this first turn
+> P2 channeled a FRY Rune
+> P2 channeled a CHS Rune
+> P2 channeled a CHS Rune
+> P2 drew Fading Memories
+> Main Phase — P2 has Priority
+[PROMPT] P2: tap runes, play cards, move units, or 'end turn'

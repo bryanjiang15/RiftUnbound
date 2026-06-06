@@ -397,7 +397,7 @@ func _cmd_pass(player_index: int) -> void:
 		if not gs.can_player_act(player_index):
 			_log("[ERROR] Not your turn to act.")
 			return
-		var lines = ChainProcessor.handle_pass(gs, ability_resolver)
+		var lines = ChainProcessor.handle_pass(gs, ability_resolver, self)
 		for l in lines:
 			_log(l)
 		_run_cleanup()
@@ -554,43 +554,29 @@ func _cmd_play(player_index: int, args: Array) -> void:
 			_log("[ERROR] Units must be played to base. Direct battlefield deployment requires Ambush.")
 			return
 
-	# Compute cost
-	var cost = CostCalculator.compute_play_cost(card, player_index, gs, use_accelerate)
-	if not CostCalculator.can_afford(player_index, cost, gs):
-		_auto_pay_runes(player_index, cost)
-		if not CostCalculator.can_afford(player_index, cost, gs):
-			_log("[ERROR] Cannot play %s: insufficient resources (need %s, pool: %s)" % [
-				card.definition.name, CostCalculator.cost_to_string(cost),
-				ps.rune_pool.describe()
-			])
-			return
+	var optional_disc_ab = _find_optional_discard_discount_ability(card)
+	if not optional_disc_ab.is_empty() and gs.pending_prompt.is_empty():
+		gs.pending_prompt = {
+			"player_index": player_index,
+			"type": "choose_optional",
+			"ability": optional_disc_ab,
+			"source": card,
+			"ctx": {},
+			"valid_choices": ["yes", "no"],
+			"prompt": "[PROMPT] %s — discard 1 to reduce cost by 2? (choose yes or no)" % card.display_name(),
+			"play_resume": {
+				"card_id": card.instance_id,
+				"player_index": player_index,
+				"destination": destination,
+				"target_id": target_id,
+				"from_zone": from_zone,
+				"use_accelerate": use_accelerate,
+			},
+		}
+		_log(gs.pending_prompt["prompt"])
+		return
 
-	# Pay cost
-	CostCalculator.pay_cost(player_index, cost, null, gs)
-	ps.cards_played_this_turn += 1
-	card.played_this_turn = true
-
-	# Remove from source zone
-	if from_zone == "hand":
-		ps.hand.erase(card)
-	elif from_zone == "champion":
-		ps.champion_zone = null
-
-	_log("> [P%d] Played %s" % [player_index + 1, card.definition.name])
-
-	match card.definition.card_type:
-		"unit":
-			_place_unit(player_index, card, destination, use_accelerate)
-		"gear":
-			_place_gear(player_index, card, destination)
-		"spell":
-			_play_spell(player_index, card, target_id, destination)
-
-	# Fire on_play triggers for units and gear (spells use "resolution" timing on the chain)
-	if card.definition.card_type != "spell":
-		_fire_on_play_triggers(card)
-
-	_run_cleanup()
+	_complete_play(card, player_index, destination, target_id, from_zone, use_accelerate, false)
 
 
 func _kill_temporary_units(turn_pi: int) -> void:
@@ -691,22 +677,89 @@ func _play_spell(player_index: int, card: CardInstance, target_id: String, desti
 		_log(l)
 
 
+func _find_optional_discard_discount_ability(card: CardInstance) -> Dictionary:
+	for ab in card.definition.abilities:
+		if ab.get("timing", "") != "on_play" or not ab.get("is_optional", false):
+			continue
+		if ab.get("effect_type", "") != "cost_reduction":
+			continue
+		if int(ab.get("cost", {}).get("discard", 0)) > 0:
+			return ab
+	return {}
+
+
+func _complete_play(
+	card: CardInstance,
+	player_index: int,
+	destination: String,
+	target_id: String,
+	from_zone: String,
+	use_accelerate: bool,
+	optional_discard_discount: bool
+) -> void:
+	var ps: PlayerState = gs.players[player_index]
+	var cost = CostCalculator.compute_play_cost(card, player_index, gs, use_accelerate, optional_discard_discount)
+	if not try_pay_cost(player_index, cost):
+		_log("[ERROR] Cannot play %s: insufficient resources (need %s, pool: %s)" % [
+			card.definition.name, CostCalculator.cost_to_string(cost),
+			ps.rune_pool.describe()
+		])
+		return
+	ps.cards_played_this_turn += 1
+	card.played_this_turn = true
+
+	if from_zone == "hand":
+		ps.hand.erase(card)
+	elif from_zone == "champion":
+		ps.champion_zone = null
+
+	_log("> [P%d] Played %s" % [player_index + 1, card.definition.name])
+
+	match card.definition.card_type:
+		"unit":
+			_place_unit(player_index, card, destination, use_accelerate)
+		"gear":
+			_place_gear(player_index, card, destination)
+		"spell":
+			_play_spell(player_index, card, target_id, destination)
+
+	if card.definition.card_type != "spell":
+		_fire_on_play_triggers(card)
+
+	if gs.pending_prompt.is_empty():
+		_run_cleanup()
+
+
+func _complete_play_from_resume(play_resume: Dictionary, optional_discard_discount: bool) -> void:
+	var card_id: String = play_resume.get("card_id", "")
+	var player_index: int = int(play_resume.get("player_index", 0))
+	var card = gs.find_instance_anywhere(card_id)
+	if card == null:
+		_log("[ERROR] Cannot resume play — card '%s' not found." % card_id)
+		return
+	_complete_play(
+		card,
+		player_index,
+		play_resume.get("destination", ""),
+		play_resume.get("target_id", ""),
+		play_resume.get("from_zone", "hand"),
+		play_resume.get("use_accelerate", false),
+		optional_discard_discount
+	)
+
+
 func _fire_on_play_triggers(card: CardInstance) -> void:
 	var ctx = {"player_index": card.owner_index, "controller": self, "source": card}
-	for ab in card.definition.abilities:
-		if ab.get("timing", "") != "on_play":
-			continue
-		if ab.get("effect_type", "") == "cost_reduction":
-			continue
-		for line in ability_resolver.resolve_ability(ab, card, null, gs, ctx):
-			_log(line)
 	for line in trigger_dispatcher.emit("on_play", ctx, gs, self):
 		_log(line)
-	# Passive on-enter effects
+		if not gs.pending_prompt.is_empty():
+			return
 	for ab in card.definition.abilities:
 		if ab.get("effect_type", "") == "other_friendly_units_enter_ready":
 			for line in ability_resolver.resolve_ability(ab, card, null, gs, ctx):
 				_log(line)
+			if not gs.pending_prompt.is_empty():
+				return
 
 
 # ─── Move ─────────────────────────────────────────────────────────────────────
@@ -853,11 +906,9 @@ func _cmd_use(player_index: int, args: Array) -> void:
 		target = card
 
 	var cost = CostCalculator.compute_ability_cost(ab, card, target, gs)
-	if not CostCalculator.can_afford(player_index, cost, gs):
+	if not try_pay_cost(player_index, cost, card):
 		_log("[ERROR] Cannot afford ability cost: %s" % CostCalculator.cost_to_string(cost))
 		return
-
-	CostCalculator.pay_cost(player_index, cost, card, gs)
 
 	var item = ChainItem.from_ability(card, ab, 0)
 	if target:
@@ -896,14 +947,12 @@ func _cmd_react(player_index: int, args: Array) -> void:
 		return
 
 	var cost = CostCalculator.compute_play_cost(card, player_index, gs)
-	if not CostCalculator.can_afford(player_index, cost, gs):
+	if not try_pay_cost(player_index, cost):
 		_log("[ERROR] Cannot afford %s (need %s, pool: %s)" % [
 			card.definition.name, CostCalculator.cost_to_string(cost),
 			ps.rune_pool.describe()
 		])
 		return
-
-	CostCalculator.pay_cost(player_index, cost, null, gs)
 	ps.hand.erase(card)
 	ps.cards_played_this_turn += 1
 
@@ -960,6 +1009,125 @@ func _cmd_assign(player_index: int, args: Array) -> void:
 	_log("> Assigned %d damage to %s (%d remaining)" % [amount, target.display_name(), gs.remaining_attacker_might])
 
 
+# ─── Discard orchestration ────────────────────────────────────────────────────
+
+func begin_discard(
+	player_index: int,
+	amount: int,
+	continuation: Dictionary,
+	source: Variant = null,
+	ability: Dictionary = {}
+) -> Array:
+	var ps: PlayerState = gs.players[player_index]
+	if amount <= 0 or ps.hand.is_empty():
+		_dispatch_discard_continuation(continuation)
+		return []
+	var valid_choices: Array = []
+	for card in ps.hand:
+		valid_choices.append(card.instance_id)
+	var remaining = mini(amount, ps.hand.size())
+	gs.pending_prompt = {
+		"player_index": player_index,
+		"type": "choose_discard",
+		"remaining": remaining,
+		"mandatory": true,
+		"continuation": continuation,
+		"valid_choices": valid_choices,
+		"source": source,
+		"ability": ability,
+		"prompt": "[PROMPT] Choose a card to discard (%d remaining) (use: choose <id>)" % remaining,
+	}
+	return [gs.pending_prompt["prompt"]]
+
+
+func _dispatch_discard_continuation(continuation: Dictionary) -> void:
+	if continuation.is_empty():
+		return
+	match continuation.get("kind", ""):
+		"discard_then_draw":
+			var owner = int(continuation.get("owner", 0))
+			var draw_amount = int(continuation.get("draw_amount", 1))
+			for line in ability_resolver.resolve_ability(
+				{"effect_type": "draw", "effect_params": {"amount": draw_amount}},
+				null, null, gs, {"player_index": owner, "controller": self}
+			):
+				_log(line)
+		"chain_after_discard_cost":
+			_finish_chain_after_discard_cost(continuation)
+		"trigger_after_discard_cost":
+			var ab: Dictionary = continuation.get("ability", {})
+			var source = continuation.get("source")
+			var ctx: Dictionary = continuation.get("ctx", {})
+			var computed: Dictionary = continuation.get("computed", {})
+			var owner_pi = int(ctx.get("player_index", 0))
+			if source is CardInstance:
+				owner_pi = source.owner_index
+			if try_pay_cost(owner_pi, _cost_after_discard_paid(computed), source if source is CardInstance else null):
+				var target = trigger_dispatcher._resolve_trigger_target(ab, source, ctx, gs)
+				var effect_ctx = ctx.duplicate()
+				effect_ctx["controller"] = self
+				for line in ability_resolver.resolve_ability(ab, source, target, gs, effect_ctx):
+					_log(line)
+		"brazen_play":
+			_complete_play_from_resume(continuation.get("play_resume", {}), true)
+		"optional_after_discard_cost":
+			var ab2: Dictionary = continuation.get("ability", {})
+			var source2 = continuation.get("source")
+			var ctx2: Dictionary = continuation.get("ctx", {})
+			var computed2: Dictionary = continuation.get("computed", {})
+			var owner2 = int(ctx2.get("player_index", 0))
+			if source2 is CardInstance:
+				owner2 = source2.owner_index
+			if try_pay_cost(owner2, _cost_after_discard_paid(computed2), source2 if source2 is CardInstance else null):
+				var target2 = trigger_dispatcher._resolve_trigger_target(ab2, source2, ctx2, gs)
+				var effect_ctx2 = ctx2.duplicate()
+				effect_ctx2["controller"] = self
+				for line in ability_resolver.resolve_ability(ab2, source2, target2, gs, effect_ctx2):
+					_log(line)
+
+
+func _finish_chain_after_discard_cost(continuation: Dictionary) -> void:
+	var item: ChainItem = continuation.get("chain_item")
+	var ab: Dictionary = continuation.get("ability", {})
+	var target: CardInstance = continuation.get("target")
+	var computed: Dictionary = continuation.get("computed", {})
+	if item == null:
+		return
+	var owner_pi = item.owner_index
+	var card = item.source_card
+	if not try_pay_cost(owner_pi, _cost_after_discard_paid(computed), card):
+		return
+	var ctx = {"controller": self, "player_index": owner_pi}
+	for line in ability_resolver.resolve_ability(ab, card, target, gs, ctx):
+		_log(line)
+	if card != null and card.definition.card_type == "spell":
+		gs.players[owner_pi].move_to_trash(card)
+	if gs.chain.is_empty():
+		for l in ChainProcessor._return_to_open(gs):
+			_log(l)
+	else:
+		gs.passes_in_sequence = 0
+		gs.priority_player_index = 1 - owner_pi
+		_log("[PROMPT] P%d: play Reaction or 'pass'" % (gs.priority_player_index + 1))
+
+
+func _resume_discard_prompt(prompt: Dictionary) -> void:
+	var remaining = int(prompt.get("remaining", 1))
+	var player_index = int(prompt.get("player_index", 0))
+	var ps = gs.players[player_index]
+	if remaining > 0 and not ps.hand.is_empty():
+		var valid_choices: Array = []
+		for card in ps.hand:
+			valid_choices.append(card.instance_id)
+		gs.pending_prompt = prompt.duplicate()
+		gs.pending_prompt["valid_choices"] = valid_choices
+		gs.pending_prompt["prompt"] = "[PROMPT] Choose a card to discard (%d remaining) (use: choose <id>)" % remaining
+		_log(gs.pending_prompt["prompt"])
+	else:
+		var continuation = prompt.get("continuation", {})
+		_dispatch_discard_continuation(continuation)
+
+
 # ─── Choose ───────────────────────────────────────────────────────────────────
 
 func _cmd_choose(player_index: int, args: Array) -> void:
@@ -999,6 +1167,19 @@ func _handle_choose_target(player_index: int, choice: String) -> void:
 	if item == null:
 		gs.pending_prompt.clear()
 		return
+	var valid: Array = gs.pending_prompt.get("valid_choices", [])
+	if not valid.is_empty():
+		var allowed := false
+		for v in valid:
+			if v is CardInstance and v.instance_id == choice:
+				allowed = true
+				break
+			if str(v) == choice:
+				allowed = true
+				break
+		if not allowed:
+			_log("[ERROR] '%s' is not a valid target." % choice)
+			return
 	var target = gs.find_instance_anywhere(choice)
 	if target == null:
 		_log("[ERROR] Target '%s' not found." % choice)
@@ -1015,29 +1196,39 @@ func _handle_choose_target(player_index: int, choice: String) -> void:
 	item.needs_target = false
 	gs.pending_prompt.clear()
 	_log("> P%d chose %s as target" % [player_index + 1, target.display_name()])
-	var resolve_lines = ChainProcessor.resolve_chain_item(item, gs, ability_resolver)
+	var resolve_lines = ChainProcessor.resolve_chain_item(item, gs, ability_resolver, self)
 	for l in resolve_lines:
 		_log(l)
 	_run_cleanup()
 
 
 func _handle_choose_discard(player_index: int, choice: String) -> void:
+	var prompt = gs.pending_prompt.duplicate()
 	var ps = gs.players[player_index]
 	var card = ps.get_hand_instance(choice)
 	if card == null:
 		_log("[ERROR] '%s' not in hand." % choice)
 		return
-	ps.hand.erase(card)
 	ps.move_to_trash(card)
 	ps.cards_discarded_count += 1
 	ps.discarded_this_turn.append(card)
-	gs.pending_prompt.clear()
 	_log("> P%d discarded %s" % [player_index + 1, card.display_name()])
 	for line in trigger_dispatcher.emit("on_discard", {
-		"discarded_card": card, "player_index": player_index, "controller": self
+		"discarded_card": card,
+		"player_index": player_index,
+		"controller": self,
+		"discard_resume": prompt,
 	}, gs, self):
 		_log(line)
-	var cb: Callable = gs.pending_prompt.get("callback") if false else gs.pending_prompt.get("on_complete")
+		if not gs.pending_prompt.is_empty():
+			return
+	var remaining = int(prompt.get("remaining", 1)) - 1
+	gs.pending_prompt.clear()
+	if remaining > 0 and not ps.hand.is_empty():
+		prompt["remaining"] = remaining
+		_resume_discard_prompt(prompt)
+		return
+	_dispatch_discard_continuation(prompt.get("continuation", {}))
 	_run_cleanup()
 
 
@@ -1054,11 +1245,46 @@ func _handle_choose_trash_return(player_index: int, choice: String) -> void:
 
 
 func _handle_choose_optional(player_index: int, choice: String) -> void:
-	var ab: Dictionary = gs.pending_prompt.get("ability", {})
-	var source = gs.pending_prompt.get("source")
-	var ctx: Dictionary = gs.pending_prompt.get("ctx", {})
+	var prompt = gs.pending_prompt.duplicate()
+	var ab: Dictionary = prompt.get("ability", {})
+	var source = prompt.get("source")
+	var ctx: Dictionary = prompt.get("ctx", {})
+	var play_resume: Dictionary = prompt.get("play_resume", {})
 	gs.pending_prompt.clear()
+
+	if not play_resume.is_empty():
+		if choice == "yes" or choice == "true":
+			var card = source if source is CardInstance else gs.find_instance_anywhere(play_resume.get("card_id", ""))
+			for line in begin_discard(player_index, 1, {
+				"kind": "brazen_play",
+				"play_resume": play_resume,
+			}, card, ab):
+				_log(line)
+		else:
+			_log("> P%d declined optional discard discount" % (player_index + 1))
+			_complete_play_from_resume(play_resume, false)
+			_run_cleanup()
+		return
+
 	if choice == "yes" or choice == "true":
+		var cost = ab.get("cost", {})
+		if not cost.is_empty():
+			var computed = CostCalculator.compute_ability_cost(cost, source if source is CardInstance else null, null, gs)
+			var discard_n = CostCalculator.discard_count(computed)
+			if discard_n > 0:
+				for line in begin_discard(player_index, discard_n, {
+					"kind": "optional_after_discard_cost",
+					"ability": ab,
+					"source": source,
+					"ctx": ctx,
+					"computed": computed,
+				}, source if source is CardInstance else null, ab):
+					_log(line)
+				return
+			if not try_pay_cost(player_index, computed, source if source is CardInstance else null):
+				_log("[ERROR] Cannot afford optional ability cost: %s" % CostCalculator.cost_to_string(computed))
+				_run_cleanup()
+				return
 		var target = trigger_dispatcher._resolve_trigger_target(ab, source, ctx, gs)
 		var effect_ctx = ctx.duplicate()
 		effect_ctx["controller"] = self
@@ -1066,6 +1292,26 @@ func _handle_choose_optional(player_index: int, choice: String) -> void:
 			_log(line)
 	else:
 		_log("> P%d declined optional ability" % (player_index + 1))
+
+	var discard_resume: Dictionary = prompt.get("discard_resume", {})
+	if discard_resume.is_empty() and not ctx.is_empty():
+		discard_resume = ctx.get("discard_resume", {})
+	if not discard_resume.is_empty():
+		var remaining = int(discard_resume.get("remaining", 1)) - 1
+		discard_resume["remaining"] = remaining
+		if remaining > 0 and not gs.players[player_index].hand.is_empty():
+			_resume_discard_prompt(discard_resume)
+		else:
+			_dispatch_discard_continuation(discard_resume.get("continuation", {}))
+	elif prompt.has("resume_on_play"):
+		var resume: Dictionary = prompt.get("resume_on_play", {})
+		for line in trigger_dispatcher.resume_on_play(
+			resume.get("ctx", {}), gs, self, int(resume.get("next_index", 0))
+		):
+			_log(line)
+			if not gs.pending_prompt.is_empty():
+				_run_cleanup()
+				return
 	_run_cleanup()
 
 
@@ -1274,9 +1520,25 @@ func _build_target_prompt(card: CardInstance, ab: Dictionary, player_index: int,
 
 
 # ─── Auto-pay ────────────────────────────────────────────────────────────────
-# Called by _cmd_play when the pool doesn't yet cover the cost.
-# Automatically taps/recycles runes to make up the shortfall, preferring
-# recycling exhausted runes first and tapping to cover energy last.
+# Pay from the Rune Pool, recycling/tapping channeled runes first when the pool
+# is short on domain Power or Energy.
+
+func _cost_after_discard_paid(cost: Dictionary) -> Dictionary:
+	var remaining = cost.duplicate()
+	remaining["discard"] = 0
+	return remaining
+
+
+func try_pay_cost(player_index: int, cost: Dictionary, source: CardInstance = null) -> bool:
+	if cost.is_empty():
+		return true
+	if not CostCalculator.can_afford(player_index, cost, gs):
+		_auto_pay_runes(player_index, cost)
+	if not CostCalculator.can_afford(player_index, cost, gs):
+		return false
+	CostCalculator.pay_cost(player_index, cost, source, gs)
+	return true
+
 
 func _auto_pay_runes(player_index: int, cost: Dictionary) -> void:
 	var ps: PlayerState = gs.players[player_index]

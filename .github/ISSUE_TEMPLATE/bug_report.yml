@@ -1,0 +1,87 @@
+name: Bug Report
+description: Report a playtest bug (mirrors Docs/bugs/ entry format)
+title: "[BUG] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Prefer filing locally first for speed: `python3 Scripts/bugs/report_bug.py new`
+        Then promote: `python3 Scripts/bugs/promote_to_github.py BUG-NNN`
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - critical
+        - high
+        - medium
+        - low
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - engine
+        - ui
+        - ai
+        - cards
+        - tests
+        - docs
+    validations:
+      required: true
+
+  - type: input
+    id: cards
+    attributes:
+      label: Cards involved
+      description: Comma-separated definition or instance ids
+      placeholder: flame-chompers, get-excited
+
+  - type: input
+    id: commands
+    attributes:
+      label: Commands typed
+      placeholder: play chemtech-enforcer / choose yes
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Numbered steps from game start or fixture state
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: console_log
+    attributes:
+      label: Console / game log
+      description: Paste Godot Output or command console from the bug moment
+      render: shell
+    validations:
+      required: false
+
+  - type: input
+    id: local_backlog
+    attributes:
+      label: Local backlog ID (if filed)
+      description: e.g. BUG-003 — links to Docs/bugs/entries/
+      placeholder: BUG-003
