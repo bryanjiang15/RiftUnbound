@@ -5,7 +5,7 @@ status: fixed
 severity: high
 area: engine
 reported: 2026-06-06
-fixed_in: try_pay_cost wired through all cost paths
+fixed_in: RuleResourcesTests (accelerate + flame-chompers on_discard)
 cards: flame-chompers, blazing-scorcher
 commands: choose yes (Flame Chompers on_discard); play blazing-scorcher accelerate
 github_issue: 1
