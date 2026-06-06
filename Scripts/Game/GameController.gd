@@ -1204,10 +1204,12 @@ func _handle_choose_target(player_index: int, choice: String) -> void:
 
 func _handle_choose_discard(player_index: int, choice: String) -> void:
 	var prompt = gs.pending_prompt.duplicate()
+	gs.pending_prompt.clear()
 	var ps = gs.players[player_index]
 	var card = ps.get_hand_instance(choice)
 	if card == null:
 		_log("[ERROR] '%s' not in hand." % choice)
+		_resume_discard_prompt(prompt)
 		return
 	ps.move_to_trash(card)
 	ps.cards_discarded_count += 1
