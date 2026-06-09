@@ -35,21 +35,21 @@ static func begin_combat(bf_index: int, attacker_player: int, gs: GameState, con
 	return log_lines
 
 
-static func handle_pass(gs: GameState) -> Array:
+static func handle_pass(gs: GameState, controller: GameController = null) -> Array:
 	var log_lines: Array[String] = []
 	var passer = gs.focus_player_index
 	log_lines.append("> [P%d] Passed Focus" % (passer + 1))
 	gs.passes_in_sequence += 1
 
 	if gs.passes_in_sequence >= gs.players.size():
-		return proceed_to_damage(gs)
+		return proceed_to_damage(gs, controller)
 	else:
 		gs.focus_player_index = (gs.focus_player_index + 1) % gs.players.size()
 		log_lines.append("[PROMPT] P%d: play Action/Reaction card or 'pass'" % (gs.focus_player_index + 1))
 	return log_lines
 
 
-static func proceed_to_damage(gs: GameState) -> Array:
+static func proceed_to_damage(gs: GameState, controller: GameController = null) -> Array:
 	var log_lines: Array[String] = []
 	var bf_index = gs.combat_bf_index
 	var bf = gs.board.battlefields[bf_index]
@@ -61,7 +61,11 @@ static func proceed_to_damage(gs: GameState) -> Array:
 
 	if atk_units.is_empty() or def_units.is_empty():
 		log_lines.append("> No opposing units — combat ends without damage")
-		return finalize_combat(gs, log_lines)
+		return finalize_combat(gs, log_lines, controller)
+
+	_ensure_combat_designations(gs)
+	atk_units = Array(bf.units[attacker])
+	def_units = Array(bf.units[defender])
 
 	log_lines.append("> Combat Damage Step at %s" % bf.display_name)
 
@@ -94,10 +98,10 @@ static func proceed_to_damage(gs: GameState) -> Array:
 			unit.add_damage(dmg)
 			log_lines.append(">   Dealt %d damage to %s" % [dmg, unit.display_name()])
 
-	return finalize_combat(gs, log_lines)
+	return finalize_combat(gs, log_lines, controller)
 
 
-static func finalize_assignments(gs: GameState) -> Array:
+static func finalize_assignments(gs: GameState, controller: GameController = null) -> Array:
 	var log_lines: Array[String] = []
 	var bf = gs.board.battlefields[gs.combat_bf_index]
 	var attacker = gs.attacker_player_index
@@ -125,7 +129,21 @@ static func finalize_assignments(gs: GameState) -> Array:
 			unit.add_damage(def_assignments[inst_id])
 			log_lines.append(">   Dealt %d damage to %s" % [def_assignments[inst_id], unit.display_name()])
 
-	return finalize_combat(gs, log_lines)
+	return finalize_combat(gs, log_lines, controller)
+
+
+static func _ensure_combat_designations(gs: GameState) -> void:
+	if gs.combat_bf_index < 0 or gs.attacker_player_index < 0:
+		return
+	var bf = gs.board.battlefields[gs.combat_bf_index]
+	var attacker = gs.attacker_player_index
+	var defender = 1 - attacker
+	for u in bf.units[attacker]:
+		u.is_attacker = true
+		u.is_defender = false
+	for u in bf.units[defender]:
+		u.is_defender = true
+		u.is_attacker = false
 
 
 static func _sum_might(units: Array, as_attacker: bool) -> int:
@@ -173,6 +191,11 @@ static func finalize_combat(gs: GameState, log_lines: Array, controller: GameCon
 	var bf = gs.board.battlefields[bf_index]
 	var attacker = gs.attacker_player_index
 	var defender = 1 - attacker
+
+	var resolver: AbilityResolver = null
+	if controller != null:
+		resolver = controller.ability_resolver
+	log_lines.append_array(CleanupProcessor.process_deaths(gs, resolver, controller))
 
 	for player_units in bf.units:
 		for u in player_units:

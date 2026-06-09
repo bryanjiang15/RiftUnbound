@@ -91,7 +91,8 @@ func get_keyword_value(keyword_id: String) -> int:
 
 
 func has_lethal_damage() -> bool:
-	return damage >= get_base_might() and get_base_might() > 0
+	var might = get_current_might()
+	return damage >= might and might > 0
 
 
 func is_at_battlefield() -> bool:

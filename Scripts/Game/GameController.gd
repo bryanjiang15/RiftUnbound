@@ -383,7 +383,7 @@ func _cmd_pass(player_index: int) -> void:
 			return
 		var lines: Array
 		if gs.combat_bf_index >= 0:
-			lines = CombatProcessor.handle_pass(gs)
+			lines = CombatProcessor.handle_pass(gs, self)
 		else:
 			lines = ShowdownProcessor.handle_pass(gs)
 		for l in lines:
@@ -984,7 +984,7 @@ func _cmd_assign(player_index: int, args: Array) -> void:
 		_log("[ERROR] Usage: assign <amount> to <id>  |  assign done")
 		return
 	if args[0] == "done":
-		var lines = CombatProcessor.finalize_assignments(gs)
+		var lines = CombatProcessor.finalize_assignments(gs, self)
 		for l in lines:
 			_log(l)
 		_run_cleanup()
