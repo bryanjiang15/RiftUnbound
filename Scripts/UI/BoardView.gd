@@ -57,9 +57,9 @@ var _hand_cards:      Array = [null, null]   # HBoxContainer inside scroll
 # Per-player rune containers  [pi]
 var _rune_slots:      Array = [null, null]   # HBoxContainer
 
-# Per-player fixed-slot references  [pi]
-var _champion_slot:   Array = [null, null]   # PanelContainer  (inner VBox named "Content")
-var _legend_slot:     Array = [null, null]
+# Per-player fixed-slot card areas  [pi]
+var _champion_card_area: Array = [null, null]   # CenterContainer
+var _legend_card_area:   Array = [null, null]
 var _deck_label:      Array = [null, null]   # Label (deck count)
 var _rune_deck_label: Array = [null, null]
 var _trash_label:     Array = [null, null]
@@ -166,19 +166,23 @@ func _build_base_row(pi: int) -> PanelContainer:
 
 	# P1: champion first; P2: main deck first (mirror)
 	if pi == 0:
-		_champion_slot[pi] = _make_named_slot("CHAMPION", W_CHAMPION, row_color)
-		hbox.add_child(_champion_slot[pi])
-		_legend_slot[pi] = _make_named_slot("LEGEND", W_LEGEND, C_ZONE_BDR)
-		hbox.add_child(_legend_slot[pi])
+		var champ_slot := _make_named_slot("CHAMPION", W_CHAMPION, row_color)
+		_champion_card_area[pi] = champ_slot.card_area
+		hbox.add_child(champ_slot.panel)
+		var legend_slot := _make_named_slot("LEGEND", W_LEGEND, C_ZONE_BDR)
+		_legend_card_area[pi] = legend_slot.card_area
+		hbox.add_child(legend_slot.panel)
 		hbox.add_child(_build_base_zone(pi, row_color))
 		hbox.add_child(_make_deck_slot("MAIN\nDECK", W_MAIN_DECK, row_color, pi, 0))
 	else:
 		hbox.add_child(_make_deck_slot("MAIN\nDECK", W_MAIN_DECK, row_color, pi, 0))
 		hbox.add_child(_build_base_zone(pi, row_color))
-		_legend_slot[pi] = _make_named_slot("LEGEND", W_LEGEND, C_ZONE_BDR)
-		hbox.add_child(_legend_slot[pi])
-		_champion_slot[pi] = _make_named_slot("CHAMPION", W_CHAMPION, row_color)
-		hbox.add_child(_champion_slot[pi])
+		var legend_slot := _make_named_slot("LEGEND", W_LEGEND, C_ZONE_BDR)
+		_legend_card_area[pi] = legend_slot.card_area
+		hbox.add_child(legend_slot.panel)
+		var champ_slot := _make_named_slot("CHAMPION", W_CHAMPION, row_color)
+		_champion_card_area[pi] = champ_slot.card_area
+		hbox.add_child(champ_slot.panel)
 
 	return pc
 
@@ -262,13 +266,14 @@ func _build_base_zone(pi: int, border_color: Color) -> HBoxContainer:
 	return outer
 
 
-func _make_named_slot(label_text: String, width: int, border_color: Color) -> PanelContainer:
+func _make_named_slot(label_text: String, width: int, border_color: Color) -> Dictionary:
 	var pc := PanelContainer.new()
 	pc.custom_minimum_size = Vector2(width, 0)
 	pc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	pc.add_theme_stylebox_override("panel", _flat_sb(C_ZONE, border_color * 0.5, 1, 3))
 
 	var vbox := VBoxContainer.new()
+	vbox.name = "VBox"
 	vbox.add_theme_constant_override("separation", 2)
 	pc.add_child(vbox)
 
@@ -279,18 +284,13 @@ func _make_named_slot(label_text: String, width: int, border_color: Color) -> Pa
 	lbl.add_theme_color_override("font_color", C_LABEL_DIM)
 	vbox.add_child(lbl)
 
-	var content := Label.new()
-	content.name = "Content"
-	content.text = "—"
-	content.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	content.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	content.size_flags_vertical  = Control.SIZE_EXPAND_FILL
-	content.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	content.add_theme_font_size_override("font_size", 10)
-	content.add_theme_color_override("font_color", C_LABEL_BRT)
-	vbox.add_child(content)
+	var card_area := CenterContainer.new()
+	card_area.name = "CardArea"
+	card_area.custom_minimum_size = Vector2(CARD_W, CARD_H)
+	card_area.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(card_area)
 
-	return pc
+	return { "panel": pc, "card_area": card_area }
 
 
 ## slot_kind:  0 = main deck,  1 = rune deck,  2 = trash
@@ -524,6 +524,23 @@ func _refresh_hud(gs: GameState) -> void:
 	_hud_pool.text = "  P%d Pool: %s  " % [tp + 1, pool.describe()]
 
 
+func _refresh_fixed_card_slot(card_area: CenterContainer, inst: CardInstance) -> void:
+	if card_area == null:
+		return
+	_clear_children(card_area)
+	if inst:
+		card_area.add_child(_make_card_thumb(inst))
+	else:
+		var empty_lbl := Label.new()
+		empty_lbl.text = "—"
+		empty_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		empty_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		empty_lbl.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		empty_lbl.add_theme_color_override("font_color", C_LABEL_DIM)
+		empty_lbl.add_theme_font_size_override("font_size", 10)
+		card_area.add_child(empty_lbl)
+
+
 func _refresh_base_zone(gs: GameState, pi: int) -> void:
 	var ps: PlayerState = gs.players[pi]
 	var cards_hbox: HBoxContainer = _base_cards[pi]
@@ -531,30 +548,8 @@ func _refresh_base_zone(gs: GameState, pi: int) -> void:
 		return
 	_clear_children(cards_hbox)
 
-	# Champion zone slot
-	var champ_slot = _champion_slot[pi]
-	if champ_slot:
-		var content: Label = champ_slot.get_node_or_null("VBoxContainer/Content")
-		if content:
-			if ps.champion_zone:
-				content.text = ps.champion_zone.instance_id + "\n" + ps.champion_zone.definition.name
-				content.add_theme_color_override("font_color",
-					C_P1 if pi == 0 else C_P2)
-			else:
-				content.text = "—"
-				content.add_theme_color_override("font_color", C_LABEL_DIM)
-
-	# Legend zone slot
-	var legend_slot = _legend_slot[pi]
-	if legend_slot:
-		var content: Label = legend_slot.get_node_or_null("VBoxContainer/Content")
-		if content:
-			if ps.legend:
-				content.text = ps.legend.definition.name
-				content.add_theme_color_override("font_color",
-					C_P1 if pi == 0 else C_P2)
-			else:
-				content.text = "—"
+	_refresh_fixed_card_slot(_champion_card_area[pi], ps.champion_zone)
+	_refresh_fixed_card_slot(_legend_card_area[pi], ps.legend)
 
 	# Units at base
 	for unit in ps.get_units_at_base():

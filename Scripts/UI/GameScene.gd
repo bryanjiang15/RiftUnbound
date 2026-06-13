@@ -103,6 +103,8 @@ func _wire_signals() -> void:
 	_console.command_submitted.connect(_on_command_submitted)
 	_board_view.card_hovered.connect(_on_card_hovered)
 	_board_view.card_unhovered.connect(_on_card_unhovered)
+	if _controller.gs:
+		_on_board_updated()
 
 
 func _on_game_log(text: String) -> void:

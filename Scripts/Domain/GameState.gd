@@ -188,6 +188,8 @@ func board_description() -> String:
 			lines.append("  Base gear: " + ", ".join(gear_strs))
 		if ps.champion_zone:
 			lines.append("  Champion Zone: %s" % ps.champion_zone.short_description())
+		if ps.legend:
+			lines.append("  Legend: %s" % ps.legend.short_description())
 		var rune_strs: Array[String] = []
 		for j in range(ps.channeled_runes.size()):
 			var r = ps.channeled_runes[j]

@@ -24,3 +24,9 @@ static func _test_starter_deck_valid(assertions) -> void:
 	})
 	assertions.assert_eq(h.gs().players.size(), 2, "setup creates two players")
 	assertions.assert_eq(h.gs().board.battlefields.size(), 2, "setup creates two battlefields")
+	for pi in range(2):
+		var ps = h.gs().players[pi]
+		assertions.assert_true(ps.legend != null, "P%d legend loaded" % (pi + 1))
+		assertions.assert_eq(ps.legend.definition.id, "jinx-loose-cannon", "P%d legend id" % (pi + 1))
+		assertions.assert_true(ps.champion_zone != null, "P%d champion loaded" % (pi + 1))
+		assertions.assert_eq(ps.champion_zone.definition.id, "jinx-demolitionist", "P%d champion id" % (pi + 1))

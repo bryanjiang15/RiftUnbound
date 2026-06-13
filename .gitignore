@@ -9,3 +9,6 @@ ai_agent/agent_decisions.log
 __pycache__/
 *.pyc
 .env
+
+/Docs/bugs/entries/
+/Docs/bugs/logs/
