@@ -74,7 +74,10 @@ static func build_player_state(deck_path: String, player_index: int) -> PlayerSt
 	ps.rune_deck = rune_deck_raw
 
 	# Battlefields list (stored in deck data; selection happens in game setup)
-	ps.deck_battlefields = data.get("battlefields", [])
+	var deck_bfs: Array[String] = []
+	for bf in data.get("battlefields", []):
+		deck_bfs.append(str(bf))
+	ps.deck_battlefields = deck_bfs
 
 	return ps
 

@@ -40,7 +40,8 @@ static func load_from_dict(controller: GameController, data: Dictionary) -> void
 	gs.turn_player_index = int(data.get("first_player", 0))
 	gs.priority_player_index = gs.turn_player_index
 	gs.second_player_index = int(data.get("second_player", 1 - gs.turn_player_index))
-	gs.first_channel_done = [true, true]
+	gs.first_channel_done[0] = true
+	gs.first_channel_done[1] = true
 	if data.get("first_channel_pending", false):
 		gs.first_channel_done[gs.turn_player_index] = false
 
@@ -48,7 +49,8 @@ static func load_from_dict(controller: GameController, data: Dictionary) -> void
 	gs.current_state = STATE_MAP.get(str(data.get("state", "NEUTRAL_OPEN")), TurnStateMachine.State.NEUTRAL_OPEN)
 	gs.auto_combat_damage = bool(data.get("auto_combat_damage", true))
 	gs.mulligan_phase = false
-	gs.mulligan_done = [true, true]
+	gs.mulligan_done[0] = true
+	gs.mulligan_done[1] = true
 	gs.victory_score = int(data.get("victory_score", 8))
 
 	var players_data: Array = data.get("players", [])

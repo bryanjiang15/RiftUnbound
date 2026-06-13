@@ -13,7 +13,7 @@ const P2_DECK = "res://Data/Decks/starter-deck-p2.json"
 
 var gs: GameState = GameState.new()
 var ability_resolver: AbilityResolver = AbilityResolver.new()
-var trigger_dispatcher = TriggerDispatcherScript.new()
+var trigger_dispatcher: TriggerDispatcher = TriggerDispatcherScript.new()
 
 var skip_auto_start: bool = false
 var log_lines: Array[String] = []
@@ -83,7 +83,8 @@ func start_game_from_config(config: Dictionary) -> void:
 
 	if config.get("skip_mulligan", false):
 		gs.mulligan_phase = false
-		gs.mulligan_done = [true, true]
+		gs.mulligan_done[0] = true
+		gs.mulligan_done[1] = true
 		if config.has("turn_number"):
 			gs.turn_number = int(config["turn_number"])
 		return
@@ -95,7 +96,8 @@ func start_game_from_config(config: Dictionary) -> void:
 				_log("> [P%d] Drew %s" % [ps.player_index + 1, drawn.display_name()])
 
 	gs.mulligan_phase = true
-	gs.mulligan_done = [false, false]
+	gs.mulligan_done[0] = false
+	gs.mulligan_done[1] = false
 	_log("> Mulligan: each player may set aside up to 2 cards.")
 	_log("[PROMPT] P1 goes first — type: mulligan keep  |  mulligan <id> [id]")
 	_log("[PROMPT] P2 goes after  — type: mulligan keep  |  mulligan <id> [id]")
