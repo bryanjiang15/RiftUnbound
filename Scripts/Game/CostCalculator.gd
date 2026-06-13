@@ -126,6 +126,8 @@ static func can_afford_with_autopay(player_index: int, cost: Dictionary, gs: Gam
 				var rune = _find_recyclable_rune_any(ps, recycled_instance_ids)
 				if rune == null:
 					return false
+				if not rune.is_exhausted:
+					sim_energy += 1
 				recycled_instance_ids.append(rune.instance_id)
 				for d in rune.definition.domain:
 					sim_power[d] = sim_power.get(d, 0) + 1
@@ -135,6 +137,8 @@ static func can_afford_with_autopay(player_index: int, cost: Dictionary, gs: Gam
 				var rune = _find_recyclable_rune_domain(ps, domain, recycled_instance_ids)
 				if rune == null:
 					return false
+				if not rune.is_exhausted:
+					sim_energy += 1
 				recycled_instance_ids.append(rune.instance_id)
 				for d in rune.definition.domain:
 					sim_power[d] = sim_power.get(d, 0) + 1
