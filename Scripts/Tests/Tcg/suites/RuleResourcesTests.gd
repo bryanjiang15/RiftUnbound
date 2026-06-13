@@ -8,6 +8,7 @@ static func run(assertions) -> void:
 	_test_accelerate_auto_recycles_rune(assertions)
 	_test_on_discard_power_auto_recycles_rune(assertions)
 	_test_accelerate_taps_before_recycle_for_energy(assertions)
+	_test_accelerate_three_runes_recycles_for_power(assertions)
 
 
 static func _test_tap_adds_energy(assertions) -> void:
@@ -92,3 +93,34 @@ static func _test_accelerate_taps_before_recycle_for_energy(assertions) -> void:
 	h.cmd(0, "play jinx-demolitionist accelerate")
 	assertions.assert_no_error(h.controller, "jinx demolitionist accelerate succeeds with four runes")
 	assertions.assert_true(h.find_unit("jinx-demolitionist") != null, "jinx demolitionist enters play")
+
+
+# BUG-009: accelerate domain power must auto-recycle; do not spend all runes on energy only.
+static func _test_accelerate_three_runes_recycles_for_power(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{
+				"pool": {"energy": 0, "power": {}},
+				"hand": ["jinx-demolitionist", "void-seeker", "fury-rune"],
+				"runes": [
+					{"id": "fury-rune", "exhausted": false},
+					{"id": "fury-rune", "exhausted": false},
+					{"id": "fury-rune", "exhausted": false},
+				],
+				"deck_size": 10, "rune_deck_size": 12,
+			},
+			{"deck_size": 10, "rune_deck_size": 12}
+		]
+	})
+	var rune_deck_before = h.gs().players[0].rune_deck.size()
+	h.set_choices(["void-seeker", "fury-rune"])
+	h.cmd(0, "play jinx-demolitionist accelerate")
+	assertions.assert_no_error(h.controller, "jinx accelerate succeeds with three runes")
+	assertions.assert_log_contains(h.controller, "[Auto] Rune recycled", "accelerate recycles a rune for domain power")
+	assertions.assert_eq(h.gs().players[0].rune_deck.size(), rune_deck_before + 1, "one rune returned to rune deck")
+	assertions.assert_eq(h.gs().players[0].channeled_runes.size(), 2, "two runes remain channeled after recycle")
+	var unit = h.find_unit("jinx-demolitionist")
+	assertions.assert_true(unit != null and not unit.is_exhausted, "accelerate enters ready")

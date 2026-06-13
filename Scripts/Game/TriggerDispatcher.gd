@@ -172,6 +172,8 @@ func _emit_played_card_abilities(ctx: Dictionary, gs: GameState, controller: Gam
 			continue
 		if ab.get("effect_type", "") == "cost_reduction":
 			continue
+		if ab.get("effect_type", "") == "enter_ready" and ctx.get("use_accelerate", false):
+			continue
 		var condition = ab.get("condition", null)
 		if not ConditionEvaluatorScript.evaluate(condition, source, gs, ctx):
 			continue

@@ -38,7 +38,9 @@ static func compute_play_cost(
 				energy = maxi(0, energy - int(ep.get("amount", 2)))
 
 	if use_accelerate and card.has_keyword("accelerate"):
-		energy += 1
+		# Accelerate is "[1] + 1 Power". Auto-pay satisfies the energy by tapping
+		# before recycling the domain rune for power; adding +1 energy here would
+		# double-count and tap extra runes without recycling (BUG-009).
 		if not card.definition.domain.is_empty():
 			_add_power_cost(power, card.definition.domain[0], 1)
 
