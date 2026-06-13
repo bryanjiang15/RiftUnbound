@@ -317,6 +317,21 @@ func update_prompt(player_index: int, _in_showdown: bool) -> void:
 		COLOR_P1 if player_index == 0 else COLOR_P2)
 
 
+func append_to_input(text: String) -> void:
+	if text.is_empty():
+		return
+	var current := _input_field.text
+	if current.is_empty():
+		_input_field.text = text
+	elif not current.ends_with(" "):
+		_input_field.text = current + " " + text
+	else:
+		_input_field.text = current + text
+	_input_field.caret_column = _input_field.text.length()
+	_on_text_changed(_input_field.text)
+	_input_field.call_deferred("grab_focus")
+
+
 # ── Hint system ───────────────────────────────────────────────────────────────
 
 func set_hints_enabled(enabled: bool) -> void:

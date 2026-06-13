@@ -3,6 +3,7 @@ extends Control
 
 signal card_hovered(inst: CardInstance)
 signal card_unhovered()
+signal card_clicked(inst: CardInstance)
 
 # ── Layout constants ──────────────────────────────────────────────────────────
 const HUD_H       := 38
@@ -66,6 +67,7 @@ var _trash_label:     Array = [null, null]
 
 # Battlefield panels
 var _bf_panels: Array = []   # Array[PanelContainer]  length 2
+var _bf_unit_cards: Array = []  # [bf_index][pi] → HBoxContainer
 
 # Chain panel
 var _chain_items_vbox: VBoxContainer
@@ -392,15 +394,16 @@ func _build_battlefield_row() -> PanelContainer:
 	pc.add_child(hbox)
 
 	_bf_panels.clear()
-	for _i in range(2):
-		var bf := _build_single_battlefield()
+	_bf_unit_cards.clear()
+	for i in range(2):
+		var bf := _build_single_battlefield(i)
 		hbox.add_child(bf)
 		_bf_panels.append(bf)
 
 	return pc
 
 
-func _build_single_battlefield() -> PanelContainer:
+func _build_single_battlefield(bf_index: int) -> PanelContainer:
 	var pc := PanelContainer.new()
 	pc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	pc.size_flags_vertical   = Control.SIZE_EXPAND_FILL
@@ -409,6 +412,8 @@ func _build_single_battlefield() -> PanelContainer:
 	var vbox := VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 4)
 	pc.add_child(vbox)
+
+	_bf_unit_cards.append([null, null])
 
 	var name_row := HBoxContainer.new()
 	vbox.add_child(name_row)
@@ -430,29 +435,49 @@ func _build_single_battlefield() -> PanelContainer:
 	ctrl_lbl.add_theme_color_override("font_color", C_LABEL_DIM)
 	vbox.add_child(ctrl_lbl)
 
-	# P2 units row (top half of battlefield)
-	var p2_row_lbl := Label.new()
-	p2_row_lbl.name = "P2RowLabel"
-	p2_row_lbl.text = "P2: —"
-	p2_row_lbl.add_theme_font_size_override("font_size", 10)
-	p2_row_lbl.add_theme_color_override("font_color", C_P2)
-	p2_row_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	vbox.add_child(p2_row_lbl)
+	vbox.add_child(_build_bf_player_zone(bf_index, 1))
 
 	var divider := HSeparator.new()
 	divider.add_theme_color_override("color", C_ZONE_BDR)
 	vbox.add_child(divider)
 
-	# P1 units row (bottom half of battlefield)
-	var p1_row_lbl := Label.new()
-	p1_row_lbl.name = "P1RowLabel"
-	p1_row_lbl.text = "P1: —"
-	p1_row_lbl.add_theme_font_size_override("font_size", 10)
-	p1_row_lbl.add_theme_color_override("font_color", C_P1)
-	p1_row_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	vbox.add_child(p1_row_lbl)
+	vbox.add_child(_build_bf_player_zone(bf_index, 0))
 
 	return pc
+
+
+func _build_bf_player_zone(bf_index: int, pi: int) -> PanelContainer:
+	var row_color := C_P1 if pi == 0 else C_P2
+
+	var zone_pc := PanelContainer.new()
+	zone_pc.size_flags_vertical   = Control.SIZE_EXPAND_FILL
+	zone_pc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	zone_pc.add_theme_stylebox_override("panel",
+		_flat_sb(row_color * 0.06, row_color * 0.35, 1, 3))
+
+	var zone_vbox := VBoxContainer.new()
+	zone_vbox.add_theme_constant_override("separation", 2)
+	zone_pc.add_child(zone_vbox)
+
+	var title := Label.new()
+	title.text = "  P%d" % (pi + 1)
+	title.add_theme_font_size_override("font_size", 9)
+	title.add_theme_color_override("font_color", row_color * 0.8)
+	zone_vbox.add_child(title)
+
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	scroll.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical    = Control.SIZE_EXPAND_FILL
+	zone_vbox.add_child(scroll)
+
+	var hbox := HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 4)
+	hbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.add_child(hbox)
+
+	_bf_unit_cards[bf_index][pi] = hbox
+	return zone_pc
 
 
 # ── Chain column ──────────────────────────────────────────────────────────────
@@ -680,8 +705,6 @@ func _refresh_battlefield(gs: GameState, bf_index: int) -> void:
 
 	var name_lbl: Label = vbox.get_node_or_null("HBoxContainer/NameLabel")
 	var ctrl_lbl: Label = vbox.get_node_or_null("CtrlLabel")
-	var p2_lbl:   Label = vbox.get_node_or_null("P2RowLabel")
-	var p1_lbl:   Label = vbox.get_node_or_null("P1RowLabel")
 
 	if name_lbl:
 		name_lbl.text = "[%s]  %s" % [bf.battlefield_id.to_upper(), bf.display_name]
@@ -706,31 +729,34 @@ func _refresh_battlefield(gs: GameState, bf_index: int) -> void:
 		bg = C_BF_BASE; border = C_ZONE_BDR
 	panel.add_theme_stylebox_override("panel", _flat_sb(bg, border, 2, 5))
 
-	# Unit lists
-	for pi_data in [[p2_lbl, 1], [p1_lbl, 0]]:
-		var lbl: Label = pi_data[0]
-		var pi: int    = pi_data[1]
-		if lbl == null: continue
-		if bf.units[pi].is_empty():
-			lbl.text = "P%d: —" % (pi + 1)
-		else:
-			var parts: Array[String] = []
-			for u in bf.units[pi]:
-				var flags := ""
-				if u.is_attacker: flags += " ⚔"
-				if u.is_defender: flags += " 🛡"
-				if u.is_exhausted: flags += " ✗"
-				if u.is_stunned:   flags += " ~"
-				if u.damage > 0:   flags += " ❤%d" % u.damage
-				if u.buff_counters > 0: flags += " ★"
-				parts.append("[%s] %s  %d/%dM%s" % [
-					u.instance_id, u.definition.name,
-					u.get_current_might(), u.definition.might, flags
-				])
-			lbl.text = "P%d:  " % (pi + 1) + "\n      ".join(parts)
+	for pi in [1, 0]:
+		_refresh_bf_unit_row(bf_index, pi, bf.units[pi], bf)
 
-	if bf.facedown_card:
-		if p1_lbl: p1_lbl.text += "\n  [hidden card]"
+
+func _refresh_bf_unit_row(bf_index: int, pi: int, units: Array,
+		bf: BoardState.BattlefieldEntry) -> void:
+	if bf_index >= _bf_unit_cards.size():
+		return
+	var hbox: HBoxContainer = _bf_unit_cards[bf_index][pi]
+	if hbox == null:
+		return
+	_clear_children(hbox)
+
+	var has_facedown := bf.facedown_card != null and bf.facedown_card.owner_index == pi
+	if units.is_empty() and not has_facedown:
+		var empty_lbl := Label.new()
+		empty_lbl.text = "(no units)"
+		empty_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		empty_lbl.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		empty_lbl.add_theme_color_override("font_color", C_LABEL_DIM)
+		empty_lbl.add_theme_font_size_override("font_size", 10)
+		hbox.add_child(empty_lbl)
+		return
+
+	for u in units:
+		hbox.add_child(_make_card_thumb(u))
+	if has_facedown:
+		hbox.add_child(_make_facedown_thumb(bf.facedown_card))
 
 
 func _refresh_chain(gs: GameState) -> void:
@@ -783,6 +809,12 @@ func _make_card_thumb(inst: CardInstance) -> Control:
 	# Emit hover signals so GameScene can update the preview panel
 	wrapper.mouse_entered.connect(func(): card_hovered.emit(inst))
 	wrapper.mouse_exited.connect(func(): card_unhovered.emit())
+	wrapper.gui_input.connect(func(event: InputEvent) -> void:
+		if event is InputEventMouseButton \
+				and event.pressed \
+				and event.button_index == MOUSE_BUTTON_LEFT:
+			card_clicked.emit(inst)
+	)
 
 	# Inner card — holds all visuals, rotates when exhausted
 	var card := Control.new()
@@ -828,8 +860,10 @@ func _make_card_thumb(inst: CardInstance) -> Control:
 	id_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(id_lbl)
 
-	# Small status badges in top-left corner (damage / stun / buff only)
+	# Small status badges in top-left corner (damage / stun / buff / combat)
 	var badges: Array[String] = []
+	if inst.is_attacker:       badges.append("⚔")
+	if inst.is_defender:       badges.append("🛡")
 	if inst.damage > 0:        badges.append("❤%d" % inst.damage)
 	if inst.is_stunned:        badges.append("~")
 	if inst.buff_counters > 0: badges.append("★")
@@ -859,6 +893,80 @@ func _make_card_thumb(inst: CardInstance) -> Control:
 		card.add_child(dim)
 		card.pivot_offset = Vector2(CARD_W / 2.0, CARD_H / 2.0)
 		card.rotation_degrees = 90.0
+
+	return wrapper
+
+
+func _make_facedown_thumb(inst: CardInstance) -> Control:
+	var wrapper := Control.new()
+	wrapper.custom_minimum_size = Vector2(CARD_W, CARD_H)
+	wrapper.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	wrapper.clip_contents = false
+	wrapper.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	wrapper.mouse_entered.connect(func(): card_hovered.emit(inst))
+	wrapper.mouse_exited.connect(func(): card_unhovered.emit())
+	wrapper.gui_input.connect(func(event: InputEvent) -> void:
+		if event is InputEventMouseButton \
+				and event.pressed \
+				and event.button_index == MOUSE_BUTTON_LEFT:
+			card_clicked.emit(inst)
+	)
+
+	var card := Control.new()
+	card.set_size(Vector2(CARD_W, CARD_H))
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wrapper.add_child(card)
+
+	var tex := TextureRect.new()
+	tex.texture = _load_card_texture("")
+	tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	tex.stretch_mode = TextureRect.STRETCH_SCALE
+	tex.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	tex.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(tex)
+
+	var dim := ColorRect.new()
+	dim.color = Color(0.0, 0.0, 0.0, 0.72)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(dim)
+
+	var owner_color := C_P1 if inst.owner_index == 0 else C_P2
+	var border_panel := Panel.new()
+	border_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	border_panel.add_theme_stylebox_override("panel",
+		_flat_sb(Color(0, 0, 0, 0), owner_color * 0.5, 2, 4))
+	border_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(border_panel)
+
+	var hidden_lbl := Label.new()
+	hidden_lbl.text = "HIDDEN"
+	hidden_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hidden_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	hidden_lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hidden_lbl.add_theme_font_size_override("font_size", 11)
+	hidden_lbl.add_theme_color_override("font_color", owner_color * 0.60)
+	hidden_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(hidden_lbl)
+
+	var id_bg := ColorRect.new()
+	id_bg.color = Color(0.0, 0.0, 0.0, 0.70)
+	id_bg.anchor_left = 0.0; id_bg.anchor_right  = 1.0
+	id_bg.anchor_top  = 0.88; id_bg.anchor_bottom = 1.0
+	id_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(id_bg)
+
+	var id_lbl := Label.new()
+	id_lbl.text = inst.instance_id
+	id_lbl.clip_text = true
+	id_lbl.anchor_left  = 0.0;  id_lbl.anchor_right  = 1.0
+	id_lbl.anchor_top   = 0.89; id_lbl.anchor_bottom = 1.0
+	id_lbl.offset_left = 2; id_lbl.offset_right = -2
+	id_lbl.add_theme_font_size_override("font_size", 7)
+	id_lbl.add_theme_color_override("font_color", Color(0.70, 0.70, 0.75))
+	id_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(id_lbl)
 
 	return wrapper
 

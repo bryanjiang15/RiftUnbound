@@ -103,6 +103,7 @@ func _wire_signals() -> void:
 	_console.command_submitted.connect(_on_command_submitted)
 	_board_view.card_hovered.connect(_on_card_hovered)
 	_board_view.card_unhovered.connect(_on_card_unhovered)
+	_board_view.card_clicked.connect(_on_card_clicked)
 	if _controller.gs:
 		_on_board_updated()
 
@@ -159,3 +160,7 @@ func _on_card_hovered(inst: CardInstance) -> void:
 func _on_card_unhovered() -> void:
 	_popup.visible = false
 	_popup_tex.texture = null
+
+
+func _on_card_clicked(inst: CardInstance) -> void:
+	_console.append_to_input(inst.instance_id)

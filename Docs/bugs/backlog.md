@@ -10,5 +10,6 @@
 | [BUG-006](entries/BUG-006-extra-pending-choice-on-traveling-merchant-conquer.md) | open | low | ai | extra pending choice on traveling merchant conquer | 2026-06-13 | #9 |
 | [BUG-007](entries/BUG-007-ai-does-not-output-any-command-when-showdown-focus-required.md) | fixed | high | ai | AI does not output any command when showdown focus required | 2026-06-13 | #12 |
 | [BUG-008](entries/BUG-008-traveling-merchant-move-trigger-on-any-card-move.md) | open | high | engine | traveling-merchant move trigger on any card move | 2026-06-13 | #13 |
+| [BUG-009](entries/BUG-009-unit-with-power-cost-does-not-recycle-rune-to-pay-power.md) | open | high | engine | Unit with power cost does not recycle rune to pay power | 2026-06-13 | #16 |
 
-**Counts:** 2 open · 1 investigating · 0 confirmed · 3 fixed · 0 wontfix
+**Counts:** 3 open · 1 investigating · 0 confirmed · 3 fixed · 0 wontfix
