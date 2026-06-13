@@ -1613,6 +1613,8 @@ func _auto_tap_rune(player_index: int, rune: CardInstance) -> void:
 
 
 func _auto_recycle_rune(player_index: int, rune: CardInstance) -> void:
+	if not rune.is_exhausted:
+		_auto_tap_rune(player_index, rune)
 	for ab in rune.definition.abilities:
 		if ab.get("effect_type", "") == "add_power":
 			CostCalculator.pay_cost(player_index, ab.get("cost", {}), rune, gs)
