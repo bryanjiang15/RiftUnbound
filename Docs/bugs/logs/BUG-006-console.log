@@ -1,0 +1,49 @@
+> === Turn 3 — P2's turn ===
+> Awaken Phase
+> Beginning Phase
+> Channel Phase
+> P2 channeled a CHS Rune
+> P2 channeled a FRY Rune
+> P2 drew Blazing Scorcher
+> Main Phase — P2 has Priority
+[PROMPT] P2: tap runes, play cards, move units, or 'end turn'
+[P2] > play flame-chompers to base
+> P2 added 1 energy to pool
+> P2 added 1 energy to pool
+> P2 added 1 energy to pool
+> [P2] Played Flame Chompers
+> Flame Chompers placed at P2 base (exhausted)
+[P2] > move traveling-merchant-2 to battlefield-a
+> [P2] Traveling Merchant moved to battlefield-a
+> Zaun Warrens is now Contested
+[PROMPT] Choose a card to discard (1 remaining) (use: choose <id>)
+> Showdown staged at Zaun Warrens
+> Non-combat Showdown begins at Zaun Warrens (P2 has Focus)
+[PROMPT] P2: play Action/Reaction card or 'pass'
+[P2] > choose gust
+> P2 discarded Gust
+> P2 drew a card (hand: 4)
+[P2] > pass
+> [P2] Passed Focus
+[PROMPT] P1: play Action/Reaction card or 'pass'
+> [P2] pass
+[P2] > pass
+[ERROR] You do not have Focus.
+> [P1] pass
+[P1] > pass
+> P2 cered Zaun Warrens!
+> P2 scored 1 point (Conquer). Score: P1=0, P2=1
+> Showdown at Zaun Warrens ended — back to Neutral Open
+[P2] > choose fight-or-flight
+[ERROR] No pending choice.
+[P2] > end turn
+> Ending Phase
+> P2 ended their turn.
+> === Turn 4 — P1's turn ===
+> Awaken Phase
+> Beginning Phase
+> Channel Phase
+> P1 channeled a CHS Rune
+> P1 channeled a CHS Rune
+> P1 drew Scrapheap
+> Main Phase — P1 has Priority

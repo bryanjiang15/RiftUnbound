@@ -22,6 +22,7 @@ from bug_io import (
     rebuild_backlog,
     slugify,
     sync_status_to_github,
+    sync_backlog,
     update_meta,
 )
 
@@ -180,6 +181,20 @@ def cmd_new(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sync(args: argparse.Namespace) -> int:
+    counts = sync_backlog(prune_closed=not args.keep_closed, dry_run=args.dry_run)
+    print(
+        f"Sync complete: {counts['updated']} status updated, "
+        f"{counts['archived']} archived, {counts['drift']} drift warnings, "
+        f"{counts['errors']} errors"
+    )
+    if counts["archived"]:
+        print("Archived bugs recorded in Docs/bugs/archive/backlog.md")
+    if not args.dry_run:
+        print("Rebuilt Docs/bugs/backlog.md (active bugs only)")
+    return 0 if counts["errors"] == 0 else 1
+
+
 def _prompt_choice(label: str, options: tuple[str, ...], default: str) -> str:
     raw = input(f"{label} {list(options)} [{default}]: ").strip().lower()
     return raw if raw in options else default
@@ -240,6 +255,15 @@ def main() -> int:
 
     p_rebuild = sub.add_parser("rebuild", help="Regenerate backlog.md from entries")
     p_rebuild.set_defaults(func=lambda _: (rebuild_backlog(), print("Rebuilt Docs/bugs/backlog.md"), 0)[2])
+
+    p_sync = sub.add_parser("sync", help="Pull GitHub state and archive closed bugs")
+    p_sync.add_argument(
+        "--keep-closed",
+        action="store_true",
+        help="Update status only; do not archive closed entries",
+    )
+    p_sync.add_argument("--dry-run", action="store_true")
+    p_sync.set_defaults(func=cmd_sync)
 
     args = parser.parse_args()
     return args.func(args)

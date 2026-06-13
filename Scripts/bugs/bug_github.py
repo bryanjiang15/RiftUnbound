@@ -5,6 +5,7 @@ GitHub ↔ local bug backlog sync for Cursor agent workflows.
   import <issue#>   Pull GitHub issue into Docs/bugs/entries/
   start  <ref>      Mark investigating + comment on GitHub
   resolve <ref>     Mark fixed locally + close GitHub issue
+  sync             Pull GitHub state + archive closed bugs
   context <ref>     Print agent briefing (entry path, tests to run)
 
 <ref> = GitHub issue number (42) or local id (BUG-003).
@@ -31,6 +32,7 @@ from bug_io import (
     rebuild_backlog,
     create_entry_from_issue,
     run_gh,
+    sync_backlog,
     update_meta,
 )
 
@@ -239,6 +241,20 @@ def cmd_context(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sync(args: argparse.Namespace) -> int:
+    counts = sync_backlog(prune_closed=not args.keep_closed, dry_run=args.dry_run)
+    print(
+        f"Sync complete: {counts['updated']} status updated, "
+        f"{counts['archived']} archived, {counts['drift']} drift warnings, "
+        f"{counts['errors']} errors"
+    )
+    if counts["archived"]:
+        print("Archived bugs recorded in Docs/bugs/archive/backlog.md")
+    if not args.dry_run:
+        print("Rebuilt Docs/bugs/backlog.md (active bugs only)")
+    return 0 if counts["errors"] == 0 else 1
+
+
 def _area_hint(area: str) -> str:
     return {
         "engine": "Game/",
@@ -278,6 +294,15 @@ def main() -> int:
     p_ctx.add_argument("ref", help="Issue # or BUG-NNN")
     p_ctx.add_argument("--tests", default="./Scripts/run_tcg_tests.sh")
     p_ctx.set_defaults(func=cmd_context)
+
+    p_sync = sub.add_parser("sync", help="Pull GitHub state and archive closed bugs")
+    p_sync.add_argument(
+        "--keep-closed",
+        action="store_true",
+        help="Update status only; do not archive closed entries",
+    )
+    p_sync.add_argument("--dry-run", action="store_true", help="Preview changes")
+    p_sync.set_defaults(func=cmd_sync)
 
     args = parser.parse_args()
     return args.func(args)

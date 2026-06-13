@@ -1,0 +1,35 @@
+> === Turn 3 — P2's turn ===
+> Awaken Phase
+> Beginning Phase
+> Channel Phase
+> P2 channeled a CHS Rune
+> P2 channeled a FRY Rune
+> P2 drew Traveling Merchant
+> Main Phase — P2 has Priority
+[PROMPT] P2: tap runes, play cards, move units, or 'end turn'
+[P2] > play jinx-demolitionist-2 to base accelerate
+> P2 added 1 FRY power to pool
+> [Auto] Rune recycled to bottom of Rune Deck
+> P2 added 1 energy to pool
+> P2 added 1 energy to pool
+> P2 added 1 energy to pool
+[ERROR] Cannot play Jinx - Demolitionist: insufficient resources (need 4 ENG + 1 FRY, pool: ENG:3 | FRY:1)
+[P2] > play vi-destructive to base
+> [P2] Played Vi - Destructive
+> Vi - Destructive placed at P2 base (exhausted)
+[P2] > use vi-destructive
+> [P2] Activated ability on Vi - Destructive
+[PROMPT] P1: play Reaction or 'pass' to let it resolve
+[P2] > pass
+[PROMPT] P2: play Reaction or 'pass'
+[P2] > pass
+> Resolving: [P2] Ability: vi-destructive-recycle (Vi - Destructive)
+> Vi - Destructive +1 Might (turn)
+[P2] > use vi-destructive
+> [P2] Activatbility on Vi - Destructive
+[PROMPT] P1: play Reaction or 'pass' to let it resolve
+[P2] > pass
+[PROMPT] P2: play Reaction or 'pass'
+[P2] > pass
+> Resolving: [P2] Ability: vi-destructive-recycle (Vi - Destructive)
+> Vi - Destructive +1 Might (turn)

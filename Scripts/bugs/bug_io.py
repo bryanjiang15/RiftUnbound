@@ -11,10 +11,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 ENTRIES_DIR = ROOT / "Docs" / "bugs" / "entries"
 LOGS_DIR = ROOT / "Docs" / "bugs" / "logs"
+ARCHIVE_DIR = ROOT / "Docs" / "bugs" / "archive"
+ARCHIVE_BACKLOG = ARCHIVE_DIR / "backlog.md"
 BACKLOG = ROOT / "Docs" / "bugs" / "backlog.md"
 REPO = "bryanjiang15/RiftUnbound"
 
 STATUSES = ("open", "investigating", "confirmed", "fixed", "wontfix", "duplicate")
+TERMINAL_STATUSES = ("fixed", "wontfix", "duplicate")
 SEVERITIES = ("critical", "high", "medium", "low")
 AREAS = ("engine", "ui", "ai", "cards", "tests", "docs")
 
@@ -129,6 +132,111 @@ def rebuild_backlog() -> None:
         ]
     )
     BACKLOG.write_text("\n".join(lines), encoding="utf-8")
+
+
+def parse_archive_backlog() -> list[dict[str, str]]:
+    if not ARCHIVE_BACKLOG.exists():
+        return []
+    text = ARCHIVE_BACKLOG.read_text(encoding="utf-8")
+    rows: list[dict[str, str]] = []
+    for line in text.splitlines():
+        if not line.startswith("| BUG-"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) < 7:
+            continue
+        gh = cells[6].lstrip("#") if cells[6] not in ("—", "-", "") else ""
+        fixed_in = cells[7] if len(cells) > 7 and cells[7] not in ("—", "-") else ""
+        rows.append(
+            {
+                "id": cells[0],
+                "status": cells[1],
+                "severity": cells[2],
+                "area": cells[3],
+                "title": cells[4],
+                "reported": cells[5],
+                "github_issue": gh,
+                "fixed_in": fixed_in,
+            }
+        )
+    return rows
+
+
+def rebuild_archive_backlog(rows: list[dict[str, str]]) -> None:
+    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    counts = {s: 0 for s in TERMINAL_STATUSES}
+    lines = [
+        "# Archived Bugs",
+        "",
+        "> Closed bugs removed from active backlog by `bug_github.py sync`.",
+        "",
+        "| ID | Status | Sev | Area | Title | Reported | GitHub | Fixed in |",
+        "|----|--------|-----|------|-------|----------|--------|----------|",
+    ]
+    for e in sorted(rows, key=lambda r: r.get("id", "")):
+        status = e.get("status", "fixed")
+        if status in counts:
+            counts[status] = counts.get(status, 0) + 1
+        gh = f"#{e['github_issue']}" if e.get("github_issue") else "—"
+        fixed = e.get("fixed_in") or "—"
+        lines.append(
+            f"| {e['id']} | {status} | {e.get('severity', '?')} | {e.get('area', '?')} "
+            f"| {e.get('title', '?')} | {e.get('reported', '?')} | {gh} | {fixed} |"
+        )
+    if not rows:
+        lines.append("| — | — | — | — | *No archived bugs yet* | — | — | — |")
+    lines.extend(
+        [
+            "",
+            "**Counts:** "
+            + f"{counts.get('fixed', 0)} fixed · "
+            + f"{counts.get('wontfix', 0)} wontfix · "
+            + f"{counts.get('duplicate', 0)} duplicate",
+            "",
+        ]
+    )
+    ARCHIVE_BACKLOG.write_text("\n".join(lines), encoding="utf-8")
+
+
+def migrate_legacy_archive() -> int:
+    """Import old archive/entries/*.md into archive/backlog.md, then delete legacy files."""
+    legacy_dir = ARCHIVE_DIR / "entries"
+    if not legacy_dir.is_dir():
+        return 0
+
+    rows = parse_archive_backlog()
+    known = {r["id"] for r in rows}
+    migrated = 0
+
+    for path in sorted(legacy_dir.glob("BUG-*.md")):
+        meta, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+        bug_id = meta.get("id", "")
+        if not bug_id:
+            parts = path.stem.split("-", 2)
+            bug_id = f"{parts[0]}-{parts[1]}" if len(parts) >= 2 else path.stem
+            meta["id"] = bug_id
+        if bug_id not in known:
+            rows.append(meta)
+            known.add(bug_id)
+            migrated += 1
+        path.unlink()
+
+    legacy_logs = ARCHIVE_DIR / "logs"
+    if legacy_logs.is_dir():
+        for log in legacy_logs.glob("*.log"):
+            log.unlink()
+        try:
+            legacy_logs.rmdir()
+        except OSError:
+            pass
+    try:
+        legacy_dir.rmdir()
+    except OSError:
+        pass
+
+    if migrated:
+        rebuild_archive_backlog(rows)
+    return migrated
 
 
 def update_meta(path: Path, **fields: str) -> dict[str, str]:
@@ -405,3 +513,103 @@ def sync_status_to_github(
             "duplicate": "Closing as duplicate.",
         }[status]
         run_gh(["issue", "close", issue_number, "--repo", REPO, "--comment", close_msg])
+
+
+def fetch_issue_state(issue_number: str) -> dict:
+    import json
+
+    raw = run_gh(
+        [
+            "issue",
+            "view",
+            issue_number,
+            "--repo",
+            REPO,
+            "--json",
+            "number,title,state,labels,body",
+        ]
+    )
+    data = json.loads(raw)
+    data["label_names"] = [lb["name"] for lb in data.get("labels", [])]
+    return data
+
+
+def archive_entry(entry_path: Path, *, dry_run: bool = False) -> None:
+    meta, _ = parse_frontmatter(entry_path.read_text(encoding="utf-8"))
+    bug_id = meta.get("id", "")
+    if not bug_id:
+        parts = entry_path.stem.split("-", 2)
+        bug_id = f"{parts[0]}-{parts[1]}" if len(parts) >= 2 else entry_path.stem
+        meta["id"] = bug_id
+
+    if dry_run:
+        print(f"[dry-run] archive {bug_id} → archive/backlog.md")
+        return
+
+    rows = parse_archive_backlog()
+    rows = [r for r in rows if r.get("id") != bug_id]
+    rows.append(meta)
+    rebuild_archive_backlog(rows)
+
+    entry_path.unlink()
+    log_path = LOGS_DIR / f"{bug_id}-console.log"
+    if log_path.exists():
+        log_path.unlink()
+
+
+def sync_backlog(*, prune_closed: bool = True, dry_run: bool = False) -> dict[str, int]:
+    """
+    Pull GitHub issue state for linked entries, align local status, and archive closed bugs.
+
+    Returns counts: updated, archived, drift, errors.
+    """
+    counts = {"updated": 0, "archived": 0, "drift": 0, "errors": 0}
+    migrated = migrate_legacy_archive()
+    if migrated:
+        print(f"Migrated {migrated} legacy archive entries → archive/backlog.md")
+    to_archive: list[Path] = []
+
+    for entry_path in sorted(ENTRIES_DIR.glob("BUG-*.md")):
+        meta, _ = parse_frontmatter(entry_path.read_text(encoding="utf-8"))
+        bug_id = meta.get("id", entry_path.stem)
+        status = meta.get("status", "open")
+        issue_num = meta.get("github_issue", "")
+        github_closed = False
+
+        if issue_num:
+            try:
+                issue = fetch_issue_state(issue_num)
+            except Exception:
+                print(f"{bug_id}: could not fetch GitHub #{issue_num}", file=sys.stderr)
+                counts["errors"] += 1
+                continue
+
+            github_closed = issue.get("state") == "CLOSED"
+            if github_closed and status in ("open", "investigating", "confirmed"):
+                if dry_run:
+                    print(f"[dry-run] {bug_id}: GitHub #{issue_num} closed → status fixed")
+                else:
+                    update_meta(entry_path, status="fixed")
+                counts["updated"] += 1
+                status = "fixed"
+            elif not github_closed and status in TERMINAL_STATUSES:
+                print(
+                    f"{bug_id}: local status is {status} but GitHub #{issue_num} is still open",
+                    file=sys.stderr,
+                )
+                counts["drift"] += 1
+                continue
+
+        should_archive = prune_closed and (
+            github_closed or (not issue_num and status in TERMINAL_STATUSES)
+        )
+        if should_archive:
+            to_archive.append(entry_path)
+
+    for entry_path in to_archive:
+        archive_entry(entry_path, dry_run=dry_run)
+        counts["archived"] += 1
+
+    if not dry_run:
+        rebuild_backlog()
+    return counts
