@@ -82,6 +82,10 @@ static func _update_combat_designations(gs: GameState) -> void:
 				u.is_defender = in_combat and (pi != gs.attacker_player_index if gs.combat_bf_index >= 0 else false)
 
 
+static func process_deaths(gs: GameState, ability_resolver: AbilityResolver = null, controller: GameController = null) -> Array:
+	return _process_deaths(gs, ability_resolver, controller)
+
+
 static func _process_deaths(gs: GameState, ability_resolver: AbilityResolver, controller: GameController = null) -> Array:
 	var log_lines: Array[String] = []
 	var units_to_kill: Array = []
@@ -97,18 +101,19 @@ static func _process_deaths(gs: GameState, ability_resolver: AbilityResolver, co
 					units_to_kill.append(u)
 
 	for u in units_to_kill:
-		for ab in u.definition.abilities:
-			if ab.get("timing", "") == "on_death":
-				var dk_line = "> %s Deathknell triggers" % u.display_name()
-				log_lines.append(dk_line)
-				if controller != null:
-					controller.log_lines.append(dk_line)
-				var ctx = {"player_index": u.owner_index, "controller": controller}
-				var ab_lines = ability_resolver.resolve_ability(ab, u, null, gs, ctx)
-				log_lines.append_array(ab_lines)
-				if controller != null:
-					for line in ab_lines:
-						controller.log_lines.append(line)
+		if ability_resolver != null:
+			for ab in u.definition.abilities:
+				if ab.get("timing", "") == "on_death":
+					var dk_line = "> %s Deathknell triggers" % u.display_name()
+					log_lines.append(dk_line)
+					if controller != null:
+						controller.log_lines.append(dk_line)
+					var ctx = {"player_index": u.owner_index, "controller": controller}
+					var ab_lines = ability_resolver.resolve_ability(ab, u, null, gs, ctx)
+					log_lines.append_array(ab_lines)
+					if controller != null:
+						for line in ab_lines:
+							controller.log_lines.append(line)
 
 	for u in units_to_kill:
 		log_lines.append("> %s (P%d) was killed" % [u.display_name(), u.owner_index + 1])
