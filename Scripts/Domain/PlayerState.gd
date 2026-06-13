@@ -4,13 +4,13 @@ var player_index: int = 0
 var player_name: String = "P1"
 
 # Zones
-var deck: Array = []
-var rune_deck: Array = []
-var hand: Array = []
-var trash: Array = []
-var banishment: Array = []
-var base_permanents: Array = []
-var channeled_runes: Array = []
+var deck: Array[CardInstance] = []
+var rune_deck: Array[CardInstance] = []
+var hand: Array[CardInstance] = []
+var trash: Array[CardInstance] = []
+var banishment: Array[CardInstance] = []
+var base_permanents: Array[CardInstance] = []
+var channeled_runes: Array[CardInstance] = []
 var champion_zone: CardInstance = null
 var legend: CardInstance = null
 
@@ -21,11 +21,11 @@ var score: int = 0
 # Turn tracking
 var cards_played_this_turn: int = 0
 var cards_discarded_count: int = 0
-var discarded_this_turn: Array = []
-var battlefields_scored_this_turn: Array = []
+var discarded_this_turn: Array[CardInstance] = []
+var battlefields_scored_this_turn: Array[int] = []
 
 # Deck configuration (battlefield IDs from deck file)
-var deck_battlefields: Array = []
+var deck_battlefields: Array[String] = []
 
 # Instance ID generation
 var _id_counters: Dictionary = {}
@@ -155,16 +155,16 @@ func _remove_from_all_zones(inst: CardInstance) -> void:
 		champion_zone = null
 
 
-func get_units_at_base() -> Array:
-	var result: Array = []
+func get_units_at_base() -> Array[CardInstance]:
+	var result: Array[CardInstance] = []
 	for c in base_permanents:
 		if c.definition.card_type == "unit":
 			result.append(c)
 	return result
 
 
-func get_unattached_gear_at_base() -> Array:
-	var result: Array = []
+func get_unattached_gear_at_base() -> Array[CardInstance]:
+	var result: Array[CardInstance] = []
 	for c in base_permanents:
 		if c.definition.card_type == "gear" and c.attached_to == null:
 			result.append(c)

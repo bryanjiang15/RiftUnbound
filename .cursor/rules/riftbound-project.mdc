@@ -72,9 +72,12 @@ After any mutation that may prompt, check `gs.pending_prompt.is_empty()` before 
 
 ## GDScript Conventions
 
+See `Docs/coding-style.md` for full guidelines. Summary:
+
 - `class_name` PascalCase; private helpers prefixed `_`
 - Static utility classes (`CostCalculator`, `ChainProcessor`) use `static func`
-- Preload: `preload("res://Scripts/...")`
+- Preload only to break circular references; otherwise use `class_name`
+- Typed collections (`Array[CardInstance]`, `Array[String]`) where element type is known
 - Minimize diff scope; match surrounding style; no drive-by refactors
 
 ## Key Docs (read first for rule changes)

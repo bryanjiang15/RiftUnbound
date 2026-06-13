@@ -546,27 +546,27 @@ An AI player connects to the same command interface as a human. From the engine'
 
 The AI does **not** get a privileged API — it must issue the same text commands. This keeps the human and AI interaction paths identical and makes it straightforward to swap one for the other.
 
-AI command injection is handled by the `AIPlayer` node, which calls `CommandConsole.submit_command(command_string)` directly, bypassing the text input field but going through the same parser.
+AI command injection is handled by the `AIPlayer` node, which calls `GameController.submit_command()` directly, bypassing the text input field but going through the same validation path as the console.
 
 ---
 
 ### 19.6 Command Parsing Architecture
 
 ```
-TextInput / AIPlayer.submit_command()
+TextInput / AIPlayer
         │
         ▼
-  CommandParser.gd
+  GameController.submit_command()
   - Tokenizes the command string
-  - Maps verb → action handler
+  - Maps verb → _cmd_* handler
   - Validates current game state allows this action
   - Validates the acting player has Priority / Focus
+  - Executes the action, updates game state
+  - Triggers Cleanups as needed
         │
         ▼
-  GameController.gd
-  - Executes the validated action
-  - Updates game state
-  - Triggers Cleanups as needed
+  Processors (ChainProcessor, CombatProcessor, …)
+  AbilityResolver / TriggerDispatcher
         │
         ▼
   OutputLog.gd

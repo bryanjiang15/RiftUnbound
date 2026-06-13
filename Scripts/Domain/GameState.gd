@@ -1,13 +1,13 @@
 class_name GameState
 
 # Players
-var players: Array = []  # Array[PlayerState], 2 elements
+var players: Array[PlayerState] = []
 
 # Board
 var board: BoardState = BoardState.new()
 
 # Chain (stack)
-var chain: Array = []  # Array[ChainItem]
+var chain: Array[ChainItem] = []
 
 # Turn tracking
 var turn_number: int = 1
@@ -28,7 +28,7 @@ var pending_prompt: Dictionary = {}
 
 # Mulligan state
 var mulligan_phase: bool = false
-var mulligan_done: Array = [false, false]
+var mulligan_done: Array[bool] = [false, false]
 
 # Combat/Showdown damage assignment
 var combat_assignment_active: bool = false
@@ -36,10 +36,10 @@ var combat_bf_index: int = -1
 var attacker_player_index: int = -1
 var remaining_attacker_might: int = 0
 var damage_assignments: Dictionary = {}  # instance_id -> amount
-var assigned_targets: Array = []
+var assigned_targets: Array[CardInstance] = []
 
 # First turn bonus
-var first_channel_done: Array = [false, false]
+var first_channel_done: Array[bool] = [false, false]
 var second_player_index: int = 1
 
 # Combat mode: true = auto-assign damage (AI/default), false = manual assign
@@ -84,16 +84,16 @@ func find_instance_on_board_or_hand(player_index: int, inst_id: String) -> CardI
 	return null
 
 
-func all_units_on_board() -> Array:
-	var result: Array = []
+func all_units_on_board() -> Array[CardInstance]:
+	var result: Array[CardInstance] = []
 	for bf in board.battlefields:
 		for player_units in bf.units:
 			result.append_array(player_units)
 	return result
 
 
-func get_all_units_visible_to(player_index: int) -> Array:
-	var result: Array = []
+func get_all_units_visible_to(player_index: int) -> Array[CardInstance]:
+	var result: Array[CardInstance] = []
 	result.append_array(all_units_on_board())
 	var ps: PlayerState = players[player_index]
 	result.append_array(ps.get_units_at_base())

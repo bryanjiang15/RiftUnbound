@@ -5,10 +5,10 @@ const FixtureLoader = preload("res://Scripts/Tests/Tcg/FixtureLoader.gd")
 const GameControllerScript = preload("res://Scripts/Game/GameController.gd")
 const TriggerDispatcherScript = preload("res://Scripts/Game/TriggerDispatcher.gd")
 
-var controller
+var controller: GameController
 const TcgAssertionsScript = preload("res://Scripts/Tests/Tcg/TcgAssertions.gd")
-var assertions: TcgAssertionsScript = TcgAssertionsScript.new()
-var _pending_choices: Array = []
+var assertions: TcgAssertions = TcgAssertionsScript.new()
+var _pending_choices: Array[String] = []
 
 
 func setup() -> void:
@@ -30,7 +30,9 @@ func load_fixture_dict(data: Dictionary) -> void:
 
 
 func set_choices(choices: Array) -> void:
-	_pending_choices = choices.duplicate()
+	_pending_choices.clear()
+	for choice in choices:
+		_pending_choices.append(str(choice))
 
 
 func cmd(player_index: int, command: String) -> void:
