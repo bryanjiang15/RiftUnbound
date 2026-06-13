@@ -157,6 +157,11 @@ static func _mark_staged(gs: GameState, log_lines: Array) -> void:
 
 static func _prompt_staged(gs: GameState, controller: GameController = null) -> Array:
 	var log_lines: Array[String] = []
+	# Resolve pending choices (e.g. mandatory discard from on_move) before opening
+	# staged combats/showdowns — otherwise focus can pass while a stale prompt blocks
+	# the next player from acting (BUG-007 / GitHub #12).
+	if not gs.pending_prompt.is_empty():
+		return log_lines
 	var total_staged = gs.board.staged_combats.size() + gs.board.staged_showdowns.size()
 	if total_staged > 1:
 		var choices: Array = []
