@@ -115,6 +115,13 @@ func _collect_sources(event: String, ctx: Dictionary, gs: GameState) -> Array:
 				results.append({"source": discarded, "ability": ab})
 		return results
 
+	if event == "on_move":
+		var moved: Variant = ctx.get("source")
+		if moved is CardInstance:
+			for ab in moved.definition.abilities:
+				results.append({"source": moved, "ability": ab})
+		return results
+
 	for ps in gs.players:
 		if ps.legend and event == "beginning_phase_start":
 			for ab in ps.legend.definition.abilities:

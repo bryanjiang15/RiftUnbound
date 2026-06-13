@@ -9,6 +9,7 @@ const TargetResolver = preload("res://Scripts/Game/TargetResolver.gd")
 static func run(assertions) -> void:
 	_test_magma_wurm_aura(assertions)
 	_test_traveling_merchant_on_move(assertions)
+	_test_traveling_merchant_not_on_other_move(assertions)
 	_test_scrapheap_on_play(assertions)
 	_test_rhasa_cost_reduction(assertions)
 	_test_gust_might_filter(assertions)
@@ -52,6 +53,45 @@ static func _test_traveling_merchant_on_move(assertions) -> void:
 	})
 	h.cmd_with_choices(0, "move traveling-merchant to battlefield-a", ["fury-rune"])
 	assertions.assert_log_contains(h.controller, "discarded", "traveling merchant discards on move")
+
+
+# BUG-008: on_move triggers must fire only for the unit that moved.
+static func _test_traveling_merchant_not_on_other_move(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 1, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"battlefield_control": [0, 1],
+		"players": [
+			{
+				"battlefield-a": [{"id": "traveling-merchant", "exhausted": true}],
+				"hand": ["fury-rune"],
+				"deck_size": 5, "rune_deck_size": 12,
+			},
+			{
+				"base": [{"id": "flame-chompers", "exhausted": false}],
+				"hand": ["void-seeker"],
+				"deck_size": 5, "rune_deck_size": 12,
+			},
+		],
+	})
+	var merchant_owner_hand := h.gs().players[0].hand.size()
+	h.cmd(1, "move flame-chompers to battlefield-b")
+	assertions.assert_no_error(h.controller, "opponent move succeeds")
+	assertions.assert_eq(
+		h.gs().players[0].hand.size(),
+		merchant_owner_hand,
+		"traveling merchant owner hand unchanged when another unit moves"
+	)
+	var merchant_discarded := false
+	for line in h.controller.log_lines:
+		if "P1 discarded" in line:
+			merchant_discarded = true
+			break
+	assertions.assert_true(
+		not merchant_discarded,
+		"traveling merchant does not discard on other unit move"
+	)
 
 
 static func _test_scrapheap_on_play(assertions) -> void:
