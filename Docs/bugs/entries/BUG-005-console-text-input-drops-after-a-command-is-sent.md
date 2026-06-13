@@ -1,7 +1,7 @@
 ---
 id: BUG-005
 title: Console text input drops after a command is sent
-status: open
+status: investigating
 severity: medium
 area: ui
 reported: 2026-06-13

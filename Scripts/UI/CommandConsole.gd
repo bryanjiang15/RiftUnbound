@@ -406,13 +406,18 @@ func _format_hint(verb: String, tokens: Array) -> String:
 
 # ── Input submission ──────────────────────────────────────────────────────────
 
+func _refocus_input() -> void:
+	# Defer so focus is restored after synchronous log/board updates from command handling.
+	_input_field.call_deferred("grab_focus")
+
+
 func _on_input_submitted(text: String) -> void:
 	_input_field.clear()
 	_hint_bar.visible = false
-	_input_field.grab_focus()
 
 	var trimmed := text.strip_edges()
 	if trimmed.is_empty():
+		_refocus_input()
 		return
 
 	# Handle 'hints on/off' locally without going to GameController
@@ -420,10 +425,12 @@ func _on_input_submitted(text: String) -> void:
 	if lower == "hints on":
 		set_hints_enabled(true)
 		add_line("> Typing hints enabled.")
+		_refocus_input()
 		return
 	elif lower == "hints off":
 		set_hints_enabled(false)
 		add_line("> Typing hints disabled.")
+		_refocus_input()
 		return
 
 	# Parse optional player prefix: "p1 <command>" or "p2 <command>".
@@ -442,8 +449,10 @@ func _on_input_submitted(text: String) -> void:
 	else:
 		# Single bare word like "p1" or "p2" — ignore
 		if lower == "p1" or lower == "p2":
+			_refocus_input()
 			return
 
 	# Echo to log with resolved player tag
 	add_line("> [P%d] %s" % [player_index + 1, command])
 	command_submitted.emit(player_index, command)
+	_refocus_input()
