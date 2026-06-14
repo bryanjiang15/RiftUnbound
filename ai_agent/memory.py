@@ -12,6 +12,8 @@ Two persistence layers:
                         SQLite.  File: agent_decisions_<game_id>.jsonl
 
 Cross-game knowledge is intentionally out of scope for now.
+Godot assigns a unique game_session_id per match (see GameState.game_session_id);
+memory queries are scoped to that id, not player names alone.
 """
 from __future__ import annotations
 

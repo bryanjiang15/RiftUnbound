@@ -23,6 +23,10 @@ var game_over: bool = false
 var winner_index: int = -1
 var victory_score: int = 8
 
+# Unique per match — set once in GameController.start_game_from_config().
+# Used by the AI agent to scope episodic memory to this game only.
+var game_session_id: String = ""
+
 # Pending prompt for player choices
 var pending_prompt: Dictionary = {}
 

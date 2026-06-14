@@ -274,8 +274,8 @@ static func _pending_choice_context(gs: GameState) -> Dictionary:
 # ── Game ID ───────────────────────────────────────────────────────────────────
 
 static func _game_id(gs: GameState) -> String:
-	# Use turn_number + player names as a stable game identifier within session.
-	# A real game ID would be set once at game start; this is a session proxy.
+	if not gs.game_session_id.is_empty():
+		return gs.game_session_id
 	if gs.players.size() >= 2:
 		return "%s-vs-%s" % [gs.players[0].player_name, gs.players[1].player_name]
 	return "game"

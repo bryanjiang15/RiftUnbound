@@ -69,7 +69,7 @@ func take_turn() -> void:
 
 func _request_decision(gs: GameState) -> void:
 	_pending_brief_state = BriefStateSerializer.serialize(gs, player_index)
-	_current_game_id = _pending_brief_state.get("game_id", "")
+	_on_session_changed(_pending_brief_state.get("game_id", ""))
 
 	var payload := JSON.stringify(_build_request_payload())
 	var headers := PackedStringArray(["Content-Type: application/json"])
@@ -349,11 +349,28 @@ func _submit(cmd: String) -> void:
 
 # ── Phase 1: outcome reporting, game-over, opponent tracking ──────────────────
 
+func _on_session_changed(new_id: String) -> void:
+	if new_id.is_empty() or new_id == _current_game_id:
+		return
+	_current_game_id = new_id
+	_game_over_reported = false
+	_retry_count = 0
+	_last_rejected_move = {}
+	_last_rejection_reason = ""
+
+
+func _active_game_id(gs: GameState) -> String:
+	if gs != null and not gs.game_session_id.is_empty():
+		return gs.game_session_id
+	return _current_game_id
+
+
 func _report_outcome(accepted: bool, rejection_reason: String = "") -> void:
-	if _current_game_id.is_empty():
+	var game_id := _active_game_id(controller.gs if controller else null)
+	if game_id.is_empty():
 		return
 	var body := {
-		"game_id": _current_game_id,
+		"game_id": game_id,
 		"accepted": accepted,
 	}
 	if not accepted and not rejection_reason.is_empty():
@@ -368,8 +385,9 @@ func _on_board_updated() -> void:
 	if not gs.game_over or gs.winner_index < 0:
 		return
 	_game_over_reported = true
+	var game_id := _active_game_id(gs)
 	var body := {
-		"game_id": _current_game_id,
+		"game_id": game_id,
 		"winner_index": gs.winner_index,
 		"my_player_index": player_index,
 		"my_score": gs.players[player_index].score,
@@ -387,11 +405,13 @@ func _on_game_log_message(text: String) -> void:
 		return
 	var cmd := text.substr(prefix.length()).strip_edges()
 	var description := _parse_opponent_command(cmd)
-	if description.is_empty() or _current_game_id.is_empty():
+	var gs: GameState = controller.gs if controller else null
+	var game_id := _active_game_id(gs)
+	if description.is_empty() or game_id.is_empty():
 		return
-	var turn := controller.gs.turn_number if controller and controller.gs else 0
+	var turn: int = gs.turn_number if gs != null else 0
 	_fire_and_forget(AGENT_URL.replace("/decision", "/opponent_action"), {
-		"game_id": _current_game_id,
+		"game_id": game_id,
 		"turn": turn,
 		"action": description,
 	})

@@ -23,6 +23,11 @@ static func _test_starter_deck_valid(assertions) -> void:
 		"first_player": 0,
 	})
 	assertions.assert_eq(h.gs().players.size(), 2, "setup creates two players")
+	assertions.assert_false(h.gs().game_session_id.is_empty(), "game_session_id is set")
+	assertions.assert_true(
+		h.gs().game_session_id.contains("-vs-"),
+		"game_session_id includes player matchup prefix",
+	)
 	assertions.assert_eq(h.gs().board.battlefields.size(), 2, "setup creates two battlefields")
 	for pi in range(2):
 		var ps = h.gs().players[pi]

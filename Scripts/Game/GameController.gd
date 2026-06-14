@@ -53,6 +53,7 @@ func start_game_from_config(config: Dictionary) -> void:
 		return
 	gs.players.append(p1)
 	gs.players.append(p2)
+	gs.game_session_id = str(config.get("game_session_id", _generate_game_session_id(p1.player_name, p2.player_name)))
 
 	var bf_list: Array = config.get("battlefields", [])
 	var p1_bf: String
@@ -75,6 +76,7 @@ func start_game_from_config(config: Dictionary) -> void:
 	_first_player_cache = gs.turn_player_index
 
 	_log("> Riftbound 1v1 — %s vs %s" % [p1.player_name, p2.player_name])
+	_log("> Session: %s" % gs.game_session_id)
 	_log("> Battlefields: %s and %s" % [
 		gs.board.battlefields[0].display_name,
 		gs.board.battlefields[1].display_name
@@ -103,6 +105,11 @@ func start_game_from_config(config: Dictionary) -> void:
 	_log("[PROMPT] P2 goes after  — type: mulligan keep  |  mulligan <id> [id]")
 
 	board_updated.emit()
+
+
+static func _generate_game_session_id(p1_name: String, p2_name: String) -> String:
+	# Readable prefix + unix time + random suffix — unique per start_game_from_config call.
+	return "%s-vs-%s-%d-%x" % [p1_name, p2_name, Time.get_unix_time_from_system(), randi()]
 
 
 # ─── Public entry point ──────────────────────────────────────────────────────

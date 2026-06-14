@@ -1,8 +1,10 @@
-[gd_scene load_steps=2 format=3 uid="uid://rb_game_scene_main"]
+[gd_scene format=3 uid="uid://bkfps42few8ic"]
 
-[ext_resource type="Script" path="res://Scripts/UI/GameScene.gd" id="1_gamescene"]
+[ext_resource type="Script" uid="uid://dxnmgluqpwef4" path="res://Scripts/UI/GameScene.gd" id="1_gamescene"]
 
-[node name="GameScene" type="Control"]
+[node name="GameScene" type="Control" unique_id=2006831822]
+layout_mode = 3
+anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
