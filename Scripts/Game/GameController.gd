@@ -557,6 +557,30 @@ func _cmd_play(player_index: int, args: Array) -> void:
 			return
 
 	var optional_disc_ab = _find_optional_discard_discount_ability(card)
+	if optional_disc_ab.is_empty() and not use_accelerate and gs.pending_prompt.is_empty():
+		var optional_accel_ab = _find_optional_accelerate_ability(card)
+		if not optional_accel_ab.is_empty():
+			gs.pending_prompt = {
+				"player_index": player_index,
+				"type": "choose_optional",
+				"ability": optional_accel_ab,
+				"source": card,
+				"ctx": {},
+				"valid_choices": ["yes", "no"],
+				"prompt": "[PROMPT] Pay Accelerate on %s (+1 ENG and 1 domain Power to enter Ready)? (choose yes or no)" % card.display_name(),
+				"play_resume": {
+					"card_id": card.instance_id,
+					"player_index": player_index,
+					"destination": destination,
+					"target_id": target_id,
+					"from_zone": from_zone,
+					"use_accelerate": false,
+					"await_accelerate": true,
+				},
+			}
+			_log(gs.pending_prompt["prompt"])
+			return
+
 	if not optional_disc_ab.is_empty() and gs.pending_prompt.is_empty():
 		gs.pending_prompt = {
 			"player_index": player_index,
@@ -690,6 +714,17 @@ func _find_optional_discard_discount_ability(card: CardInstance) -> Dictionary:
 	return {}
 
 
+func _find_optional_accelerate_ability(card: CardInstance) -> Dictionary:
+	for ab in card.definition.abilities:
+		if ab.get("timing", "") != "on_play" or not ab.get("is_optional", false):
+			continue
+		if ab.get("effect_type", "") != "enter_ready":
+			continue
+		if card.has_keyword("accelerate"):
+			return ab
+	return {}
+
+
 func _complete_play(
 	card: CardInstance,
 	player_index: int,
@@ -697,7 +732,8 @@ func _complete_play(
 	target_id: String,
 	from_zone: String,
 	use_accelerate: bool,
-	optional_discard_discount: bool
+	optional_discard_discount: bool,
+	declined_accelerate: bool = false
 ) -> void:
 	var ps: PlayerState = gs.players[player_index]
 	var cost = CostCalculator.compute_play_cost(card, player_index, gs, use_accelerate, optional_discard_discount)
@@ -726,7 +762,7 @@ func _complete_play(
 			_play_spell(player_index, card, target_id, destination)
 
 	if card.definition.card_type != "spell":
-		_fire_on_play_triggers(card)
+		_fire_on_play_triggers(card, use_accelerate, declined_accelerate)
 
 	if gs.pending_prompt.is_empty():
 		_run_cleanup()
@@ -746,12 +782,19 @@ func _complete_play_from_resume(play_resume: Dictionary, optional_discard_discou
 		play_resume.get("target_id", ""),
 		play_resume.get("from_zone", "hand"),
 		play_resume.get("use_accelerate", false),
-		optional_discard_discount
+		optional_discard_discount,
+		play_resume.get("declined_accelerate", false),
 	)
 
 
-func _fire_on_play_triggers(card: CardInstance) -> void:
-	var ctx = {"player_index": card.owner_index, "controller": self, "source": card}
+func _fire_on_play_triggers(card: CardInstance, use_accelerate: bool = false, declined_accelerate: bool = false) -> void:
+	var ctx = {
+		"player_index": card.owner_index,
+		"controller": self,
+		"source": card,
+		"use_accelerate": use_accelerate,
+		"declined_accelerate": declined_accelerate,
+	}
 	for line in trigger_dispatcher.emit("on_play", ctx, gs, self):
 		_log(line)
 		if not gs.pending_prompt.is_empty():
@@ -1257,6 +1300,17 @@ func _handle_choose_optional(player_index: int, choice: String) -> void:
 	gs.pending_prompt.clear()
 
 	if not play_resume.is_empty():
+		if play_resume.get("await_accelerate", false):
+			var use_accel := choice == "yes" or choice == "true"
+			if use_accel:
+				_log("> P%d chose Accelerate on %s" % [player_index + 1, source.display_name() if source is CardInstance else "card"])
+			else:
+				_log("> P%d declined Accelerate" % (player_index + 1))
+				play_resume["declined_accelerate"] = true
+			play_resume["use_accelerate"] = use_accel
+			play_resume.erase("await_accelerate")
+			_complete_play_from_resume(play_resume, false)
+			return
 		if choice == "yes" or choice == "true":
 			var card = source if source is CardInstance else gs.find_instance_anywhere(play_resume.get("card_id", ""))
 			for line in begin_discard(player_index, 1, {

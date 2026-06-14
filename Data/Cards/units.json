@@ -191,7 +191,12 @@
     ],
     "rarity": "Rare",
     "energy_cost": 3,
-    "power_cost": [],
+    "power_cost": [
+      {
+        "domain": "fury",
+        "amount": 1
+      }
+    ],
     "might": 4,
     "might_bonus": null,
     "keywords": [
