@@ -142,7 +142,19 @@ static func _test_get_excited(assertions) -> void:
 
 
 static func _test_jinx_demolitionist_discard(assertions) -> void:
-	var h = _harness_with_play({}, [{"id": "fury-rune"}, {"id": "fury-rune"}, {"id": "void-seeker"}], "jinx-demolitionist", 10)
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{
+				"pool": {"energy": 10, "power": {"fury": 1}},
+				"hand": ["jinx-demolitionist", "fury-rune", "fury-rune", "void-seeker"],
+				"deck_size": 10, "rune_deck_size": 12,
+			},
+			{"deck_size": 10, "rune_deck_size": 12},
+		],
+	})
 	h.cmd_with_choices(0, "play jinx-demolitionist", ["no", "fury-rune", "void-seeker"])
 	assertions.assert_log_contains(h.controller, "discarded", "jinx demolitionist discards on play")
 

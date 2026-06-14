@@ -567,7 +567,7 @@ func _cmd_play(player_index: int, args: Array) -> void:
 				"source": card,
 				"ctx": {},
 				"valid_choices": ["yes", "no"],
-				"prompt": "[PROMPT] Pay Accelerate on %s (recycle 1 domain rune for Power to enter Ready)? (choose yes or no)" % card.display_name(),
+				"prompt": "[PROMPT] Pay Accelerate on %s (+1 ENG and 1 domain Power to enter Ready)? (choose yes or no)" % card.display_name(),
 				"play_resume": {
 					"card_id": card.instance_id,
 					"player_index": player_index,
@@ -732,7 +732,8 @@ func _complete_play(
 	target_id: String,
 	from_zone: String,
 	use_accelerate: bool,
-	optional_discard_discount: bool
+	optional_discard_discount: bool,
+	declined_accelerate: bool = false
 ) -> void:
 	var ps: PlayerState = gs.players[player_index]
 	var cost = CostCalculator.compute_play_cost(card, player_index, gs, use_accelerate, optional_discard_discount)
@@ -761,7 +762,7 @@ func _complete_play(
 			_play_spell(player_index, card, target_id, destination)
 
 	if card.definition.card_type != "spell":
-		_fire_on_play_triggers(card, use_accelerate)
+		_fire_on_play_triggers(card, use_accelerate, declined_accelerate)
 
 	if gs.pending_prompt.is_empty():
 		_run_cleanup()
@@ -781,16 +782,18 @@ func _complete_play_from_resume(play_resume: Dictionary, optional_discard_discou
 		play_resume.get("target_id", ""),
 		play_resume.get("from_zone", "hand"),
 		play_resume.get("use_accelerate", false),
-		optional_discard_discount
+		optional_discard_discount,
+		play_resume.get("declined_accelerate", false),
 	)
 
 
-func _fire_on_play_triggers(card: CardInstance, use_accelerate: bool = false) -> void:
+func _fire_on_play_triggers(card: CardInstance, use_accelerate: bool = false, declined_accelerate: bool = false) -> void:
 	var ctx = {
 		"player_index": card.owner_index,
 		"controller": self,
 		"source": card,
 		"use_accelerate": use_accelerate,
+		"declined_accelerate": declined_accelerate,
 	}
 	for line in trigger_dispatcher.emit("on_play", ctx, gs, self):
 		_log(line)
@@ -1303,10 +1306,10 @@ func _handle_choose_optional(player_index: int, choice: String) -> void:
 				_log("> P%d chose Accelerate on %s" % [player_index + 1, source.display_name() if source is CardInstance else "card"])
 			else:
 				_log("> P%d declined Accelerate" % (player_index + 1))
+				play_resume["declined_accelerate"] = true
 			play_resume["use_accelerate"] = use_accel
 			play_resume.erase("await_accelerate")
 			_complete_play_from_resume(play_resume, false)
-			_run_cleanup()
 			return
 		if choice == "yes" or choice == "true":
 			var card = source if source is CardInstance else gs.find_instance_anywhere(play_resume.get("card_id", ""))
