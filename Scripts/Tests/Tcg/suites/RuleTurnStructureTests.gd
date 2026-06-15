@@ -5,6 +5,7 @@ const TcgTestHarness = preload("res://Scripts/Tests/Tcg/TcgTestHarness.gd")
 
 static func run(assertions) -> void:
 	_test_legend_draw_on_low_hand(assertions)
+	_test_legend_draw_only_on_controller_turn(assertions)
 	_test_end_turn_heals(assertions)
 
 
@@ -15,6 +16,33 @@ static func _test_legend_draw_on_low_hand(assertions) -> void:
 	h.controller._execute_start_of_turn()
 	var hand_after = h.gs().players[0].hand.size()
 	assertions.assert_true(hand_after > hand_before, "legend draws when hand size <= 1 at beginning phase")
+
+
+static func _test_legend_draw_only_on_controller_turn(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 1,
+		"turn_number": 2,
+		"phase": "MAIN",
+		"state": "NEUTRAL_OPEN",
+		"players": [
+			{"hand": ["void-seeker"], "deck_size": 5, "rune_deck_size": 12},
+			{"hand": ["void-seeker", "fury-rune"], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	var p1_hand_before = h.gs().players[0].hand.size()
+	var p2_hand_before = h.gs().players[1].hand.size()
+	h.controller._execute_start_of_turn()
+	assertions.assert_eq(
+		h.gs().players[0].hand.size(),
+		p1_hand_before,
+		"p1 legend does not draw on p2 beginning phase",
+	)
+	assertions.assert_eq(
+		h.gs().players[1].hand.size(),
+		p2_hand_before + 1,
+		"p2 gets only the normal draw when active player has more than one card",
+	)
 
 
 static func _test_end_turn_heals(assertions) -> void:
