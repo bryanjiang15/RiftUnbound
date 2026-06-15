@@ -1409,6 +1409,10 @@ func _cmd_hide(player_index: int, args: Array) -> void:
 	if bf.facedown_card != null:
 		_log("[ERROR] Facedown zone already occupied.")
 		return
+	var cost = CostCalculator.compute_hidden_hide_cost()
+	if not try_pay_cost(player_index, cost, card):
+		_log("[ERROR] Cannot afford Hidden cost (%s)." % CostCalculator.cost_to_string(cost))
+		return
 	ps.hand.erase(card)
 	card.is_face_down = true
 	card.location = bf_id

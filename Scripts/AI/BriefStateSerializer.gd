@@ -235,7 +235,8 @@ static func _legal_categories(gs: GameState, player_index: int) -> Array:
 	var ps: PlayerState = gs.players[player_index]
 	var has_hide := false
 	for card in ps.hand:
-		if card.has_keyword("hidden"):
+		if card.has_keyword("hidden") and CostCalculator.can_afford_with_autopay(
+				player_index, CostCalculator.compute_hidden_hide_cost(), gs):
 			for bf in gs.board.battlefields:
 				if bf.controller_index == player_index and bf.facedown_card == null:
 					has_hide = true

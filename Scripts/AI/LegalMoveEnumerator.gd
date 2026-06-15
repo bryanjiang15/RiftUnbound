@@ -207,6 +207,9 @@ static func _add_hide_moves(gs: GameState, ps: PlayerState, player_index: int, m
 	for card in ps.hand:
 		if not card.has_keyword("hidden"):
 			continue
+		var cost = CostCalculator.compute_hidden_hide_cost()
+		if not CostCalculator.can_afford_with_autopay(player_index, cost, gs):
+			continue
 		for bf in gs.board.battlefields:
 			if bf.controller_index != player_index:
 				continue

@@ -13,6 +13,8 @@ static func run(assertions) -> void:
 	_test_play_without_accelerate_skips_prompt(assertions)
 	_test_accelerate_requires_energy_when_pool_has_power(assertions)
 	_test_hidden_unaffordable_play_not_legal(assertions)
+	_test_hidden_hide_requires_any_power(assertions)
+	_test_hidden_hide_auto_recycles_rune(assertions)
 	_test_hidden_hide_only_at_controlled_empty_facedown(assertions)
 	_test_play_from_hidden_facedown_card(assertions)
 
@@ -247,6 +249,58 @@ static func _test_hidden_unaffordable_play_not_legal(assertions) -> void:
 	assertions.assert_true(
 		not ("hide fight-or-flight at battlefield-b" in moves),
 		"hide not offered at uncontrolled battlefield-b",
+	)
+
+
+static func _test_hidden_hide_requires_any_power(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"battlefield_control": [0, -1],
+		"players": [
+			{
+				"pool": {"energy": 0, "power": {}},
+				"hand": ["fight-or-flight"],
+				"runes": [],
+				"deck_size": 10, "rune_deck_size": 12,
+			},
+			{"deck_size": 10, "rune_deck_size": 12}
+		]
+	})
+	var moves: Array = LegalMoveEnumerator.enumerate(h.gs(), 0)
+	assertions.assert_true(
+		not ("hide fight-or-flight at battlefield-a" in moves),
+		"hide not offered without any payable hidden cost",
+	)
+
+
+static func _test_hidden_hide_auto_recycles_rune(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"battlefield_control": [0, -1],
+		"players": [
+			{
+				"pool": {"energy": 0, "power": {}},
+				"hand": ["fight-or-flight"],
+				"runes": [{"id": "chaos-rune", "exhausted": false}],
+				"deck_size": 10, "rune_deck_size": 12,
+			},
+			{"deck_size": 10, "rune_deck_size": 12}
+		]
+	})
+	var ps = h.gs().players[0]
+	var rune_deck_before = ps.rune_deck.size()
+	h.cmd(0, "hide fight-or-flight at battlefield-a")
+	assertions.assert_no_error(h.controller, "hidden card hide succeeds with auto-recycled rune")
+	assertions.assert_log_contains(h.controller, "[Auto] Rune recycled", "hide auto-recycles a rune for any power")
+	assertions.assert_eq(ps.channeled_runes.size(), 0, "hidden cost recycles channeled rune")
+	assertions.assert_eq(ps.rune_deck.size(), rune_deck_before + 1, "hidden cost returns rune to rune deck")
+	assertions.assert_true(
+		h.gs().board.battlefields[0].facedown_card != null,
+		"hidden card placed face-down after paying cost",
 	)
 
 
