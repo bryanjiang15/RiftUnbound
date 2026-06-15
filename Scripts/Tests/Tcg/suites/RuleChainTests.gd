@@ -18,6 +18,7 @@ static func _test_spell_adds_to_chain(assertions) -> void:
 			{
 				"pool": {"energy": 5, "power": {}},
 				"hand": ["void-seeker"],
+				"runes": [{"id": "fury-rune", "exhausted": false}],
 				"battlefield-a": [{"id": "blazing-scorcher", "owner": 1}],
 				"deck_size": 5,
 				"rune_deck_size": 12

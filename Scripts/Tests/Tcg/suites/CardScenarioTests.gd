@@ -34,7 +34,7 @@ static func run(assertions) -> void:
 
 
 static func _test_magma_wurm_aura(assertions) -> void:
-	var h = _harness_with_play({"id": "chemtech-enforcer", "exhausted": true}, [], "magma-wurm")
+	var h = _harness_with_play({"id": "chemtech-enforcer", "exhausted": true}, [], "magma-wurm", 10, [{"id": "fury-rune", "exhausted": false}])
 	h.cmd(0, "play magma-wurm")
 	var ally = h.find_unit("chemtech-enforcer")
 	assertions.assert_true(ally != null and not ally.is_exhausted, "magma wurm readies other units")
@@ -158,6 +158,7 @@ static func _test_cemetery_attendant(assertions) -> void:
 		"battlefields": ["zaun-warrens", "targons-peak"],
 		"players": [
 			{"pool": {"energy": 5, "power": {}}, "hand": ["cemetery-attendant"],
+			 "runes": [{"id": "chaos-rune", "exhausted": false}],
 			 "trash": [{"id": "chemtech-enforcer"}], "deck_size": 5, "rune_deck_size": 12},
 			{"deck_size": 5, "rune_deck_size": 12}
 		]
@@ -173,6 +174,7 @@ static func _test_get_excited(assertions) -> void:
 		"battlefields": ["zaun-warrens", "targons-peak"],
 		"players": [
 			{"pool": {"energy": 5, "power": {}}, "hand": ["get-excited", "void-seeker"],
+			 "runes": [{"id": "fury-rune", "exhausted": false}],
 			 "battlefield-a": [{"id": "blazing-scorcher", "owner": 1}], "deck_size": 5, "rune_deck_size": 12},
 			{"deck_size": 5, "rune_deck_size": 12}
 		]
@@ -271,6 +273,7 @@ static func _test_fading_memories_temporary(assertions) -> void:
 		"battlefields": ["zaun-warrens", "targons-peak"],
 		"players": [
 			{"pool": {"energy": 5, "power": {}}, "hand": ["fading-memories"],
+			 "runes": [{"id": "chaos-rune", "exhausted": false}],
 			 "battlefield-a": [{"id": "chemtech-enforcer", "owner": 0}], "deck_size": 5, "rune_deck_size": 12},
 			{"deck_size": 5, "rune_deck_size": 12}
 		]
@@ -399,7 +402,7 @@ static func _test_p2_can_act_after_chemtech_scrapheap_turn(assertions) -> void:
 	assertions.assert_true(h.gs().can_player_act(1), "p2 can act at turn 2 start for ai trigger")
 
 
-static func _harness_with_play(base_ally: Dictionary, extra_hand: Array, play_id: String = "", energy: int = 10) -> TcgTestHarness:
+static func _harness_with_play(base_ally: Dictionary, extra_hand: Array, play_id: String = "", energy: int = 10, runes: Array = []) -> TcgTestHarness:
 	var h = TcgTestHarness.new()
 	var base: Array = []
 	if not base_ally.is_empty():
@@ -408,11 +411,20 @@ static func _harness_with_play(base_ally: Dictionary, extra_hand: Array, play_id
 	if not play_id.is_empty():
 		hand.append(play_id)
 	hand.append_array(extra_hand)
+	var p0: Dictionary = {
+		"pool": {"energy": energy, "power": {}},
+		"hand": hand,
+		"base": base,
+		"deck_size": 10,
+		"rune_deck_size": 12,
+	}
+	if not runes.is_empty():
+		p0["runes"] = runes
 	h.load_fixture_dict({
 		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
 		"battlefields": ["zaun-warrens", "targons-peak"],
 		"players": [
-			{"pool": {"energy": energy, "power": {}}, "hand": hand, "base": base, "deck_size": 10, "rune_deck_size": 12},
+			p0,
 			{"deck_size": 10, "rune_deck_size": 12}
 		]
 	})

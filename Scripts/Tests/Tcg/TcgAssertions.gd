@@ -24,6 +24,10 @@ func assert_true(condition: bool, test_name: String, reason: String = "") -> voi
 		print(msg)
 
 
+func assert_false(condition: bool, test_name: String, reason: String = "") -> void:
+	assert_true(not condition, test_name, reason)
+
+
 func assert_eq(actual: Variant, expected: Variant, test_name: String) -> void:
 	assert_true(actual == expected, test_name, "expected %s, got %s" % [str(expected), str(actual)])
 
