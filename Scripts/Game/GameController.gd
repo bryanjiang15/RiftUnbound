@@ -134,6 +134,12 @@ func submit_command(player_index: int, raw: String) -> void:
 	var verb = tokens[0]
 	var args = tokens.slice(1)
 
+	if not gs.pending_prompt.is_empty() and verb != "choose":
+		var prompt_pi = int(gs.pending_prompt.get("player_index", -1))
+		if player_index == prompt_pi:
+			_log("[ERROR] Resolve pending choice first (use: choose <id>).")
+			return
+
 	match verb:
 		"mulligan":
 			_cmd_mulligan(player_index, args)
@@ -251,6 +257,12 @@ func _cmd_mulligan(player_index: int, args: Array) -> void:
 
 func _execute_start_of_turn() -> void:
 	var turn_pi = gs.turn_player_index
+	if not gs.pending_prompt.is_empty():
+		var prompt_pi = int(gs.pending_prompt.get("player_index", -1))
+		if prompt_pi != turn_pi:
+			_log("[INFO] Cleared stale pending choice from P%d" % (prompt_pi + 1))
+			gs.pending_prompt.clear()
+
 	_log("> === Turn %d — P%d's turn ===" % [gs.turn_number, turn_pi + 1])
 
 	# Awaken Phase
@@ -340,6 +352,9 @@ func _cmd_end_turn(player_index: int) -> void:
 	if gs.current_state != TurnStateMachine.State.NEUTRAL_OPEN:
 		_log("[ERROR] Cannot end turn while a Chain or Showdown is active.")
 		return
+	if not gs.pending_prompt.is_empty():
+		_log("[ERROR] Resolve pending choice before ending turn.")
+		return
 	_execute_end_of_turn()
 
 
@@ -384,7 +399,18 @@ func _cmd_pass(player_index: int) -> void:
 		_log("[ERROR] Use 'mulligan keep' during mulligan phase.")
 		return
 
-	# If in showdown/combat
+	# Chain priority wins when the stack is active in a closed state
+	if gs.is_closed_chain_state():
+		if player_index != gs.priority_player_index:
+			_log("[ERROR] Not your turn to act.")
+			return
+		var chain_lines = ChainProcessor.handle_pass(gs, ability_resolver, self)
+		for l in chain_lines:
+			_log(l)
+		_run_cleanup()
+		return
+
+	# Showdown focus pass (open, or closed with empty chain)
 	if gs.current_state == TurnStateMachine.State.SHOWDOWN_OPEN or \
 	   gs.current_state == TurnStateMachine.State.SHOWDOWN_CLOSED:
 		if player_index != gs.focus_player_index:
@@ -397,17 +423,16 @@ func _cmd_pass(player_index: int) -> void:
 			lines = ShowdownProcessor.handle_pass(gs)
 		for l in lines:
 			_log(l)
-		# Run cleanup after showdown resolves
 		_run_cleanup()
 		return
 
-	# If chain is active
+	# Neutral closed chain (no showdown)
 	if not gs.chain.is_empty():
-		if not gs.can_player_act(player_index):
+		if player_index != gs.priority_player_index:
 			_log("[ERROR] Not your turn to act.")
 			return
-		var lines = ChainProcessor.handle_pass(gs, ability_resolver, self)
-		for l in lines:
+		var neutral_chain_lines = ChainProcessor.handle_pass(gs, ability_resolver, self)
+		for l in neutral_chain_lines:
 			_log(l)
 		_run_cleanup()
 		return
@@ -949,6 +974,9 @@ func _cmd_react(player_index: int, args: Array) -> void:
 	if gs.current_state != TurnStateMachine.State.NEUTRAL_CLOSED and \
 	   gs.current_state != TurnStateMachine.State.SHOWDOWN_CLOSED:
 		_log("[ERROR] Can only react during Closed states.")
+		return
+	if player_index != gs.priority_player_index:
+		_log("[ERROR] Not your turn to act.")
 		return
 
 	var card_id = args[0]
@@ -1663,6 +1691,7 @@ func _maybe_trigger_ai() -> void:
 	# Trigger for every situation where the AI seat has the right to act:
 	# main phase priority, showdown focus, chain reactions, pending prompts,
 	# and combat damage assignment all route through can_player_act().
+	# Empty or single-option legal moves are handled inside AIPlayer.take_turn().
 	if gs.can_player_act(_ai_player_index):
 		call_deferred("_trigger_ai_turn")
 

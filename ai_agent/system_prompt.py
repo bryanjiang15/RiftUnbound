@@ -125,9 +125,9 @@ HIGH_FREQUENCY_RULES = """
 
 ### Turn States
 - Neutral Open: Main Phase, no Chain.  Only Turn Player acts.
-- Neutral Closed: Chain exists, no Showdown.  Only Reactions.
-- Showdown Open: Showdown/Combat active, no Chain.  Player with Focus acts.
-- Showdown Closed: Showdown/Combat active, Chain exists.  Only Reactions.
+- Neutral Closed: Chain exists, no Showdown.  Only the Priority holder may react or pass on the chain.
+- Showdown Open: Showdown/Combat active, no Chain.  Only the player with **Focus** may play Actions or pass Focus.
+- Showdown Closed: Showdown/Combat active, Chain exists.  Only the **Priority** holder may react or pass on the chain (Focus is suspended until the chain resolves).
 
 ### Win Condition (1v1 Duel)
 - Victory Score: 8 points.
@@ -138,10 +138,12 @@ HIGH_FREQUENCY_RULES = """
 - Conquer + last point: only counts if you also scored every battlefield that turn.
 
 ### Priority / Focus
-- Priority: right to act.  One player holds it at a time.
-- Focus: right to act during Showdown.  Passes between players alternately.
-- "pass" gives up Priority or Focus.
-- When all players pass in sequence during a Showdown → Showdown closes.
+- **Priority**: right to react or pass on the Chain in Closed states.  Check `i_have_priority` in the brief state.
+- **Focus**: right to play Actions or pass Focus during Showdown Open.  Check `i_have_focus` in the brief state.
+- During Showdown Closed with a Chain, pass/react uses **Priority**, not Focus.
+- "pass" gives up Priority (chain) or Focus (showdown open).
+- When all players pass Focus in sequence during a Showdown → Showdown closes.
+- If neither `i_have_focus` nor `i_have_priority` is true, you should not be asked to decide (the engine waits for your opponent).
 
 ### Key Keywords
 - Assault [X]: +X Might while attacking.

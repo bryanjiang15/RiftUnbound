@@ -105,6 +105,12 @@ class BriefState(BaseModel):
     current_state: str
     decision_type: DecisionType
 
+    # Acting context (Focus vs Priority)
+    focus_player_index: int = -1
+    priority_player_index: int = 0
+    i_have_focus: bool = False
+    i_have_priority: bool = False
+
     # Resources
     my_score: int
     my_energy: int

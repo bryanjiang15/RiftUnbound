@@ -46,15 +46,26 @@ static func enumerate(gs: GameState, player_index: int) -> Array:
 		moves.append("choose none")
 		return moves
 
-	# ── Showdown / closed chain ───────────────────────────────────────────────
-	if gs.is_showdown_state():
+	# ── Closed chain (priority holder reacts or passes) ───────────────────────
+	if gs.is_closed_chain_state():
+		if gs.priority_player_index != player_index:
+			return []
+		moves.append("pass")
+		_add_reaction_plays(gs, player_index, moves)
+		return moves
+
+	# ── Showdown open (focus holder plays or passes focus) ────────────────────
+	if gs.current_state == TurnStateMachine.State.SHOWDOWN_OPEN:
 		if gs.focus_player_index != player_index:
 			return []
 		moves.append("pass")
 		_add_reaction_plays(gs, player_index, moves)
 		return moves
 
+	# ── Neutral closed chain without showdown ─────────────────────────────────
 	if not gs.chain.is_empty():
+		if gs.priority_player_index != player_index:
+			return []
 		moves.append("pass")
 		_add_reaction_plays(gs, player_index, moves)
 		return moves

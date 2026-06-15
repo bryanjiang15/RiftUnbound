@@ -49,14 +49,27 @@ func take_turn() -> void:
 	if _waiting_for_http:
 		return
 
+	if not _can_act_now(gs):
+		return
+	var legal := _legal_moves_for(gs)
+	if legal.is_empty():
+		return
+	if legal.size() == 1:
+		_submit(legal[0])
+		return
+
 	# Delay slightly so the game log is readable
 	await get_tree().create_timer(THINK_DELAY).timeout
 	if gs.game_over:
 		return
 
-	# Re-check that the AI can still act (state may have changed during delay)
-	var can_act := _can_act_now(gs)
-	if not can_act:
+	if not _can_act_now(gs):
+		return
+	legal = _legal_moves_for(gs)
+	if legal.is_empty():
+		return
+	if legal.size() == 1:
+		_submit(legal[0])
 		return
 
 	_retry_count = 0
@@ -218,6 +231,13 @@ func _heuristic_fallback(gs: GameState) -> void:
 	if gs.game_over or not _can_act_now(gs):
 		return
 
+	var legal := _legal_moves_for(gs)
+	if legal.is_empty():
+		return
+	if legal.size() == 1:
+		_submit(legal[0])
+		return
+
 	# Mulligan: always keep
 	if gs.mulligan_phase and not gs.mulligan_done[player_index]:
 		_submit("mulligan keep")
@@ -234,8 +254,9 @@ func _heuristic_fallback(gs: GameState) -> void:
 	if gs.is_showdown_state() and gs.focus_player_index == player_index:
 		_submit("pass")
 		return
-	if not gs.chain.is_empty():
-		_submit("pass")
+	if gs.is_closed_chain_state() or not gs.chain.is_empty():
+		if gs.priority_player_index == player_index:
+			_submit("pass")
 		return
 
 	# Combat damage assignment: assign everything to first unit and confirm
@@ -342,6 +363,10 @@ func _can_act_now(gs: GameState) -> bool:
 	if gs.mulligan_phase:
 		return not gs.mulligan_done[player_index]
 	return gs.can_player_act(player_index)
+
+
+func _legal_moves_for(gs: GameState) -> Array:
+	return LegalMoveEnumerator.enumerate(gs, player_index)
 
 
 func _submit(cmd: String) -> void:

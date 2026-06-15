@@ -122,6 +122,13 @@ func is_showdown_state() -> bool:
 		   current_state == TurnStateMachine.State.SHOWDOWN_CLOSED
 
 
+func is_closed_chain_state() -> bool:
+	return not chain.is_empty() and (
+		current_state == TurnStateMachine.State.NEUTRAL_CLOSED
+		or current_state == TurnStateMachine.State.SHOWDOWN_CLOSED
+	)
+
+
 func can_player_act(player_index: int) -> bool:
 	if pending_prompt.size() > 0:
 		return pending_prompt.get("player_index", -1) == player_index
@@ -129,12 +136,14 @@ func can_player_act(player_index: int) -> bool:
 		return player_index == attacker_player_index
 	if current_state == TurnStateMachine.State.NEUTRAL_OPEN:
 		return player_index == turn_player_index
-	if current_state == TurnStateMachine.State.NEUTRAL_CLOSED:
-		return true  # reactions from anyone
+	if is_closed_chain_state():
+		return player_index == priority_player_index
 	if current_state == TurnStateMachine.State.SHOWDOWN_OPEN:
 		return player_index == focus_player_index
+	if current_state == TurnStateMachine.State.NEUTRAL_CLOSED:
+		return player_index == priority_player_index
 	if current_state == TurnStateMachine.State.SHOWDOWN_CLOSED:
-		return true
+		return player_index == focus_player_index
 	return false
 
 

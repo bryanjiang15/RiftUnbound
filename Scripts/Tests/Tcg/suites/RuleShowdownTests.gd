@@ -2,11 +2,16 @@ class_name RuleShowdownTests
 extends RefCounted
 
 const TcgTestHarness = preload("res://Scripts/Tests/Tcg/TcgTestHarness.gd")
+const LegalMoveEnumerator = preload("res://Scripts/AI/LegalMoveEnumerator.gd")
 
 static func run(assertions) -> void:
 	_test_showdown_establishes_control(assertions)
 	_test_showdown_waits_for_pending_discard(assertions)
 	_test_p2_can_act_after_showdown_focus_pass(assertions)
+	_test_p2_cannot_act_while_p1_has_focus(assertions)
+	_test_showdown_chain_priority_not_focus(assertions)
+	_test_end_turn_blocked_with_pending_choice(assertions)
+	_test_stale_pending_cleared_for_new_turn_player(assertions)
 
 
 static func _test_showdown_establishes_control(assertions) -> void:
@@ -61,3 +66,131 @@ static func _test_p2_can_act_after_showdown_focus_pass(assertions) -> void:
 	assertions.assert_true(h.gs().can_player_act(1), "p2 can act when showdown focus passes")
 	h.cmd(1, "pass")
 	assertions.assert_true(not h.gs().is_showdown_state(), "showdown closes after both pass")
+
+
+static func _showdown_fixture_harness() -> TcgTestHarness:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{
+				"base": [{"id": "traveling-merchant", "exhausted": false}],
+				"hand": ["void-seeker", "fury-rune"],
+				"pool": {"energy": 5, "power": {"fury": 1}},
+				"runes": [{"id": "fury-rune", "exhausted": false}],
+				"deck_size": 5, "rune_deck_size": 12
+			},
+			{
+				"deck_size": 5, "rune_deck_size": 12
+			}
+		]
+	})
+	h.cmd_with_choices(0, "move traveling-merchant to battlefield-a", ["fury-rune"])
+	return h
+
+
+static func _test_p2_cannot_act_while_p1_has_focus(assertions) -> void:
+	var h = _showdown_fixture_harness()
+	assertions.assert_eq(h.gs().focus_player_index, 0, "p1 holds focus")
+	assertions.assert_eq(h.gs().current_state, TurnStateMachine.State.SHOWDOWN_OPEN,
+		"showdown is open")
+	assertions.assert_false(h.gs().can_player_act(1), "p2 cannot act while p1 has focus")
+	assertions.assert_eq(LegalMoveEnumerator.enumerate(h.gs(), 1).size(), 0,
+		"p2 has no legal moves without focus")
+
+
+static func _test_showdown_chain_priority_not_focus(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "SHOWDOWN_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{
+				"hand": ["void-seeker"],
+				"pool": {"energy": 5, "power": {"fury": 1}},
+				"runes": [{"id": "fury-rune", "exhausted": false}],
+				"deck_size": 5, "rune_deck_size": 12
+			},
+			{
+				"battlefield-a": [{"id": "blazing-scorcher", "owner": 1}],
+				"deck_size": 5, "rune_deck_size": 12
+			}
+		]
+	})
+	var gs = h.gs()
+	gs.focus_player_index = 0
+	gs.board.active_showdown_bf = 0
+	assertions.assert_eq(gs.focus_player_index, 0, "p1 holds focus before action")
+	h.controller.submit_command(0, "play void-seeker target blazing-scorcher")
+	assertions.assert_no_error(h.controller, "p1 plays action in showdown")
+	assertions.assert_true(h.gs().is_closed_chain_state(), "chain active in showdown closed")
+	assertions.assert_eq(h.gs().priority_player_index, 1, "chain priority passes to p2")
+	assertions.assert_eq(h.gs().focus_player_index, 0, "focus stays with p1 during chain")
+	assertions.assert_false(h.gs().can_player_act(0), "p1 cannot act on chain without priority")
+	assertions.assert_true(h.gs().can_player_act(1), "p2 has chain priority")
+	var p2_moves: Array = LegalMoveEnumerator.enumerate(h.gs(), 1)
+	assertions.assert_true("pass" in p2_moves, "p2 may pass on chain")
+	assertions.assert_eq(LegalMoveEnumerator.enumerate(h.gs(), 0).size(), 0,
+		"p1 has no legal moves while waiting on chain priority")
+
+	h.controller.submit_command(0, "pass")
+	assertions.assert_true(h.controller.last_command_error,
+		"p1 cannot pass chain without priority")
+
+	h.controller.submit_command(1, "pass")
+	assertions.assert_no_error(h.controller, "p2 passes on chain")
+	assertions.assert_eq(h.gs().priority_player_index, 0,
+		"chain priority returns to p1 after p2 passes")
+	assertions.assert_false(h.gs().chain.is_empty(),
+		"chain waits for p1 pass before resolving")
+
+
+static func _test_end_turn_blocked_with_pending_choice(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"hand": ["void-seeker", "fury-rune"], "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.gs().pending_prompt = {
+		"player_index": 0,
+		"type": "choose_discard",
+		"valid_choices": ["void-seeker", "fury-rune"],
+		"prompt": "[PROMPT] Choose a card to discard",
+	}
+	h.controller.submit_command(0, "end turn")
+	assertions.assert_true(h.controller.last_command_error,
+		"end turn blocked while pending choice unresolved")
+	h.controller.submit_command(0, "play void-seeker")
+	assertions.assert_true(h.controller.last_command_error,
+		"other commands blocked while pending choice unresolved")
+
+
+static func _test_stale_pending_cleared_for_new_turn_player(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "turn_number": 6, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"deck_size": 5, "rune_deck_size": 12},
+			{"hand": ["fight-or-flight"], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.gs().turn_player_index = 1
+	h.gs().pending_prompt = {
+		"player_index": 0,
+		"type": "choose_discard",
+		"valid_choices": ["void-seeker"],
+		"prompt": "[PROMPT] Choose a card to discard",
+	}
+	h.controller._execute_start_of_turn()
+	assertions.assert_true(h.gs().pending_prompt.is_empty(),
+		"stale pending choice cleared for new turn player")
+	assertions.assert_true(h.gs().can_player_act(1),
+		"p2 can act after stale prompt cleared")
+	assertions.assert_true(not LegalMoveEnumerator.enumerate(h.gs(), 1).is_empty(),
+		"p2 has legal moves at start of turn")

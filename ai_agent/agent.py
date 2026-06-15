@@ -432,6 +432,17 @@ def _append_legal_moves(lines: list[str], legal: list) -> None:
     lines.append("  Use list_legal_moves for a fresh full list if needed.")
 
 
+def _format_acting_context(bs: dict) -> str:
+    """Summarize Focus vs Priority for the current seat."""
+    focus_you = bs.get("i_have_focus", False)
+    priority_you = bs.get("i_have_priority", False)
+    focus_str = "you" if focus_you else "opponent"
+    priority_str = "you" if priority_you else "opponent"
+    chain_active = bool(bs.get("legal_moves")) and bs.get("decision_type") == "chain_reaction"
+    chain_note = " | Chain active" if chain_active else ""
+    return f"Acting context: Focus={focus_str} | Priority={priority_str}{chain_note}"
+
+
 def _format_brief_state(bs: dict) -> str:
     """Render the brief state as a readable text summary for the model."""
     lines: list[str] = []
@@ -440,6 +451,7 @@ def _format_brief_state(bs: dict) -> str:
                  f"Phase: {bs.get('current_phase', '?')} | "
                  f"State: {bs.get('current_state', '?')} | "
                  f"Decision type: **{bs.get('decision_type', '?')}**")
+    lines.append(_format_acting_context(bs))
     lines.append(f"My score: {bs.get('my_score', 0)} | "
                  f"Opponent score: {bs.get('opponent_score', 0)} | "
                  f"Victory: 8 pts")

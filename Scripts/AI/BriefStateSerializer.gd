@@ -24,6 +24,12 @@ static func serialize(gs: GameState, player_index: int) -> Dictionary:
 		"current_state": gs.get_state_name(),
 		"decision_type": _decision_type(gs, player_index),
 
+		# Acting context (Focus vs Priority)
+		"focus_player_index": gs.focus_player_index,
+		"priority_player_index": gs.priority_player_index,
+		"i_have_focus": gs.focus_player_index == player_index,
+		"i_have_priority": gs.priority_player_index == player_index,
+
 		# Resources
 		"my_score": ps.score,
 		"my_energy": ps.rune_pool.energy,
@@ -73,9 +79,12 @@ static func _decision_type(gs: GameState, player_index: int) -> String:
 		return "pending_choice"
 	if gs.combat_assignment_active and gs.attacker_player_index == player_index:
 		return "combat_assignment"
-	if gs.is_showdown_state() and gs.focus_player_index == player_index:
+	if gs.is_closed_chain_state() and gs.priority_player_index == player_index:
+		return "chain_reaction"
+	if gs.current_state == TurnStateMachine.State.SHOWDOWN_OPEN and \
+	   gs.focus_player_index == player_index:
 		return "showdown_focus"
-	if not gs.chain.is_empty():
+	if not gs.chain.is_empty() and gs.priority_player_index == player_index:
 		return "chain_reaction"
 	return "main_phase"
 
@@ -196,16 +205,27 @@ static func _legal_categories(gs: GameState, player_index: int) -> Array:
 		cats.append("assign_damage")
 		cats.append("assign_done")
 		return cats
-	if gs.is_showdown_state():
-		cats.append("pass")
-		var ps: PlayerState = gs.players[player_index]
-		for c in ps.hand:
-			if c.definition.is_reaction:
-				cats.append("react")
-				break
+	if gs.is_closed_chain_state():
+		if gs.priority_player_index == player_index:
+			cats.append("pass")
+			var ps_chain: PlayerState = gs.players[player_index]
+			for c in ps_chain.hand:
+				if c.definition.is_reaction:
+					cats.append("react")
+					break
+		return cats
+	if gs.current_state == TurnStateMachine.State.SHOWDOWN_OPEN:
+		if gs.focus_player_index == player_index:
+			cats.append("pass")
+			var ps_sd: PlayerState = gs.players[player_index]
+			for c in ps_sd.hand:
+				if c.definition.is_reaction:
+					cats.append("react")
+					break
 		return cats
 	if not gs.chain.is_empty():
-		cats.append("pass")
+		if gs.priority_player_index == player_index:
+			cats.append("pass")
 		return cats
 	# Main phase
 	cats.append("tap_rune")
