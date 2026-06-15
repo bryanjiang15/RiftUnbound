@@ -77,13 +77,18 @@ HIGH_FREQUENCY_RULES = """
 
 ### Reading your resources (IMPORTANT)
 - The brief state shows one resource line: `Resources: XE playable  [N untapped ...]`
-- **XE playable is the number to use for affordability.** It equals untapped runes
-  plus any floating energy already in the pool (rare, from card/ability effects).
-- Each untapped rune auto-taps when you play_card, giving +1E and +1 domain power.
-- Domain power (FUR, MIN, etc.) works the same way — the displayed totals already
-  include both rune contributions and any floating pool power.
-- Cards in hand are pre-labelled [PLAYABLE] or [too costly] based on this.
-  Trust those labels; do not recompute from raw pool fields.
+- **XE playable** is a rough capacity hint (untapped runes + floating pool energy).
+  Each untapped rune can auto-tap for +1E and +1 domain power when you play_card.
+- Domain totals (FUR, MIN, etc.) include untapped runes plus any floating pool power.
+- **Card costs in hand are for strategic planning only** — they show printed base cost
+  (e.g. 3E+1FUR). They do NOT tell you whether a play is legal, and they do NOT
+  include optional costs like Accelerate.
+- **Legality comes from `legal_moves` only.** Only propose moves that appear there
+  (or call `list_legal_moves` for a fresh list). The engine auto-pays costs; do not
+  manually guess whether you "have enough runes."
+- For `play_card` with Accelerate: set `accelerate: true` **only** if `legal_moves`
+  contains `"play <card_id> accelerate"` for that card. If only `"play <card_id>"`
+  appears, play without accelerate.
 - "Floating" energy/power (from ability effects, not runes) is called out
   explicitly when present; otherwise the pool is empty and runes are the resource.
 

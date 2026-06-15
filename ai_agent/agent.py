@@ -363,6 +363,41 @@ async def decide(
 
 # ── Brief state formatting ────────────────────────────────────────────────────
 
+# Legal moves the model should prioritize — play/accelerate variants live here.
+_LEGAL_MOVE_PRIORITY_PREFIXES = (
+    "play ", "move ", "choose ", "mulligan", "react ", "use ",
+    "assign ", "hide ", "equip ",
+)
+_LEGAL_MOVE_PRIORITY_EXACT = frozenset({"end turn", "pass", "assign done"})
+
+
+def _is_priority_legal_move(move: str) -> bool:
+    if move in _LEGAL_MOVE_PRIORITY_EXACT:
+        return True
+    return any(move.startswith(prefix) for prefix in _LEGAL_MOVE_PRIORITY_PREFIXES)
+
+
+def _append_legal_moves(lines: list[str], legal: list) -> None:
+    """Show all play/move/choose lines; list remaining moves separately."""
+    priority = [mv for mv in legal if _is_priority_legal_move(mv)]
+    other = [mv for mv in legal if not _is_priority_legal_move(mv)]
+
+    lines.append(f"Legal moves ({len(legal)} total):")
+    if priority:
+        lines.append(f"  Play/move options ({len(priority)}):")
+        for mv in priority:
+            lines.append(f"    {mv}")
+    if other:
+        lines.append(f"  Other ({len(other)}):")
+        shown_other = other[:15]
+        for mv in shown_other:
+            lines.append(f"    {mv}")
+        if len(other) > len(shown_other):
+            lines.append(f"    ... and {len(other) - len(shown_other)} more")
+    if not priority and not other:
+        lines.append("  (none)")
+    lines.append("  Use list_legal_moves for a fresh full list if needed.")
+
 
 def _format_brief_state(bs: dict) -> str:
     """Render the brief state as a readable text summary for the model."""
@@ -428,7 +463,7 @@ def _format_brief_state(bs: dict) -> str:
 
     lines.append("")
 
-    # Hand — annotate each card with affordability given rune situation
+    # Hand — costs and keywords for planning; legality comes from legal_moves
     hand = bs.get("my_hand", [])
     lines.append(f"Hand ({len(hand)} cards):")
     for c in hand:
@@ -441,15 +476,9 @@ def _format_brief_state(bs: dict) -> str:
             )
         kw = ", ".join(c.get("keywords", []))
         might_str = f" Might:{c['might']}" if c.get("might") is not None else ""
-        # Affordability: check energy and each domain power requirement
-        energy_ok = e_cost <= total_energy
-        domain_ok = all(
-            total_power.get(pc["domain"], 0) >= pc["amount"] for pc in p_costs
-        )
-        playable = "[PLAYABLE]" if (energy_ok and domain_ok) else "[too costly]"
         lines.append(
             f"  {c['instance_id']} — {c['name']} [{c['card_type']}] ({cost_str})"
-            f"{might_str} {playable} {kw}"
+            f"{might_str} {kw}".rstrip()
         )
         effect = c.get("effect_text", "")
         if effect:
@@ -491,15 +520,10 @@ def _format_brief_state(bs: dict) -> str:
             ))
     lines.append("")
 
-    # Legal moves
+    # Legal moves — sole source of truth for what you may do this decision
     legal = bs.get("legal_moves", [])
     if legal:
-        shown = legal[:20]
-        lines.append(f"Legal moves ({len(legal)} total, first {len(shown)} shown):")
-        for mv in shown:
-            lines.append(f"  {mv}")
-        if len(legal) > 20:
-            lines.append(f"  ... and {len(legal) - 20} more (call list_legal_moves)")
+        _append_legal_moves(lines, legal)
 
     # Decision context — pending choice
     ctx = bs.get("pending_choice_context", {})

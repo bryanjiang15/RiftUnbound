@@ -9,8 +9,9 @@ static func run(assertions) -> void:
 	_test_on_discard_power_auto_recycles_rune(assertions)
 	_test_accelerate_taps_before_recycle_for_energy(assertions)
 	_test_jinx_base_cost_recycles_for_power(assertions)
+	_test_jinx_legal_moves_accelerate_requires_four_runes(assertions)
+	_test_play_without_accelerate_skips_prompt(assertions)
 	_test_accelerate_requires_energy_when_pool_has_power(assertions)
-	_test_declined_accelerate_prompt_not_shown_twice(assertions)
 
 
 static func _test_tap_adds_energy(assertions) -> void:
@@ -118,7 +119,7 @@ static func _test_jinx_base_cost_recycles_for_power(assertions) -> void:
 		]
 	})
 	var rune_deck_before = h.gs().players[0].rune_deck.size()
-	h.set_choices(["no", "void-seeker", "fury-rune"])
+	h.set_choices(["void-seeker", "fury-rune"])
 	h.cmd(0, "play jinx-demolitionist")
 	assertions.assert_no_error(h.controller, "jinx base cost succeeds with three runes")
 	assertions.assert_log_contains(h.controller, "[Auto] Rune recycled", "base fury power auto-recycles a rune")
@@ -126,6 +127,36 @@ static func _test_jinx_base_cost_recycles_for_power(assertions) -> void:
 	assertions.assert_eq(h.gs().players[0].channeled_runes.size(), 2, "two runes remain channeled after recycle")
 	var unit = h.find_unit("jinx-demolitionist")
 	assertions.assert_true(unit != null and unit.is_exhausted, "jinx enters exhausted without accelerate")
+
+
+static func _test_jinx_legal_moves_accelerate_requires_four_runes(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{
+				"pool": {"energy": 0, "power": {}},
+				"hand": ["jinx-demolitionist", "void-seeker", "fury-rune"],
+				"runes": [
+					{"id": "fury-rune", "exhausted": false},
+					{"id": "fury-rune", "exhausted": false},
+					{"id": "fury-rune", "exhausted": false},
+				],
+				"deck_size": 10, "rune_deck_size": 12,
+			},
+			{"deck_size": 10, "rune_deck_size": 12}
+		]
+	})
+	var moves: Array = LegalMoveEnumerator.enumerate(h.gs(), 0)
+	assertions.assert_true(
+		"play jinx-demolitionist" in moves,
+		"three runes: base jinx play is legal",
+	)
+	assertions.assert_true(
+		not ("play jinx-demolitionist accelerate" in moves),
+		"three runes: jinx accelerate is not legal",
+	)
 
 
 static func _test_accelerate_requires_energy_when_pool_has_power(assertions) -> void:
@@ -151,7 +182,7 @@ static func _test_accelerate_requires_energy_when_pool_has_power(assertions) -> 
 	assertions.assert_true(unit != null and not unit.is_exhausted, "accelerate enters ready")
 
 
-static func _test_declined_accelerate_prompt_not_shown_twice(assertions) -> void:
+static func _test_play_without_accelerate_skips_prompt(assertions) -> void:
 	var h = TcgTestHarness.new()
 	h.load_fixture_dict({
 		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
@@ -170,11 +201,16 @@ static func _test_declined_accelerate_prompt_not_shown_twice(assertions) -> void
 			{"deck_size": 10, "rune_deck_size": 12}
 		]
 	})
-	h.set_choices(["no", "void-seeker", "fury-rune"])
+	h.set_choices(["void-seeker", "fury-rune"])
 	h.cmd(0, "play jinx-demolitionist")
-	var accel_prompts := 0
+	var has_accel_prompt := false
 	for line in h.controller.log_lines:
 		if "Pay Accelerate on" in line:
-			accel_prompts += 1
-	assertions.assert_eq(accel_prompts, 1, "accelerate offered once before paying base cost")
-	assertions.assert_no_error(h.controller, "declined accelerate still plays base cost")
+			has_accel_prompt = true
+	assertions.assert_true(
+		not has_accel_prompt,
+		"play without accelerate keyword does not prompt for accelerate",
+	)
+	assertions.assert_no_error(h.controller, "jinx plays without accelerate prompt")
+	var unit = h.find_unit("jinx-demolitionist")
+	assertions.assert_true(unit != null and unit.is_exhausted, "jinx enters exhausted without accelerate flag")

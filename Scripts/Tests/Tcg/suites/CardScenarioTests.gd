@@ -195,7 +195,7 @@ static func _test_jinx_demolitionist_discard(assertions) -> void:
 			{"deck_size": 10, "rune_deck_size": 12},
 		],
 	})
-	h.cmd_with_choices(0, "play jinx-demolitionist", ["no", "fury-rune", "void-seeker"])
+	h.cmd_with_choices(0, "play jinx-demolitionist", ["fury-rune", "void-seeker"])
 	assertions.assert_log_contains(h.controller, "discarded", "jinx demolitionist discards on play")
 
 
@@ -364,7 +364,7 @@ static func _test_flame_chompers_not_on_other_discard(assertions) -> void:
 			{"base": [{"id": "flame-chompers"}], "deck_size": 5, "rune_deck_size": 12}
 		]
 	})
-	h.cmd_with_choices(0, "play jinx-demolitionist", ["no", "brazen-buccaneer", "void-seeker"])
+	h.cmd_with_choices(0, "play jinx-demolitionist", ["brazen-buccaneer", "void-seeker"])
 	var has_chompers_prompt = false
 	for line in h.controller.log_lines:
 		if "Optional ability (Flame Chompers)" in line:

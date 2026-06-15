@@ -58,9 +58,9 @@ const HINTS: Dictionary = {
 			"target <id>   Target permanent for spells/abilities\n" +
 			"from champion Play the Chosen Champion from the Champion Zone\n" +
 			"from hidden   Play a face-down Hidden card at a Battlefield\n" +
-			"accelerate    Pay +1 ENG +1 Power to enter Ready instead of Exhausted"
+			"accelerate    Pay +1 ENG +1 Power to enter Ready (include on the play command; no follow-up prompt)"
 		),
-		"example": "play noxus-hopeful to battlefield-a"
+		"example": "play blazing-scorcher accelerate"
 	},
 	"move": {
 		"usage": "move <id> [id …] to <location>",
