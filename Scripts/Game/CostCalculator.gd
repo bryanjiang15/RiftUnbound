@@ -46,6 +46,10 @@ static func compute_play_cost(
 	return {"energy": energy, "power": power, "accelerate": use_accelerate}
 
 
+static func compute_hidden_hide_cost() -> Dictionary:
+	return {"energy": 0, "power": [{"domain": "any", "amount": 1}]}
+
+
 static func compute_ability_cost(
 	ability_or_cost: Variant,
 	source: CardInstance,
