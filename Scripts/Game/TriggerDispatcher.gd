@@ -122,10 +122,13 @@ func _collect_sources(event: String, ctx: Dictionary, gs: GameState) -> Array:
 				results.append({"source": moved, "ability": ab})
 		return results
 
-	for ps in gs.players:
-		if ps.legend and event == "beginning_phase_start":
-			for ab in ps.legend.definition.abilities:
-				results.append({"source": ps.legend, "ability": ab})
+	if event == "beginning_phase_start":
+		var active_pi := int(ctx.get("player_index", gs.turn_player_index))
+		if active_pi >= 0 and active_pi < gs.players.size():
+			var active_ps: PlayerState = gs.players[active_pi]
+			if active_ps.legend:
+				for ab in active_ps.legend.definition.abilities:
+					results.append({"source": active_ps.legend, "ability": ab})
 
 	for i in range(gs.board.battlefields.size()):
 		if event in ["on_conquer", "on_defend"] and bf_idx >= 0 and i != bf_idx:

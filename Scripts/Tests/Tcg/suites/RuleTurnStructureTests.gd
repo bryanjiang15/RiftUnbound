@@ -5,6 +5,7 @@ const TcgTestHarness = preload("res://Scripts/Tests/Tcg/TcgTestHarness.gd")
 
 static func run(assertions) -> void:
 	_test_legend_draw_on_low_hand(assertions)
+	_test_legend_does_not_draw_on_opponent_beginning(assertions)
 	_test_end_turn_heals(assertions)
 
 
@@ -15,6 +16,25 @@ static func _test_legend_draw_on_low_hand(assertions) -> void:
 	h.controller._execute_start_of_turn()
 	var hand_after = h.gs().players[0].hand.size()
 	assertions.assert_true(hand_after > hand_before, "legend draws when hand size <= 1 at beginning phase")
+
+
+static func _test_legend_does_not_draw_on_opponent_beginning(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 1,
+		"turn_number": 2,
+		"phase": "BEGINNING",
+		"state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"score": 0, "legend": "jinx-loose-cannon", "hand": ["fury-rune"], "deck_size": 10, "rune_deck_size": 12},
+			{"score": 0, "hand": [], "deck_size": 10, "rune_deck_size": 12}
+		]
+	})
+	var hand_before = h.gs().players[0].hand.size()
+	h.controller._execute_start_of_turn()
+	var hand_after = h.gs().players[0].hand.size()
+	assertions.assert_eq(hand_after, hand_before, "legend does not draw on opponent beginning phase")
 
 
 static func _test_end_turn_heals(assertions) -> void:
