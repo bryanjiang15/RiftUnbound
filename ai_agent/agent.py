@@ -216,6 +216,17 @@ def _parse_decision(content: str) -> Optional[Decision]:
         return None
 
 
+def _command_in_legal_moves(cmd: str, legal: list) -> bool:
+    """Return True if cmd matches an enumerated legal move."""
+    if cmd in legal:
+        return True
+    # play_card with explicit "to base" matches bare "play <id>" in legal_moves
+    if cmd.endswith(" to base"):
+        if cmd[: -len(" to base")] in legal:
+            return True
+    return False
+
+
 _PASS_DECISION = Decision(
     reasoning="Fallback: could not produce a valid decision within retry budget.",
     move=Move(action="pass"),
@@ -337,6 +348,28 @@ async def decide(
         content = msg.content or ""
         decision = _parse_decision(content)
         if decision is not None:
+            cmd = decision.move.to_command()
+            legal = brief_state.get("legal_moves", [])
+            if legal and not _command_in_legal_moves(cmd, legal):
+                logger.warning(
+                    "Decision command not in legal_moves: %s (have %d moves)",
+                    cmd,
+                    len(legal),
+                )
+                messages.append({"role": "assistant", "content": content})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"Your move translates to '{cmd}', which is NOT in the "
+                        f"current legal_moves list. You must pick exactly one "
+                        f"command that appears in legal_moves (omit destination "
+                        f"for units played to base — use play_card without "
+                        f"destination, not 'to base'). "
+                        f"For hiding a Hidden card from hand, use hide_card — "
+                        f"not play_card with from_hidden. Respond with corrected JSON."
+                    ),
+                })
+                continue
             logger.info(
                 "Decision [round=%d]: action=%s reasoning=%.120s",
                 round_num,

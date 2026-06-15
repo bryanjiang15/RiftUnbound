@@ -30,11 +30,15 @@ Action names and their required parameters:
   mulligan_keep          {}
   mulligan               {"card_ids": ["<id>", ...]}     # 1 or 2 card IDs
   play_card              {"card_id": "<id>",
-                          "destination": "<base|"">",
+                          "destination": "<battlefield-a|battlefield-b|"">",
                           "target_id": "<id or "">",
                           "from_champion": false,
                           "from_hidden": false,
                           "accelerate": false}
+                          # Omit destination (or use "") for units to base — legal_moves
+                          # lists "play <id>" without "to base".
+  hide_card              {"card_id": "<id>",
+                          "battlefield_id": "<battlefield-a|battlefield-b>"}
   move_unit              {"unit_ids": ["<id>", ...],
                           "destination": "<battlefield-a|battlefield-b|base>"}
   pass                   {}
@@ -148,6 +152,10 @@ HIGH_FREQUENCY_RULES = """
 - Legion: cost reduced by 2 if you played another card this turn.
 - Reaction: can be played during Closed states on any player's turn.
 - Action: can be played during Showdown Open states.
+- Hidden: from hand at a controlled battlefield, use hide_card (not play_card).
+  Only use play_card with from_hidden: true for a card already face-down at a
+  battlefield (listed in legal_moves as "play <id> from hidden"). You may also
+  play_card normally from hand when affordable and legal_moves includes it.
 - Deflect [X]: enemy spells/abilities targeting this cost X more Power.
 - Deathknell: triggers when the unit dies.
 """

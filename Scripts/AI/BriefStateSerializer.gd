@@ -212,6 +212,18 @@ static func _legal_categories(gs: GameState, player_index: int) -> Array:
 	cats.append("recycle_rune")
 	cats.append("play_card")
 	cats.append("move_unit")
+	var ps: PlayerState = gs.players[player_index]
+	var has_hide := false
+	for card in ps.hand:
+		if card.has_keyword("hidden"):
+			for bf in gs.board.battlefields:
+				if bf.controller_index == player_index and bf.facedown_card == null:
+					has_hide = true
+					break
+			if has_hide:
+				break
+	if has_hide:
+		cats.append("hide_card")
 	cats.append("end_turn")
 	return cats
 

@@ -167,8 +167,9 @@ func _move_to_command(move: Dictionary) -> String:
 			return ("mulligan %s" % ids) if ids != "" else "mulligan keep"
 		"play_card":
 			var cmd := "play %s" % p.get("card_id", "")
-			if p.get("destination", "") != "":
-				cmd += " to %s" % p["destination"]
+			var dest: String = p.get("destination", "")
+			if dest != "" and dest != "base":
+				cmd += " to %s" % dest
 			if p.get("target_id", "") != "":
 				cmd += " target %s" % p["target_id"]
 			if p.get("from_champion", false):
@@ -197,6 +198,8 @@ func _move_to_command(move: Dictionary) -> String:
 			if p.get("target_id", "") != "":
 				cmd += " target %s" % p["target_id"]
 			return cmd
+		"hide_card":
+			return "hide %s at %s" % [p.get("card_id", ""), p.get("battlefield_id", "")]
 		"assign_damage":
 			return "assign %d to %s" % [p.get("amount", 0), p.get("target_id", "")]
 		"assign_done":

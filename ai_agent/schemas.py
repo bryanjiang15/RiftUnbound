@@ -136,6 +136,7 @@ ActionType = Literal[
     "mulligan_keep",
     "mulligan",
     "play_card",
+    "hide_card",
     "move_unit",
     "pass",
     "end_turn",
@@ -162,8 +163,9 @@ class Move(BaseModel):
             return f"mulligan {ids}" if ids else "mulligan keep"
         elif self.action == "play_card":
             cmd = f"play {p.get('card_id', '')}"
-            if p.get("destination"):
-                cmd += f" to {p['destination']}"
+            dest = p.get("destination", "")
+            if dest and dest != "base":
+                cmd += f" to {dest}"
             if p.get("target_id"):
                 cmd += f" target {p['target_id']}"
             if p.get("from_champion"):
@@ -173,6 +175,8 @@ class Move(BaseModel):
             if p.get("accelerate"):
                 cmd += " accelerate"
             return cmd
+        elif self.action == "hide_card":
+            return f"hide {p.get('card_id', '')} at {p.get('battlefield_id', '')}"
         elif self.action == "move_unit":
             unit_ids = p.get("unit_ids", [])
             if isinstance(unit_ids, str):

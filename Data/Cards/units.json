@@ -102,7 +102,10 @@
     ],
     "rarity": "Common",
     "energy_cost": 8,
-    "power_cost": [],
+    "power_cost": [{
+        "domain": "fury",
+        "amount": 1
+      }],
     "might": 8,
     "might_bonus": null,
     "keywords": [],
@@ -266,7 +269,12 @@
     ],
     "rarity": "Rare",
     "energy_cost": 2,
-    "power_cost": [],
+    "power_cost": [
+      {
+        "domain": "fury",
+        "amount": 1
+      }
+    ],
     "might": 3,
     "might_bonus": null,
     "keywords": [
@@ -407,7 +415,12 @@
     ],
     "rarity": "Common",
     "energy_cost": 3,
-    "power_cost": [],
+    "power_cost": [
+      {
+        "domain": "chaos",
+        "amount": 1
+      }
+    ],
     "might": 3,
     "might_bonus": null,
     "keywords": [],
@@ -445,7 +458,10 @@
     ],
     "rarity": "Common",
     "energy_cost": 5,
-    "power_cost": [],
+    "power_cost": [{
+        "domain": "chaos",
+        "amount": 1
+      }],
     "might": 5,
     "might_bonus": null,
     "keywords": [
@@ -530,7 +546,10 @@
     ],
     "rarity": "Rare",
     "energy_cost": 10,
-    "power_cost": [],
+    "power_cost": [{
+        "domain": "chaos",
+        "amount": 1
+      }],
     "might": 6,
     "might_bonus": null,
     "keywords": [],

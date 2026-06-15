@@ -12,6 +12,9 @@ static func run(assertions) -> void:
 	_test_jinx_legal_moves_accelerate_requires_four_runes(assertions)
 	_test_play_without_accelerate_skips_prompt(assertions)
 	_test_accelerate_requires_energy_when_pool_has_power(assertions)
+	_test_hidden_unaffordable_play_not_legal(assertions)
+	_test_hidden_hide_only_at_controlled_empty_facedown(assertions)
+	_test_play_from_hidden_facedown_card(assertions)
 
 
 static func _test_tap_adds_energy(assertions) -> void:
@@ -214,3 +217,92 @@ static func _test_play_without_accelerate_skips_prompt(assertions) -> void:
 	assertions.assert_no_error(h.controller, "jinx plays without accelerate prompt")
 	var unit = h.find_unit("jinx-demolitionist")
 	assertions.assert_true(unit != null and unit.is_exhausted, "jinx enters exhausted without accelerate flag")
+
+
+static func _test_hidden_unaffordable_play_not_legal(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"battlefield_control": [0, -1],
+		"players": [
+			{
+				"pool": {"energy": 0, "power": {}},
+				"hand": ["fight-or-flight"],
+				"runes": [{"id": "chaos-rune", "exhausted": false}],
+				"deck_size": 10, "rune_deck_size": 12,
+			},
+			{"deck_size": 10, "rune_deck_size": 12}
+		]
+	})
+	var moves: Array = LegalMoveEnumerator.enumerate(h.gs(), 0)
+	assertions.assert_true(
+		not ("play fight-or-flight" in moves),
+		"hidden spell not playable with only 1E (costs 2E)",
+	)
+	assertions.assert_true(
+		"hide fight-or-flight at battlefield-a" in moves,
+		"hide offered at controlled battlefield-a",
+	)
+	assertions.assert_true(
+		not ("hide fight-or-flight at battlefield-b" in moves),
+		"hide not offered at uncontrolled battlefield-b",
+	)
+
+
+static func _test_hidden_hide_only_at_controlled_empty_facedown(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"battlefield_control": [0, 1],
+		"players": [
+			{
+				"pool": {"energy": 0, "power": {}},
+				"hand": ["fight-or-flight"],
+				"runes": [],
+				"deck_size": 10, "rune_deck_size": 12,
+			},
+			{"deck_size": 10, "rune_deck_size": 12}
+		]
+	})
+	var bf_a = h.gs().board.battlefields[0]
+	var occupied_def = CardLoader.get_card("void-seeker")
+	bf_a.facedown_card = CardInstance.new(occupied_def, "void-seeker-hidden", 0)
+	bf_a.facedown_card.is_face_down = true
+	var moves: Array = LegalMoveEnumerator.enumerate(h.gs(), 0)
+	assertions.assert_true(
+		not ("hide fight-or-flight at battlefield-a" in moves),
+		"hide not offered when facedown slot occupied",
+	)
+	assertions.assert_true(
+		not ("hide fight-or-flight at battlefield-b" in moves),
+		"hide not offered at opponent-controlled battlefield-b",
+	)
+
+
+static func _test_play_from_hidden_facedown_card(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"battlefield_control": [0, -1],
+		"players": [
+			{
+				"pool": {"energy": 2, "power": {}},
+				"hand": [],
+				"runes": [],
+				"deck_size": 10, "rune_deck_size": 12,
+			},
+			{"deck_size": 10, "rune_deck_size": 12}
+		]
+	})
+	var bf = h.gs().board.battlefields[0]
+	var hidden_def = CardLoader.get_card("fight-or-flight")
+	bf.facedown_card = CardInstance.new(hidden_def, "fight-or-flight", 0)
+	bf.facedown_card.is_face_down = true
+	var moves: Array = LegalMoveEnumerator.enumerate(h.gs(), 0)
+	assertions.assert_true(
+		"play fight-or-flight from hidden" in moves,
+		"facedown hidden card can be played from hidden",
+	)

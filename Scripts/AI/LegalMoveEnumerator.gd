@@ -86,11 +86,8 @@ static func enumerate(gs: GameState, player_index: int) -> Array:
 		if CostCalculator.can_afford_with_autopay(player_index, cost, gs):
 			moves.append("play %s from champion" % champ.instance_id)
 
-	# Hidden units in hand
-	for card in ps.hand:
-		if card.has_keyword("hidden"):
-			for bf in gs.board.battlefields:
-				moves.append("hide %s at %s" % [card.instance_id, bf.battlefield_id])
+	_add_hide_moves(gs, ps, player_index, moves)
+	_add_play_from_hidden(gs, player_index, moves)
 
 	moves.append("end turn")
 	return moves
@@ -195,6 +192,35 @@ static func _add_activated_abilities(gs: GameState, ps: PlayerState, player_inde
 					moves.append("use %s target %s" % [perm.instance_id, t.instance_id])
 
 
+static func _add_hide_moves(gs: GameState, ps: PlayerState, player_index: int, moves: Array) -> void:
+	for card in ps.hand:
+		if not card.has_keyword("hidden"):
+			continue
+		for bf in gs.board.battlefields:
+			if bf.controller_index != player_index:
+				continue
+			if bf.facedown_card != null:
+				continue
+			moves.append("hide %s at %s" % [card.instance_id, bf.battlefield_id])
+
+
+static func _add_play_from_hidden(gs: GameState, player_index: int, moves: Array) -> void:
+	for bf in gs.board.battlefields:
+		if bf.controller_index != player_index:
+			continue
+		if bf.facedown_card == null:
+			continue
+		var card: CardInstance = bf.facedown_card
+		if not TurnStateMachine.can_play_card(card, gs.current_state, player_index, gs):
+			continue
+		var cost = CostCalculator.compute_play_cost(card, player_index, gs)
+		if not CostCalculator.can_afford_with_autopay(player_index, cost, gs):
+			continue
+		var cmd := "play %s from hidden" % card.instance_id
+		if not cmd in moves:
+			moves.append(cmd)
+
+
 static func _add_reaction_plays(gs: GameState, player_index: int, moves: Array) -> void:
 	var ps: PlayerState = gs.players[player_index]
 	for card in ps.hand:
@@ -203,6 +229,7 @@ static func _add_reaction_plays(gs: GameState, player_index: int, moves: Array) 
 		var cost = CostCalculator.compute_play_cost(card, player_index, gs)
 		if CostCalculator.can_afford_with_autopay(player_index, cost, gs):
 			moves.append("react %s" % card.instance_id)
+	_add_play_from_hidden(gs, player_index, moves)
 
 
 static func _enumerate_combat_assignments(gs: GameState) -> Array:
