@@ -82,6 +82,18 @@ DecisionType = Literal[
     "pending_choice",
 ]
 
+class PendingChoiceContext(BaseModel):
+    """Why the engine is waiting for a choose command (from BriefStateSerializer.gd)."""
+
+    prompt_text: str = ""
+    prompt_type: str = ""
+    source_card_name: Optional[str] = None
+    source_card_id: Optional[str] = None
+    source_effect_text: Optional[str] = None
+    ability_description: Optional[str] = None
+    remaining_discards: Optional[int] = None
+    mandatory: Optional[bool] = None
+
 
 class BriefState(BaseModel):
     schema_version: str = SCHEMA_VERSION
@@ -120,6 +132,7 @@ class BriefState(BaseModel):
 
     # Pending choice context
     pending_choice_options: list[str] = Field(default_factory=list)
+    pending_choice_context: PendingChoiceContext = Field(default_factory=PendingChoiceContext)
 
     # Combat damage assignment context
     combat_assignment_active: bool = False

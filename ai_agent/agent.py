@@ -560,10 +560,14 @@ def _format_brief_state(bs: dict) -> str:
 
     # Decision context — pending choice
     ctx = bs.get("pending_choice_context", {})
+    if hasattr(ctx, "model_dump"):
+        ctx = ctx.model_dump()
     opts = bs.get("pending_choice_options", [])
     if ctx or opts:
         lines.append("")
         lines.append("=== PENDING CHOICE ===")
+        if ctx.get("prompt_type"):
+            lines.append(f"Type: {ctx['prompt_type']}")
         if ctx.get("prompt_text"):
             lines.append(f"What: {ctx['prompt_text']}")
         if ctx.get("source_card_name"):
@@ -574,6 +578,12 @@ def _format_brief_state(bs: dict) -> str:
             )
         if ctx.get("ability_description"):
             lines.append(f"Ability: {ctx['ability_description']}")
+        if ctx.get("remaining_discards") is not None:
+            mandatory = ctx.get("mandatory", True)
+            lines.append(
+                f"Discards: {ctx['remaining_discards']} remaining"
+                f" ({'mandatory' if mandatory else 'optional'})"
+            )
         if opts:
             lines.append(f"Options (use choose <option>): {opts}")
         lines.append("======================")

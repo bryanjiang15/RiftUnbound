@@ -12,5 +12,6 @@
 | [BUG-008](entries/BUG-008-traveling-merchant-move-trigger-on-any-card-move.md) | open | high | engine | traveling-merchant move trigger on any card move | 2026-06-13 | #13 |
 | [BUG-009](entries/BUG-009-unit-with-power-cost-does-not-recycle-rune-to-pay-power.md) | open | high | engine | Unit with power cost does not recycle rune to pay power | 2026-06-13 | #16 |
 | [BUG-010](entries/BUG-010-jinx-loose-cannon-ability-triggers-on-both-player-s-turn.md) | open | high | engine | Jinx loose cannon ability triggers on both player's turn | 2026-06-14 | #18 |
+| [BUG-011](entries/BUG-011-hiding-card-does-not-cost-power.md) | open | high | engine | Hiding card does not cost power | 2026-06-14 | #21 |
 
-**Counts:** 4 open · 1 investigating · 0 confirmed · 3 fixed · 0 wontfix
+**Counts:** 5 open · 1 investigating · 0 confirmed · 3 fixed · 0 wontfix
