@@ -51,11 +51,7 @@ func take_turn() -> void:
 
 	if not _can_act_now(gs):
 		return
-	var legal := _legal_moves_for(gs)
-	if legal.is_empty():
-		return
-	if legal.size() == 1:
-		_submit(legal[0])
+	if _legal_moves_for(gs).is_empty():
 		return
 
 	# Delay slightly so the game log is readable
@@ -65,11 +61,7 @@ func take_turn() -> void:
 
 	if not _can_act_now(gs):
 		return
-	legal = _legal_moves_for(gs)
-	if legal.is_empty():
-		return
-	if legal.size() == 1:
-		_submit(legal[0])
+	if _legal_moves_for(gs).is_empty():
 		return
 
 	_retry_count = 0
@@ -233,9 +225,6 @@ func _heuristic_fallback(gs: GameState) -> void:
 
 	var legal := _legal_moves_for(gs)
 	if legal.is_empty():
-		return
-	if legal.size() == 1:
-		_submit(legal[0])
 		return
 
 	# Mulligan: always keep
