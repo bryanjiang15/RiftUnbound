@@ -887,14 +887,14 @@ func _cmd_move(player_index: int, args: Array) -> void:
 				bf.is_contested = true
 				gs.attacker_player_index = player_index
 				_log("> %s is now Contested" % bf.display_name)
-			var move_ctx = {
-				"player_index": player_index,
-				"source": unit,
-				"battlefield_index": dest_bf_idx if destination != "base" else -1,
-				"controller": self,
-			}
-			for line in trigger_dispatcher.emit("on_move", move_ctx, gs, self):
-				_log(line)
+		var move_ctx = {
+			"player_index": player_index,
+			"source": unit,
+			"battlefield_index": dest_bf_idx,
+			"controller": self,
+		}
+		for line in trigger_dispatcher.emit("on_move", move_ctx, gs, self):
+			_log(line)
 
 	_run_cleanup()
 
