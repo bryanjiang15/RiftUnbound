@@ -759,6 +759,11 @@ func _refresh_bf_unit_row(bf_index: int, pi: int, units: Array,
 		hbox.add_child(_make_facedown_thumb(bf.facedown_card))
 
 
+static func _is_opponent_hidden_card(inst: CardInstance) -> bool:
+	# P1 is the local human seat (see hand zone: pi == 0 shows faces).
+	return inst.is_face_down and inst.owner_index != 0
+
+
 func _refresh_chain(gs: GameState) -> void:
 	_clear_children(_chain_items_vbox)
 
@@ -950,23 +955,24 @@ func _make_facedown_thumb(inst: CardInstance) -> Control:
 	hidden_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(hidden_lbl)
 
-	var id_bg := ColorRect.new()
-	id_bg.color = Color(0.0, 0.0, 0.0, 0.70)
-	id_bg.anchor_left = 0.0; id_bg.anchor_right  = 1.0
-	id_bg.anchor_top  = 0.88; id_bg.anchor_bottom = 1.0
-	id_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	card.add_child(id_bg)
+	if not _is_opponent_hidden_card(inst):
+		var id_bg := ColorRect.new()
+		id_bg.color = Color(0.0, 0.0, 0.0, 0.70)
+		id_bg.anchor_left = 0.0; id_bg.anchor_right  = 1.0
+		id_bg.anchor_top  = 0.88; id_bg.anchor_bottom = 1.0
+		id_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_child(id_bg)
 
-	var id_lbl := Label.new()
-	id_lbl.text = inst.instance_id
-	id_lbl.clip_text = true
-	id_lbl.anchor_left  = 0.0;  id_lbl.anchor_right  = 1.0
-	id_lbl.anchor_top   = 0.89; id_lbl.anchor_bottom = 1.0
-	id_lbl.offset_left = 2; id_lbl.offset_right = -2
-	id_lbl.add_theme_font_size_override("font_size", 7)
-	id_lbl.add_theme_color_override("font_color", Color(0.70, 0.70, 0.75))
-	id_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	card.add_child(id_lbl)
+		var id_lbl := Label.new()
+		id_lbl.text = inst.instance_id
+		id_lbl.clip_text = true
+		id_lbl.anchor_left  = 0.0;  id_lbl.anchor_right  = 1.0
+		id_lbl.anchor_top   = 0.89; id_lbl.anchor_bottom = 1.0
+		id_lbl.offset_left = 2; id_lbl.offset_right = -2
+		id_lbl.add_theme_font_size_override("font_size", 7)
+		id_lbl.add_theme_color_override("font_color", Color(0.70, 0.70, 0.75))
+		id_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_child(id_lbl)
 
 	return wrapper
 

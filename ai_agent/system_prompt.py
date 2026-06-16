@@ -155,9 +155,11 @@ HIGH_FREQUENCY_RULES = """
 - Reaction: can be played during Closed states on any player's turn.
 - Action: can be played during Showdown Open states.
 - Hidden: from hand at a controlled battlefield, use hide_card (not play_card).
-  Only use play_card with from_hidden: true for a card already face-down at a
-  battlefield (listed in legal_moves as "play <id> from hidden"). You may also
-  play_card normally from hand when affordable and legal_moves includes it.
+  Hiding costs 0 Energy + 1 any-domain Power (recycle a rune). Once face-down,
+  play_card with from_hidden: true costs 0 Energy and 0 Power — the card's
+  printed cost does not apply. Only use from_hidden for a card already at a
+  battlefield (legal_moves: "play <id> from hidden"). You may also play_card
+  normally from hand when affordable and legal_moves includes it.
 - Deflect [X]: enemy spells/abilities targeting this cost X more Power.
 - Deathknell: triggers when the unit dies.
 """

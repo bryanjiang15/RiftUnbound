@@ -60,6 +60,14 @@ class UnitSummary(BaseModel):
     effect_text: str = ""
 
 
+class FacedownCard(BaseModel):
+    instance_id: str
+    name: str
+    card_type: str
+    effect_text: str = ""
+    play_from_hidden_cost: str = "0E"
+
+
 class BattlefieldInfo(BaseModel):
     battlefield_id: str
     display_name: str
@@ -68,6 +76,7 @@ class BattlefieldInfo(BaseModel):
     opponent_units: list[UnitSummary]
     is_contested: bool
     has_facedown: bool
+    my_facedown: Optional[FacedownCard] = None
     effect_text: str = ""
 
 

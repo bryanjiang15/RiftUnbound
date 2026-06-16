@@ -735,7 +735,13 @@ func _complete_play(
 	if not use_accelerate and card.has_keyword("accelerate"):
 		declined_accelerate = true
 	var ps: PlayerState = gs.players[player_index]
-	var cost = CostCalculator.compute_play_cost(card, player_index, gs, use_accelerate, optional_discard_discount)
+	var cost: Dictionary
+	if from_zone == "hidden":
+		cost = CostCalculator.compute_play_from_hidden_cost()
+	else:
+		cost = CostCalculator.compute_play_cost(
+			card, player_index, gs, use_accelerate, optional_discard_discount
+		)
 	if not try_pay_cost(player_index, cost):
 		_log("[ERROR] Cannot play %s: insufficient resources (need %s, pool: %s)" % [
 			card.definition.name, CostCalculator.cost_to_string(cost),

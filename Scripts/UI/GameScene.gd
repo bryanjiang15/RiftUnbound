@@ -16,6 +16,9 @@ var _ai: AIPlayer
 var _popup: PanelContainer
 var _popup_tex: TextureRect
 
+# Local human seat — matches BoardView hand visibility (P1 faces, P2 backs).
+const LOCAL_PLAYER_INDEX := 0
+
 # "pvp" = no AI, "pvai" = P2 is AI (default when launched directly)
 var _game_mode: String = "pvai"
 
@@ -139,12 +142,15 @@ func _on_command_submitted(player_index: int, text: String) -> void:
 
 
 func _on_card_hovered(inst: CardInstance) -> void:
-	var def := inst.definition
-	var img_path: String = "res://Assets/" + def.image if def.image != "" \
-		else "res://Assets/Champ_Card.jpg"
-	if not ResourceLoader.exists(img_path):
-		img_path = "res://Assets/Champ_Card.jpg"
-	_popup_tex.texture = load(img_path)
+	if _is_opponent_hidden(inst):
+		_popup_tex.texture = _load_card_back_texture()
+	else:
+		var def := inst.definition
+		var img_path: String = "res://Assets/" + def.image if def.image != "" \
+			else "res://Assets/Champ_Card.jpg"
+		if not ResourceLoader.exists(img_path):
+			img_path = "res://Assets/Champ_Card.jpg"
+		_popup_tex.texture = load(img_path)
 
 	# Position popup above-right of cursor, clamped to viewport
 	var mouse := get_global_mouse_position()
@@ -163,4 +169,14 @@ func _on_card_unhovered() -> void:
 
 
 func _on_card_clicked(inst: CardInstance) -> void:
+	if _is_opponent_hidden(inst):
+		return
 	_console.append_to_input(inst.instance_id)
+
+
+func _is_opponent_hidden(inst: CardInstance) -> bool:
+	return inst.is_face_down and inst.owner_index != LOCAL_PLAYER_INDEX
+
+
+func _load_card_back_texture() -> Texture2D:
+	return load("res://Assets/Champ_Card.jpg")

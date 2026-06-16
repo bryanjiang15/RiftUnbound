@@ -563,6 +563,18 @@ def _format_brief_state(bs: dict) -> str:
             lines.append("  Opp units: " + ", ".join(
                 f"{u['instance_id']}({u['current_might']}MHT)" for u in bf["opponent_units"]
             ))
+        my_facedown = bf.get("my_facedown")
+        if my_facedown:
+            fd_cost = my_facedown.get("play_from_hidden_cost", "0E")
+            lines.append(
+                f"  My hidden: {my_facedown['instance_id']} ({my_facedown['name']}) "
+                f"— play from hidden costs {fd_cost}"
+            )
+            fd_effect = my_facedown.get("effect_text", "")
+            if fd_effect:
+                lines.append(f"    Effect: {skill_module.format_effect_text(fd_effect)}")
+        elif bf.get("has_facedown"):
+            lines.append("  Hidden card present (opponent's)")
     lines.append("")
 
     # Legal moves — sole source of truth for what you may do this decision

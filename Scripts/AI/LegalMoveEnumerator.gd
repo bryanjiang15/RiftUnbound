@@ -227,7 +227,7 @@ static func _add_play_from_hidden(gs: GameState, player_index: int, moves: Array
 		var card: CardInstance = bf.facedown_card
 		if not TurnStateMachine.can_play_card(card, gs.current_state, player_index, gs):
 			continue
-		var cost = CostCalculator.compute_play_cost(card, player_index, gs)
+		var cost = CostCalculator.compute_play_from_hidden_cost()
 		if not CostCalculator.can_afford_with_autopay(player_index, cost, gs):
 			continue
 		var cmd := "play %s from hidden" % card.instance_id

@@ -3,7 +3,7 @@ class_name BriefStateSerializer
 # Serializes the authoritative GameState into the compact BriefState JSON
 # understood by the Python AI agent.  Only information the seat at player_index
 # is entitled to see is included (no hidden hand contents for the opponent,
-# no face-down card identities).
+# no face-down card identities for the opponent).
 #
 # schema_version must match SCHEMA_VERSION in ai_agent/schemas.py.
 
@@ -186,9 +186,25 @@ static func _serialize_battlefields(gs: GameState, player_index: int) -> Array:
 			"opponent_units": _serialize_units(bf.units[1 - player_index]),
 			"is_contested": bf.is_contested,
 			"has_facedown": bf.facedown_card != null,
+			"my_facedown": _serialize_my_facedown(bf, player_index),
 			"effect_text": bf_effect,
 		})
 	return result
+
+
+static func _serialize_my_facedown(bf, player_index: int) -> Variant:
+	if bf.facedown_card == null:
+		return null
+	var card: CardInstance = bf.facedown_card
+	if card.owner_index != player_index:
+		return null
+	return {
+		"instance_id": card.instance_id,
+		"name": card.definition.name,
+		"card_type": card.definition.card_type,
+		"effect_text": card.definition.effect_text,
+		"play_from_hidden_cost": "0E",
+	}
 
 
 # ── Legal action categories ───────────────────────────────────────────────────

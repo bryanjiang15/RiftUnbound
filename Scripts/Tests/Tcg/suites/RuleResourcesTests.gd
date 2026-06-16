@@ -343,7 +343,7 @@ static func _test_play_from_hidden_facedown_card(assertions) -> void:
 		"battlefield_control": [0, -1],
 		"players": [
 			{
-				"pool": {"energy": 2, "power": {}},
+				"pool": {"energy": 0, "power": {}},
 				"hand": [],
 				"runes": [],
 				"deck_size": 10, "rune_deck_size": 12,
@@ -358,5 +358,7 @@ static func _test_play_from_hidden_facedown_card(assertions) -> void:
 	var moves: Array = LegalMoveEnumerator.enumerate(h.gs(), 0)
 	assertions.assert_true(
 		"play fight-or-flight from hidden" in moves,
-		"facedown hidden card can be played from hidden",
+		"facedown hidden card legal with zero resources",
 	)
+	h.cmd(0, "play fight-or-flight from hidden")
+	assertions.assert_no_error(h.controller, "play from hidden costs zero resources")
