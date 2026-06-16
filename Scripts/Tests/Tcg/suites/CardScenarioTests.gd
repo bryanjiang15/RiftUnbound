@@ -9,6 +9,7 @@ const TargetResolver = preload("res://Scripts/Game/TargetResolver.gd")
 static func run(assertions) -> void:
 	_test_magma_wurm_aura(assertions)
 	_test_traveling_merchant_on_move(assertions)
+	_test_traveling_merchant_on_move_to_base(assertions)
 	_test_traveling_merchant_not_on_other_move(assertions)
 	_test_scrapheap_on_play(assertions)
 	_test_rhasa_cost_reduction(assertions)
@@ -53,6 +54,27 @@ static func _test_traveling_merchant_on_move(assertions) -> void:
 	})
 	h.cmd_with_choices(0, "move traveling-merchant to battlefield-a", ["fury-rune"])
 	assertions.assert_log_contains(h.controller, "discarded", "traveling merchant discards on move")
+
+
+# BUG-012: on_move must fire when returning to base, not only when moving to a battlefield.
+static func _test_traveling_merchant_on_move_to_base(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{
+				"battlefield-a": [{"id": "traveling-merchant", "exhausted": false}],
+				"hand": ["fury-rune"],
+				"deck_size": 5, "rune_deck_size": 12,
+			},
+			{"deck_size": 5, "rune_deck_size": 12},
+		],
+	})
+	h.cmd_with_choices(0, "move traveling-merchant to base", ["fury-rune"])
+	assertions.assert_log_contains(
+		h.controller, "discarded", "traveling merchant discards on move to base"
+	)
 
 
 # BUG-008: on_move triggers must fire only for the unit that moved.
