@@ -46,8 +46,8 @@ func start_game_from_config(config: Dictionary) -> void:
 
 	var p1_path = config.get("p1_deck", P1_DECK)
 	var p2_path = config.get("p2_deck", P2_DECK)
-	var p1 = DeckLoader.build_player_state(p1_path, 0)
-	var p2 = DeckLoader.build_player_state(p2_path, 1)
+	var p1 = DeckLoader.build_player_state(p1_path, 0, gs)
+	var p2 = DeckLoader.build_player_state(p2_path, 1, gs)
 	if p1 == null or p2 == null:
 		_log("[ERROR] Failed to load decks. Check Data/Decks/ paths.")
 		return
