@@ -27,15 +27,22 @@ var battlefields_scored_this_turn: Array[int] = []
 # Deck configuration (battlefield IDs from deck file)
 var deck_battlefields: Array[String] = []
 
-# Instance ID generation
+# When set, instance ids are allocated game-wide via GameState.allocate_instance_id().
+var id_registry: GameState = null
+
+# Fallback for isolated PlayerState construction without a GameState.
 var _id_counters: Dictionary = {}
 
 
 func create_instance(card_def: CardDefinition) -> CardInstance:
 	var base_id = card_def.id
-	var count = _id_counters.get(base_id, 0) + 1
-	_id_counters[base_id] = count
-	var inst_id = base_id if count == 1 else "%s-%d" % [base_id, count]
+	var inst_id: String
+	if id_registry != null:
+		inst_id = id_registry.allocate_instance_id(base_id)
+	else:
+		var count = _id_counters.get(base_id, 0) + 1
+		_id_counters[base_id] = count
+		inst_id = base_id if count == 1 else "%s-%d" % [base_id, count]
 	return CardInstance.new(card_def, inst_id, player_index)
 
 

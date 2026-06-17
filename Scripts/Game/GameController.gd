@@ -46,8 +46,8 @@ func start_game_from_config(config: Dictionary) -> void:
 
 	var p1_path = config.get("p1_deck", P1_DECK)
 	var p2_path = config.get("p2_deck", P2_DECK)
-	var p1 = DeckLoader.build_player_state(p1_path, 0)
-	var p2 = DeckLoader.build_player_state(p2_path, 1)
+	var p1 = DeckLoader.build_player_state(p1_path, 0, gs)
+	var p2 = DeckLoader.build_player_state(p2_path, 1, gs)
 	if p1 == null or p2 == null:
 		_log("[ERROR] Failed to load decks. Check Data/Decks/ paths.")
 		return
@@ -1221,11 +1221,13 @@ func _handle_choose_target(player_index: int, choice: String) -> void:
 		gs.pending_prompt.clear()
 		return
 	var valid: Array = gs.pending_prompt.get("valid_choices", [])
+	var target: CardInstance = null
 	if not valid.is_empty():
 		var allowed := false
 		for v in valid:
 			if v is CardInstance and v.instance_id == choice:
 				allowed = true
+				target = v
 				break
 			if str(v) == choice:
 				allowed = true
@@ -1233,7 +1235,8 @@ func _handle_choose_target(player_index: int, choice: String) -> void:
 		if not allowed:
 			_log("[ERROR] '%s' is not a valid target." % choice)
 			return
-	var target = gs.find_instance_anywhere(choice)
+	if target == null:
+		target = gs.find_instance_anywhere(choice)
 	if target == null:
 		_log("[ERROR] Target '%s' not found." % choice)
 		return

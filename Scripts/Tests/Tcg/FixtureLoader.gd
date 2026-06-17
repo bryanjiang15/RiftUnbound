@@ -56,7 +56,7 @@ static func load_from_dict(controller: GameController, data: Dictionary) -> void
 	var players_data: Array = data.get("players", [])
 	for pi in range(2):
 		var pdata: Dictionary = players_data[pi] if pi < players_data.size() else {}
-		gs.players.append(_build_player(pi, pdata))
+		gs.players.append(_build_player(pi, pdata, gs))
 
 	_place_battlefield_units(gs, players_data)
 
@@ -79,10 +79,11 @@ static func _read_json(path: String) -> Dictionary:
 	return parsed if parsed is Dictionary else {}
 
 
-static func _build_player(player_index: int, pdata: Dictionary) -> PlayerState:
+static func _build_player(player_index: int, pdata: Dictionary, gs: GameState) -> PlayerState:
 	var ps = PlayerState.new()
 	ps.player_index = player_index
 	ps.player_name = "P%d" % (player_index + 1)
+	ps.id_registry = gs
 	ps.score = int(pdata.get("score", 0))
 
 	var legend_id = str(pdata.get("legend", "jinx-loose-cannon"))

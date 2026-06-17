@@ -49,6 +49,15 @@ var second_player_index: int = 1
 # Combat mode: true = auto-assign damage (AI/default), false = manual assign
 var auto_combat_damage: bool = true
 
+# Game-wide instance id suffix counters (definition id -> count created this match).
+var _instance_id_counters: Dictionary = {}
+
+
+func allocate_instance_id(definition_id: String) -> String:
+	var count: int = int(_instance_id_counters.get(definition_id, 0)) + 1
+	_instance_id_counters[definition_id] = count
+	return definition_id if count == 1 else "%s-%d" % [definition_id, count]
+
 
 func get_turn_player() -> PlayerState:
 	return players[turn_player_index]
@@ -63,14 +72,16 @@ func get_player(player_index: int) -> PlayerState:
 
 
 func find_instance_anywhere(inst_id: String) -> CardInstance:
-	# Search hand, base, chain, battlefields
+	# Board units first — instance IDs are scoped per player, so the same id can
+	# exist on both players' boards/bases (e.g. two "chemtech-enforcer" copies).
+	# Targeting and combat commands usually refer to visible battlefield units.
+	var on_board = board.find_unit_on_board(inst_id)
+	if on_board:
+		return on_board
 	for ps in players:
 		var c = ps.find_instance(inst_id)
 		if c:
 			return c
-	var c2 = board.find_unit_on_board(inst_id)
-	if c2:
-		return c2
 	return null
 
 

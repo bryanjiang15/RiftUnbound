@@ -18,7 +18,7 @@ static func load_deck(path: String) -> Dictionary:
 	return data
 
 
-static func build_player_state(deck_path: String, player_index: int) -> PlayerState:
+static func build_player_state(deck_path: String, player_index: int, gs: GameState = null) -> PlayerState:
 	var data = load_deck(deck_path)
 	if data.is_empty():
 		return null
@@ -26,6 +26,7 @@ static func build_player_state(deck_path: String, player_index: int) -> PlayerSt
 	var ps = PlayerState.new()
 	ps.player_index = player_index
 	ps.player_name = data.get("player_label", "P%d" % (player_index + 1))
+	ps.id_registry = gs
 
 	# Legend
 	var legend_id = data.get("legend", "")
