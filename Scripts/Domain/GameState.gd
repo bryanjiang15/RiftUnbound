@@ -63,14 +63,16 @@ func get_player(player_index: int) -> PlayerState:
 
 
 func find_instance_anywhere(inst_id: String) -> CardInstance:
-	# Search hand, base, chain, battlefields
+	# Board units first — instance IDs are scoped per player, so the same id can
+	# exist on both players' boards/bases (e.g. two "chemtech-enforcer" copies).
+	# Targeting and combat commands usually refer to visible battlefield units.
+	var on_board = board.find_unit_on_board(inst_id)
+	if on_board:
+		return on_board
 	for ps in players:
 		var c = ps.find_instance(inst_id)
 		if c:
 			return c
-	var c2 = board.find_unit_on_board(inst_id)
-	if c2:
-		return c2
 	return null
 
 

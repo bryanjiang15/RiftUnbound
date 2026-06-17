@@ -1221,11 +1221,13 @@ func _handle_choose_target(player_index: int, choice: String) -> void:
 		gs.pending_prompt.clear()
 		return
 	var valid: Array = gs.pending_prompt.get("valid_choices", [])
+	var target: CardInstance = null
 	if not valid.is_empty():
 		var allowed := false
 		for v in valid:
 			if v is CardInstance and v.instance_id == choice:
 				allowed = true
+				target = v
 				break
 			if str(v) == choice:
 				allowed = true
@@ -1233,7 +1235,8 @@ func _handle_choose_target(player_index: int, choice: String) -> void:
 		if not allowed:
 			_log("[ERROR] '%s' is not a valid target." % choice)
 			return
-	var target = gs.find_instance_anywhere(choice)
+	if target == null:
+		target = gs.find_instance_anywhere(choice)
 	if target == null:
 		_log("[ERROR] Target '%s' not found." % choice)
 		return
