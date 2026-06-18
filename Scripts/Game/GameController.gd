@@ -988,10 +988,12 @@ func _cmd_react(player_index: int, args: Array) -> void:
 	   gs.current_state != TurnStateMachine.State.SHOWDOWN_CLOSED:
 		_log("[ERROR] Can only react during Closed states or Showdown Open.")
 		return
-	var has_reaction_priority = player_index == gs.priority_player_index
-	var has_showdown_focus = gs.current_state == TurnStateMachine.State.SHOWDOWN_OPEN and \
-		player_index == gs.focus_player_index
-	if not has_reaction_priority and not has_showdown_focus:
+	var can_react := false
+	if gs.current_state == TurnStateMachine.State.SHOWDOWN_OPEN:
+		can_react = player_index == gs.focus_player_index
+	else:
+		can_react = player_index == gs.priority_player_index
+	if not can_react:
 		_log("[ERROR] Not your turn to act.")
 		return
 

@@ -236,6 +236,15 @@ static func _test_reaction_playable_in_showdown_open(assertions) -> void:
 	assertions.assert_eq(h2.gs().priority_player_index, 0,
 		"chain priority returns after opponent pass")
 
+	var h3 = TcgTestHarness.new()
+	h3.load_fixture_dict(fixture)
+	h3.gs().focus_player_index = 1
+	h3.gs().priority_player_index = 0
+	h3.gs().board.active_showdown_bf = 0
+	h3.controller.submit_command(0, "react gust target flame-chompers")
+	assertions.assert_true(h3.controller.last_command_error,
+		"non-focus player cannot react in showdown open")
+
 
 static func _test_end_turn_blocked_with_pending_choice(assertions) -> void:
 	var h = TcgTestHarness.new()
