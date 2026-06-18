@@ -6,6 +6,7 @@ const TcgTestHarness = preload("res://Scripts/Tests/Tcg/TcgTestHarness.gd")
 static func run(assertions) -> void:
 	_test_move_exhausts_unit(assertions)
 	_test_cannot_move_exhausted(assertions)
+	_test_play_unit_to_controlled_battlefield(assertions)
 
 
 static func _test_move_exhausts_unit(assertions) -> void:
@@ -31,3 +32,29 @@ static func _test_cannot_move_exhausted(assertions) -> void:
 	})
 	h.cmd(0, "move vi-destructive to battlefield-a")
 	assertions.assert_true(h.controller.last_command_error, "exhausted unit cannot move")
+
+
+static func _test_play_unit_to_controlled_battlefield(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0,
+		"phase": "MAIN",
+		"state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"battlefield_control": [0, -1],
+		"players": [
+			{
+				"hand": ["flame-chompers"],
+				"pool": {"energy": 3},
+				"deck_size": 5,
+				"rune_deck_size": 12
+			},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd(0, "play flame-chompers to battlefield-a")
+	assertions.assert_no_error(h.controller, "play unit to controlled battlefield succeeds")
+	assertions.assert_eq(h.gs().board.battlefields[0].units[0].size(), 1,
+		"unit is placed at controlled battlefield")
+	assertions.assert_eq(h.gs().board.battlefields[0].units[0][0].instance_id, "flame-chompers",
+		"played unit keeps instance id at battlefield")

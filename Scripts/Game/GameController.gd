@@ -582,10 +582,16 @@ func _cmd_play(player_index: int, args: Array) -> void:
 		_log("[ERROR] Cannot play %s in current state (%s)." % [card.definition.name, gs.get_state_name()])
 		return
 
-	# Units to base unless Ambush allows battlefield deployment
+	# Units may normally deploy to controlled Battlefields. Ambush is the exception
+	# that permits direct Battlefield deployment outside that normal control check.
 	if card.definition.card_type == "unit" and destination.begins_with("battlefield"):
-		if not card.has_keyword("ambush"):
-			_log("[ERROR] Units must be played to base. Direct battlefield deployment requires Ambush.")
+		var bf_idx = gs.board.get_battlefield_index(destination)
+		if bf_idx < 0:
+			_log("[ERROR] Unknown battlefield '%s'" % destination)
+			return
+		var bf = gs.board.battlefields[bf_idx]
+		if bf.controller_index != player_index and not card.has_keyword("ambush"):
+			_log("[ERROR] Units can only be played to controlled Battlefields unless they have Ambush.")
 			return
 
 	var optional_disc_ab = _find_optional_discard_discount_ability(card)
