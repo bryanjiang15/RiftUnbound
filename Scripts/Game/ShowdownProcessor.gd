@@ -13,21 +13,21 @@ static func begin_showdown(bf_index: int, focus_player: int, gs: GameState) -> A
 	return log_lines
 
 
-static func handle_pass(gs: GameState) -> Array:
+static func handle_pass(gs: GameState, controller: GameController = null) -> Array:
 	var log_lines: Array[String] = []
 	var passer = gs.focus_player_index
 	log_lines.append("> [P%d] Passed Focus" % (passer + 1))
 	gs.passes_in_sequence += 1
 
 	if gs.passes_in_sequence >= gs.players.size():
-		return close_showdown(gs)
+		return close_showdown(gs, controller)
 	else:
 		gs.focus_player_index = (gs.focus_player_index + 1) % gs.players.size()
 		log_lines.append("[PROMPT] P%d: play Action/Reaction card or 'pass'" % (gs.focus_player_index + 1))
 	return log_lines
 
 
-static func close_showdown(gs: GameState) -> Array:
+static func close_showdown(gs: GameState, controller: GameController = null) -> Array:
 	var log_lines: Array[String] = []
 	var bf_index = gs.board.active_showdown_bf
 	gs.board.active_showdown_bf = -1
@@ -45,9 +45,9 @@ static func close_showdown(gs: GameState) -> Array:
 	var p1_has = not bf.units[1].is_empty()
 
 	if p0_has and not p1_has:
-		log_lines.append_array(establish_control(gs, bf_index, 0, true))
+		log_lines.append_array(establish_control(gs, bf_index, 0, true, controller))
 	elif p1_has and not p0_has:
-		log_lines.append_array(establish_control(gs, bf_index, 1, true))
+		log_lines.append_array(establish_control(gs, bf_index, 1, true, controller))
 	else:
 		log_lines.append("> Showdown at %s concluded with no change" % bf_name)
 
