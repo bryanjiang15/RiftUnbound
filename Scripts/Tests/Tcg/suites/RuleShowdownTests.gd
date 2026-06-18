@@ -6,6 +6,7 @@ const LegalMoveEnumerator = preload("res://Scripts/AI/LegalMoveEnumerator.gd")
 
 static func run(assertions) -> void:
 	_test_showdown_establishes_control(assertions)
+	_test_conquer_trigger_fires_after_showdown_close(assertions)
 	_test_showdown_waits_for_pending_discard(assertions)
 	_test_p2_can_act_after_showdown_focus_pass(assertions)
 	_test_p2_cannot_act_while_p1_has_focus(assertions)
@@ -29,6 +30,45 @@ static func _test_showdown_establishes_control(assertions) -> void:
 	h.gs().board.active_showdown_bf = 0
 	var lines = ShowdownProcessor.close_showdown(h.gs())
 	assertions.assert_eq(h.gs().board.battlefields[0].controller_index, 0, "showdown establishes control")
+
+
+static func _test_conquer_trigger_fires_after_showdown_close(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0,
+		"phase": "MAIN",
+		"state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{
+				"base": [{"id": "chemtech-enforcer", "exhausted": false}],
+				"runes": [
+					{"id": "fury-rune", "exhausted": true},
+					{"id": "fury-rune", "exhausted": true},
+				],
+				"deck_size": 5,
+				"rune_deck_size": 12,
+			},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd(0, "move chemtech-enforcer to battlefield-b")
+	h.cmd(0, "pass")
+	h.cmd(1, "pass")
+	assertions.assert_log_contains(
+		h.controller,
+		"Scheduled ready_runes at end of turn",
+		"targons peak schedules ready runes after showdown conquer",
+	)
+	h.cmd(0, "end turn")
+	assertions.assert_true(
+		not h.gs().players[0].channeled_runes[0].is_exhausted,
+		"targons peak readies first rune at end of turn",
+	)
+	assertions.assert_true(
+		not h.gs().players[0].channeled_runes[1].is_exhausted,
+		"targons peak readies second rune at end of turn",
+	)
 
 
 static func _test_showdown_waits_for_pending_discard(assertions) -> void:

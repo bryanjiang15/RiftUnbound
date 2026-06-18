@@ -420,7 +420,7 @@ func _cmd_pass(player_index: int) -> void:
 		if gs.combat_bf_index >= 0:
 			lines = CombatProcessor.handle_pass(gs, self)
 		else:
-			lines = ShowdownProcessor.handle_pass(gs)
+			lines = ShowdownProcessor.handle_pass(gs, self)
 		for l in lines:
 			_log(l)
 		_run_cleanup()
