@@ -11,6 +11,7 @@ static func run(assertions) -> void:
 	_test_p2_can_act_after_showdown_focus_pass(assertions)
 	_test_p2_cannot_act_while_p1_has_focus(assertions)
 	_test_showdown_chain_priority_not_focus(assertions)
+	_test_reaction_playable_in_showdown_open(assertions)
 	_test_end_turn_blocked_with_pending_choice(assertions)
 	_test_stale_pending_cleared_for_new_turn_player(assertions)
 
@@ -184,6 +185,45 @@ static func _test_showdown_chain_priority_not_focus(assertions) -> void:
 		"chain priority returns to p1 after p2 passes")
 	assertions.assert_false(h.gs().chain.is_empty(),
 		"chain waits for p1 pass before resolving")
+
+
+static func _test_reaction_playable_in_showdown_open(assertions) -> void:
+	var h = TcgTestHarness.new()
+	var fixture = {
+		"first_player": 0, "phase": "MAIN", "state": "SHOWDOWN_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{
+				"hand": ["gust"],
+				"pool": {"energy": 1},
+				"deck_size": 5,
+				"rune_deck_size": 12
+			},
+			{
+				"battlefield-a": [{"id": "flame-chompers", "owner": 1}],
+				"deck_size": 5,
+				"rune_deck_size": 12
+			}
+		]
+	}
+	h.load_fixture_dict(fixture)
+	h.gs().focus_player_index = 0
+	h.gs().board.active_showdown_bf = 0
+	h.controller.submit_command(0, "play gust target flame-chompers")
+	assertions.assert_no_error(h.controller, "reaction playable in showdown open")
+	assertions.assert_true(h.gs().is_closed_chain_state(),
+		"reaction creates chain from showdown open")
+	assertions.assert_eq(h.gs().priority_player_index, 1,
+		"reaction passes chain priority to opponent")
+
+	var h2 = TcgTestHarness.new()
+	h2.load_fixture_dict(fixture)
+	h2.gs().focus_player_index = 0
+	h2.gs().board.active_showdown_bf = 0
+	assertions.assert_true("react gust" in LegalMoveEnumerator.enumerate(h2.gs(), 0),
+		"reaction is enumerated in showdown open")
+	h2.controller.submit_command(0, "react gust target flame-chompers")
+	assertions.assert_no_error(h2.controller, "react command works in showdown open")
 
 
 static func _test_end_turn_blocked_with_pending_choice(assertions) -> void:
