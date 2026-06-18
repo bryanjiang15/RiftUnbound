@@ -224,6 +224,17 @@ static func _test_reaction_playable_in_showdown_open(assertions) -> void:
 		"reaction is enumerated in showdown open")
 	h2.controller.submit_command(0, "react gust target flame-chompers")
 	assertions.assert_no_error(h2.controller, "react command works in showdown open")
+	assertions.assert_true(h2.gs().is_closed_chain_state(),
+		"react command closes showdown while chain is pending")
+	assertions.assert_true("pass" in LegalMoveEnumerator.enumerate(h2.gs(), 1),
+		"opponent can pass after showdown reaction")
+	h2.controller.submit_command(0, "pass")
+	assertions.assert_true(h2.controller.last_command_error,
+		"focus player cannot pass while opponent has chain priority")
+	h2.controller.submit_command(1, "pass")
+	assertions.assert_no_error(h2.controller, "opponent passes after showdown reaction")
+	assertions.assert_eq(h2.gs().priority_player_index, 0,
+		"chain priority returns after opponent pass")
 
 
 static func _test_end_turn_blocked_with_pending_choice(assertions) -> void:
