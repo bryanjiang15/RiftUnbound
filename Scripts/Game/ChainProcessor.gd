@@ -13,7 +13,9 @@ static func on_card_added_to_chain(gs: GameState) -> Array:
 		gs.current_state = TurnStateMachine.State.SHOWDOWN_CLOSED
 	gs.passes_in_sequence = 0
 	# Priority passes to opponent to allow reactions
-	gs.priority_player_index = 1 - gs.priority_player_index
+	var item = gs.peek_chain()
+	var owner_index = item.owner_index if item != null else gs.priority_player_index
+	gs.priority_player_index = 1 - owner_index
 	if gs.current_state == TurnStateMachine.State.NEUTRAL_CLOSED or \
 	   gs.current_state == TurnStateMachine.State.SHOWDOWN_CLOSED:
 		log_lines.append("[PROMPT] P%d: play Reaction or 'pass' to let it resolve" % (gs.priority_player_index + 1))

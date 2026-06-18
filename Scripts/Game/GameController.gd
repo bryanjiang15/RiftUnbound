@@ -984,10 +984,14 @@ func _cmd_react(player_index: int, args: Array) -> void:
 		_log("[ERROR] Usage: react <card-id> [target <id>]")
 		return
 	if gs.current_state != TurnStateMachine.State.NEUTRAL_CLOSED and \
+	   gs.current_state != TurnStateMachine.State.SHOWDOWN_OPEN and \
 	   gs.current_state != TurnStateMachine.State.SHOWDOWN_CLOSED:
-		_log("[ERROR] Can only react during Closed states.")
+		_log("[ERROR] Can only react during Closed states or Showdown Open.")
 		return
-	if player_index != gs.priority_player_index:
+	var has_reaction_priority = player_index == gs.priority_player_index
+	var has_showdown_focus = gs.current_state == TurnStateMachine.State.SHOWDOWN_OPEN and \
+		player_index == gs.focus_player_index
+	if not has_reaction_priority and not has_showdown_focus:
 		_log("[ERROR] Not your turn to act.")
 		return
 
@@ -1024,9 +1028,8 @@ func _cmd_react(player_index: int, args: Array) -> void:
 		item.targets.append(target)
 	gs.push_to_chain(item)
 	_log("> [P%d] Reacted with %s" % [player_index + 1, card.definition.name])
-	gs.passes_in_sequence = 0
-	gs.priority_player_index = 1 - player_index
-	_log("[PROMPT] P%d: play Reaction or 'pass'" % (gs.priority_player_index + 1))
+	for l in ChainProcessor.on_card_added_to_chain(gs):
+		_log(l)
 	_run_cleanup()
 
 

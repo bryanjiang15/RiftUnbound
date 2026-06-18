@@ -43,7 +43,8 @@ static func can_play_card(card: CardInstance, state: int, player_index: int, gam
 			return state == State.NEUTRAL_OPEN and player_index == game_state.turn_player_index
 		"spell":
 			if card.definition.is_reaction:
-				return state == State.NEUTRAL_CLOSED or state == State.SHOWDOWN_CLOSED
+				return state == State.NEUTRAL_CLOSED or state == State.SHOWDOWN_OPEN or \
+					state == State.SHOWDOWN_CLOSED
 			if card.definition.is_action:
 				return state == State.NEUTRAL_OPEN or state == State.SHOWDOWN_OPEN
 			return state == State.NEUTRAL_OPEN and player_index == game_state.turn_player_index
@@ -56,7 +57,8 @@ static func can_activate_ability(ability: Dictionary, state: int, player_index: 
 	var is_reaction = ability.get("is_reaction", false)
 	var is_action = ability.get("is_action", false)
 	if is_reaction:
-		return state == State.NEUTRAL_CLOSED or state == State.SHOWDOWN_CLOSED
+		return state == State.NEUTRAL_CLOSED or state == State.SHOWDOWN_OPEN or \
+			state == State.SHOWDOWN_CLOSED
 	if is_action:
 		return state == State.NEUTRAL_OPEN or state == State.SHOWDOWN_OPEN
 	# Standard activated abilities: only during NEUTRAL_OPEN on turn player's turn
