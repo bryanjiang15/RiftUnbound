@@ -889,6 +889,27 @@ func _make_card_thumb(inst: CardInstance) -> Control:
 		badge_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		card.add_child(badge_lbl)
 
+	# Might modifier badge (top-right): buffs, temp bonuses, gear, assault/shield
+	var might_mod: int = inst.get_might_modifier()
+	if might_mod != 0:
+		var mod_text := "+%d" % might_mod if might_mod > 0 else str(might_mod)
+		var mod_color := Color(0.35, 0.92, 0.45) if might_mod > 0 else Color(0.95, 0.40, 0.40)
+		var mod_bg := ColorRect.new()
+		mod_bg.color = Color(0.0, 0.0, 0.0, 0.72)
+		mod_bg.anchor_left = 0.58; mod_bg.anchor_right  = 1.0
+		mod_bg.anchor_top  = 0.0;  mod_bg.anchor_bottom = 0.16
+		mod_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_child(mod_bg)
+		var mod_lbl := Label.new()
+		mod_lbl.text = mod_text
+		mod_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		mod_lbl.anchor_left  = 0.58; mod_lbl.anchor_right  = 1.0
+		mod_lbl.anchor_top   = 0.01; mod_lbl.anchor_bottom = 0.15
+		mod_lbl.add_theme_font_size_override("font_size", 10)
+		mod_lbl.add_theme_color_override("font_color", mod_color)
+		mod_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		card.add_child(mod_lbl)
+
 	# Exhausted: dim overlay + rotate 90° (TCG "tapped" look)
 	if inst.is_exhausted:
 		var dim := ColorRect.new()

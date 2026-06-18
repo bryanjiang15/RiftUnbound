@@ -230,13 +230,30 @@ static func _test_vi_recycle_cost(assertions) -> void:
 		"battlefields": ["zaun-warrens", "targons-peak"],
 		"players": [
 			{"pool": {"energy": 0, "power": {}}, "battlefield-a": [{"id": "vi-destructive", "owner": 0}],
+			 "trash": [{"id": "fury-rune"}], "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	var deck_before = h.gs().players[0].deck.size()
+	h.cmd(0, "use vi-destructive")
+	assertions.assert_log_contains(h.controller, "Might", "vi recycle cost gives might")
+	var vi = h.find_unit("vi-destructive")
+	assertions.assert_eq(vi.get_might_modifier(), 1, "vi gains +1 might modifier")
+	assertions.assert_eq(h.gs().players[0].trash.size(), 0, "trash card was recycled")
+	assertions.assert_eq(h.gs().players[0].deck.size(), deck_before + 1, "recycled card returned to deck")
+
+	var h2 = TcgTestHarness.new()
+	h2.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 0, "power": {}}, "battlefield-a": [{"id": "vi-destructive", "owner": 0}],
 			 "deck_size": 5, "rune_deck_size": 12},
 			{"deck_size": 5, "rune_deck_size": 12}
 		]
 	})
-	var deck_before = h.gs().players[0].deck.duplicate()
-	h.cmd(0, "use vi-destructive")
-	assertions.assert_log_contains(h.controller, "Might", "vi recycle cost consumes deck card")
+	h2.cmd(0, "use vi-destructive")
+	assertions.assert_log_contains(h2.controller, "Cannot afford", "vi cannot activate with empty trash")
 
 
 static func _test_raging_soul_keywords(assertions) -> void:

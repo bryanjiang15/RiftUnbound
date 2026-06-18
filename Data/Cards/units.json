@@ -291,7 +291,7 @@
         "condition": null,
         "is_optional": true,
         "cost": {
-          "recycle": 1
+          "recycle": { "from": "trash", "amount": 1 }
         },
         "effect_type": "give_might",
         "effect_params": {

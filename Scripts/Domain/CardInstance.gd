@@ -55,6 +55,12 @@ func get_current_might() -> int:
 	return base
 
 
+func get_might_modifier() -> int:
+	if definition.card_type != "unit" or definition.might <= 0:
+		return 0
+	return get_current_might() - definition.might
+
+
 func has_keyword(keyword_id: String) -> bool:
 	for kw in definition.keywords:
 		if kw.get("id", "") == keyword_id:

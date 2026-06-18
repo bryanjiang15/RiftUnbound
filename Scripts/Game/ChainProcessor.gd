@@ -12,8 +12,15 @@ static func on_card_added_to_chain(gs: GameState) -> Array:
 	elif gs.current_state == TurnStateMachine.State.SHOWDOWN_OPEN:
 		gs.current_state = TurnStateMachine.State.SHOWDOWN_CLOSED
 	gs.passes_in_sequence = 0
-	# Priority passes to opponent to allow reactions
-	gs.priority_player_index = 1 - gs.priority_player_index
+	# Priority passes to the opponent of whoever just added to the chain.
+	# During a Showdown the actor is the Focus holder, which can differ from the
+	# stale priority_player_index, so derive it from the top chain item instead
+	# of flipping the previous priority value.
+	var top := gs.peek_chain()
+	if top != null:
+		gs.priority_player_index = 1 - top.owner_index
+	else:
+		gs.priority_player_index = 1 - gs.priority_player_index
 	if gs.current_state == TurnStateMachine.State.NEUTRAL_CLOSED or \
 	   gs.current_state == TurnStateMachine.State.SHOWDOWN_CLOSED:
 		log_lines.append("[PROMPT] P%d: play Reaction or 'pass' to let it resolve" % (gs.priority_player_index + 1))
@@ -25,6 +32,11 @@ static func resolve_chain_item(item: ChainItem, gs: GameState, ability_resolver:
 	log_lines.append("> Resolving: %s" % item.describe())
 	var resolve_lines = _execute_chain_item(item, gs, ability_resolver, controller)
 	log_lines.append_array(resolve_lines)
+	# An effect may raise its own prompt mid-resolution (e.g. a discard cost or a
+	# follow-up choice). Stop here and let that prompt's continuation finish the
+	# chain — returning to Open now would clobber the resolving state and hang.
+	if not gs.pending_prompt.is_empty():
+		return log_lines
 	if gs.chain.is_empty():
 		log_lines.append_array(_return_to_open(gs))
 	else:

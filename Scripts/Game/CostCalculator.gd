@@ -79,12 +79,14 @@ static func compute_ability_cost(
 			else:
 				energy += deflect_val
 
+	var recycle_parts = _recycle_cost_parts(cost)
 	return {
 		"energy": energy,
 		"power": power,
 		"exhaust": cost.get("exhaust", false),
 		"recycle_self": cost.get("recycle_self", false),
-		"recycle": cost.get("recycle", 0),
+		"recycle": recycle_parts.deck,
+		"recycle_from_trash": recycle_parts.trash,
 		"discard": cost.get("discard", 0),
 	}
 
@@ -94,6 +96,8 @@ static func can_afford(player_index: int, cost: Dictionary, gs: GameState) -> bo
 	if cost.get("discard", 0) > ps.hand.size():
 		return false
 	if cost.get("recycle", 0) > ps.deck.size():
+		return false
+	if cost.get("recycle_from_trash", 0) > ps.trash.size():
 		return false
 	return ps.rune_pool.can_pay(cost.get("energy", 0), cost.get("power", []))
 
@@ -107,6 +111,8 @@ static func can_afford_with_autopay(player_index: int, cost: Dictionary, gs: Gam
 	if cost.get("discard", 0) > ps.hand.size():
 		return false
 	if cost.get("recycle", 0) > ps.deck.size():
+		return false
+	if cost.get("recycle_from_trash", 0) > ps.trash.size():
 		return false
 
 	# Simulate auto-pay without mutating game state.
@@ -204,6 +210,12 @@ static func pay_cost(player_index: int, cost: Dictionary, source: CardInstance, 
 			break
 		var card = ps.deck.pop_back()
 		ps.recycle_to_bottom(card, false)
+	var recycle_trash_n = int(cost.get("recycle_from_trash", 0))
+	for _i in range(recycle_trash_n):
+		if ps.trash.is_empty():
+			break
+		var trash_card = ps.trash.pop_back()
+		ps.recycle_to_bottom(trash_card, false)
 	# Discard leg is handled via GameController.begin_discard (player choice + on_discard triggers).
 
 
@@ -239,4 +251,18 @@ static func cost_to_string(cost: Dictionary) -> String:
 		parts.append("DISCARD:%d" % cost.get("discard", 0))
 	if cost.get("recycle", 0) > 0:
 		parts.append("RECYCLE:%d" % cost.get("recycle", 0))
+	if cost.get("recycle_from_trash", 0) > 0:
+		parts.append("RECYCLE:%d from trash" % cost.get("recycle_from_trash", 0))
 	return " + ".join(parts) if not parts.is_empty() else "free"
+
+
+static func _recycle_cost_parts(cost: Dictionary) -> Dictionary:
+	var recycle_raw = cost.get("recycle", 0)
+	var from_deck := 0
+	var from_trash := 0
+	if recycle_raw is Dictionary:
+		if str(recycle_raw.get("from", "")) == "trash":
+			from_trash = int(recycle_raw.get("amount", 0))
+	else:
+		from_deck = int(recycle_raw)
+	return {"deck": from_deck, "trash": from_trash}
