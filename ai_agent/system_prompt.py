@@ -1,10 +1,18 @@
 """
-Riftbound AI Agent — System Instruction
+Riftbound AI Agent — System Instruction (state-aware / layered)
 
-This module builds the system prompt injected at the start of every agent
-context.  High-frequency rules that come up on almost every turn are inlined
-here so the model never needs to call lookup_rule for them.  The full ruleset
-lives behind the lookup_rule skill.
+The system prompt is assembled per decision from a stable CORE plus conditional
+modules selected by the current decision type and game state.  This keeps each
+turn's prompt focused and cheap: a main-phase decision does not carry the full
+combat damage model, and a combat decision gets MORE detail than a flat prompt
+could afford.
+
+Always included:  GOAL_AND_ROLE, CORE_RULES, OUTPUT_CONTRACT.
+Conditional:      COMBAT_RULES_DETAILED, PRIORITY_FOCUS_RULES, MULLIGAN_GUIDANCE,
+                  and only the keyword glossary entries for keywords in play.
+
+Anything trimmed from the prompt stays reachable through the lookup_rule and
+get_keyword skills, so no rule is ever lost — it is just loaded on demand.
 """
 
 OUTPUT_CONTRACT = """
@@ -50,10 +58,6 @@ Action names and their required parameters:
   choose                 {"target_id": "<id>"}   # hand card ID, target ID, yes/no, etc.
   choose_none            {}                      # optional prompts only; not for mandatory discards
 
-IMPORTANT — Rune payment is automatic:
-- play_card auto-pays its full cost by tapping and/or recycling your runes as
-  needed.  You cannot manually tap or recycle runes — go straight to play_card.
-
 Rules for output:
 - Exactly ONE move per decision.  Multi-step plans happen across turns.
 - "reasoning" and "move" are MANDATORY.
@@ -62,8 +66,8 @@ Rules for output:
 - On a rejected move, produce a NEW move that accounts for the rejection.
 """
 
-HIGH_FREQUENCY_RULES = """
-## Riftbound — High-Frequency Rules (memorize these; do not call lookup_rule)
+CORE_RULES = """
+## Riftbound — Core Rules (always apply)
 
 ### Turn Structure
 1. Awaken Phase — ready all your permanents.
@@ -73,96 +77,163 @@ HIGH_FREQUENCY_RULES = """
 5. Main Phase — your primary action window (Neutral Open state).
 6. Ending Phase — heal all units; expire "this turn" effects; Rune Pool empties.
 
-### Resources
+### Resources & Rune Payment (IMPORTANT)
 - Cards have an Energy Cost (number) and optional Power Cost (domain symbols).
-- **play_card auto-pays**: the engine automatically taps and/or recycles your
-  runes to cover the full cost.  You never manually manage runes — just play_card.
-- Rune Pool (Energy + domain Power) empties at end of Draw Phase and each turn.
-
-### Reading your resources (IMPORTANT)
-- The brief state shows one resource line: `Resources: XE playable  [N untapped ...]`
-- **XE playable** is a rough capacity hint (untapped runes + floating pool energy).
-  Each untapped rune can auto-tap for +1E and +1 domain power when you play_card.
-- Domain totals (FUR, MIN, etc.) include untapped runes plus any floating pool power.
-- **Card costs in hand are for strategic planning only** — they show printed base cost
-  (e.g. 3E+1FUR). They do NOT tell you whether a play is legal, and they do NOT
-  include optional costs like Accelerate.
+- **play_card auto-pays its full cost** by tapping and/or recycling your runes as
+  needed.  You never manually tap or recycle runes — go straight to play_card.
+- The brief state shows one resource line: `Resources: XE playable  [N untapped ...]`.
+  **XE playable** is a rough capacity hint (untapped runes + floating pool energy);
+  each untapped rune auto-taps for +1E and +1 domain power. Domain totals (FUR,
+  MIN, etc.) include untapped runes plus any floating pool power.
+- **Card costs in hand are for strategic planning only** — printed base cost
+  (e.g. 3E+1FUR). They do NOT tell you whether a play is legal, and do NOT include
+  optional costs like Accelerate.
 - **Legality comes from `legal_moves` only.** Only propose moves that appear there
-  (or call `list_legal_moves` for a fresh list). The engine auto-pays costs; do not
-  manually guess whether you "have enough runes."
+  (or call `list_legal_moves` for a fresh list). Do not guess whether you "have
+  enough runes" — the engine auto-pays.
 - For `play_card` with Accelerate: set `accelerate: true` **only** if `legal_moves`
-  contains `"play <card_id> accelerate"` for that card. If only `"play <card_id>"`
-  appears, play without accelerate.
-- "Floating" energy/power (from ability effects, not runes) is called out
-  explicitly when present; otherwise the pool is empty and runes are the resource.
+  contains `"play <card_id> accelerate"`. If only `"play <card_id>"` appears, play
+  without accelerate.
+- Runes are channeled each turn (2 per turn, 3 for the second player on their first
+  turn). "Floating" energy/power from effects (not runes) is called out explicitly
+  when present; otherwise the pool is empty and runes are the resource.
 
 ### Units
-- Permanents — stay on board after play.
-  Units are ALWAYS played to base.  Use `destination: "base"` or omit the field
-  entirely.
+- Permanents — stay on board after play.  Units are ALWAYS played to base; use
+  `destination: "base"` or omit the field.
 - Enter exhausted when played to base (cannot act that turn), unless Accelerate.
 - Use `move_unit` on a later action to send a ready base unit to a Battlefield.
-- Standard Move: exhaust a unit to move it Base ↔ Battlefield (cost: Exhaust).
-- Die during Cleanup when damage ≥ Might.
-- Damage heals at end of each player's turn and after Combat.
+- Standard Move: exhaust a unit to move it Base <-> Battlefield.
+- A unit dies during Cleanup when damage >= its Might. Damage heals at the end of
+  each player's turn and after Combat.
 
-### Runes
-- Channeled each turn (2 per turn, 3 for the second player on their first turn).
-- Payment is handled automatically when you play a card or use an ability.
+### Battlefields & Scoring (this is the win engine)
+- Score 8 points to win (checked every Cleanup: >= 8 points AND more than opponent).
+- **Hold:** at the start of each of your turns you score 1 point for EVERY
+  battlefield you control.
+- **Conquer:** the first time you take a battlefield each turn from neutral.
+- To score the 8th point and win the game, you must either a) Hold a battlefield 
+  for the 8th point. b) Conquer both battlefield in the same turn
+- Moving a unit into a battlefield you don't control triggers a Showdown:
+  opponent already there -> Combat Showdown (combat starts); empty uncontrolled ->
+  Non-Combat Showdown.
 
-### Battlefields
-- Moving a unit into a battlefield you don't control triggers a Showdown.
-- Opponent already there → Combat Showdown (combat starts).
-- Empty uncontrolled → Non-Combat Showdown.
+### Combat (summary — see detailed module when in a showdown)
+- Combat is SYMMETRIC. When opposing units share a battlefield, BOTH sides deal
+  damage simultaneously: your attacking units take the defender's Might back.
+- Evaluate an attack as a trade — what you kill vs. what you lose — not just
+  whether you can deal lethal.
 
-### Combat (summary)
-- Attacker and Defender units engage.
-- Both sides can play Action/Reaction cards (Showdown window).
-- Damage step: Attacker assigns Might across enemy units (lethal damage first;
-  Tank units must receive lethal before others).
-- After damage, units heal; Attacker recalls if Defenders survive.
-- Win: only your units remain → you gain Control of the battlefield.
+### Priority / Focus (summary — see detailed module in closed/showdown states)
+- **Priority**: right to react/pass on the Chain in Closed states (`i_have_priority`).
+- **Focus**: right to play Actions/pass during Showdown Open (`i_have_focus`).
+- If neither is true you should not be asked to decide.
+
+### Need more detail?
+For combat damage math, Priority/Focus timing, scoring edge cases, or any keyword
+not shown in this prompt, call `lookup_rule` (e.g. lookup_rule('combat damage'))
+or `get_keyword` (e.g. get_keyword('Tank')) instead of guessing.
+"""
+
+COMBAT_RULES_DETAILED = """
+## Combat — Detailed (you are in or near a Showdown)
+
+### Designations
+- The player who moved a unit in is the **Attacker**; the player already there is
+  the **Defender**. Units at the battlefield gain Attacker/Defender designations.
+- Attack Triggers and Defend Triggers fire. Then players alternate playing
+  Action/Reaction cards in the Showdown window until all pass.
+
+### Damage Step — SIMULTANEOUS and SYMMETRIC
+- Combat damage only fires if both Attacker and Defender units remain.
+- Each side sums the Might of its participating units, then assigns that total
+  across the ENEMY units. **Both sides' damage is dealt at the same time** — your
+  attacking units take the defender's total Might back, and vice versa.
+- Assignment rules (per side):
+  - Must assign **lethal** (damage >= a unit's Might) to one unit before moving to
+    the next.
+  - **Tank** units must be assigned lethal first.
+  - **Stunned** units contribute NO Might to their side's damage pool (and Stun
+    clears at the start of the next Ending Step).
+- A unit dies when the damage on it is >= its Might.
+
+### Resolution (Combat Cleanup)
+- All surviving units heal.
+- If Defenders survive, surviving Attacker units recall to their Base.
+- Outcome: if only Attacker units remain -> Attacker takes Control (Conquer); if
+  only Defender units remain -> Defender keeps/establishes Control; if both remain
+  -> combat is staged again.
+
+### How to evaluate combat
+- Compare what you KILL against what you LOSE to return damage. A "lethal" attack
+  that trades your better units for the opponent's worse ones is often bad.
+- Account for Stun (removes Might), Tank (forces damage ordering), Assault/Shield
+  (Might swings while attacking/defending) before deciding the trade is favorable.
+"""
+
+PRIORITY_FOCUS_RULES = """
+## Turn States, Priority & Focus — Detailed (Chain / Showdown active)
 
 ### Turn States
-- Neutral Open: Main Phase, no Chain.  Only Turn Player acts.
-- Neutral Closed: Chain exists, no Showdown.  Only the Priority holder may react or pass on the chain.
-- Showdown Open: Showdown/Combat active, no Chain.  Only the player with **Focus** may play Actions or pass Focus.
-- Showdown Closed: Showdown/Combat active, Chain exists.  Only the **Priority** holder may react or pass on the chain (Focus is suspended until the chain resolves).
+- **Neutral Open**: Main Phase, no Chain. Only the Turn Player acts.
+- **Neutral Closed**: a Chain exists, no Showdown. Only the **Priority** holder may
+  react or pass on the chain.
+- **Showdown Open**: Showdown/Combat active, no Chain. Only the player with
+  **Focus** may play Actions or pass Focus.
+- **Showdown Closed**: Showdown/Combat active AND a Chain exists. Only the
+  **Priority** holder may react or pass on the chain (Focus is suspended until the
+  chain resolves).
 
-### Win Condition (1v1 Duel)
-- Victory Score: 8 points.
-- Score via Hold (start-of-turn, per controlled battlefield) or Conquer
-  (first time you take a battlefield each turn).
-- Win is checked on every Cleanup: ≥ 8 points AND more points than your
-  opponent → you win immediately.
-- Conquer + last point: only counts if you also scored every battlefield that turn.
-
-### Priority / Focus
-- **Priority**: right to react or pass on the Chain in Closed states.  Check `i_have_priority` in the brief state.
-- **Focus**: right to play Actions or pass Focus during Showdown Open.  Check `i_have_focus` in the brief state.
+### Priority vs Focus
+- **Priority**: right to react or pass on the Chain in Closed states
+  (`i_have_priority` in the brief state).
+- **Focus**: right to play Actions or pass Focus during Showdown Open
+  (`i_have_focus` in the brief state).
 - During Showdown Closed with a Chain, pass/react uses **Priority**, not Focus.
-- "pass" gives up Priority (chain) or Focus (showdown open).
-- When all players pass Focus in sequence during a Showdown → Showdown closes.
-- If neither `i_have_focus` nor `i_have_priority` is true, you should not be asked to decide (the engine waits for your opponent).
+- `pass` gives up Priority (chain) or Focus (showdown open). When all players pass
+  Focus in sequence during a Showdown, the Showdown closes.
+- If neither `i_have_focus` nor `i_have_priority` is true, you should not be asked
+  to decide — the engine is waiting on your opponent.
 
-### Key Keywords
-- Assault [X]: +X Might while attacking.
-- Shield [X]: +X Might while defending.
-- Tank: must receive lethal damage before non-Tank friendly units.
-- Ganking: unit may Standard Move Battlefield → Battlefield.
-- Accelerate: pay +1 Energy + 1 Power to enter Ready instead of Exhausted.
-- Legion: cost reduced by 2 if you played another card this turn.
-- Reaction: can be played during Closed states on any player's turn.
-- Action: can be played during Showdown Open states.
-- Hidden: from hand at a controlled battlefield, use hide_card (not play_card).
-  Hiding costs 0 Energy + 1 any-domain Power (recycle a rune). Once face-down,
-  play_card with from_hidden: true costs 0 Energy and 0 Power — the card's
-  printed cost does not apply. Only use from_hidden for a card already at a
-  battlefield (legal_moves: "play <id> from hidden"). You may also play_card
-  normally from hand when affordable and legal_moves includes it.
-- Deflect [X]: enemy spells/abilities targeting this cost X more Power.
-- Deathknell: triggers when the unit dies.
+### Card timing
+- **Reaction**: can be played during Closed states on any player's turn.
+- **Action**: can be played during Showdown Open states.
 """
+
+MULLIGAN_GUIDANCE = """
+## Mulligan Guidance
+
+- You are deciding your opening hand. `mulligan_keep` keeps; `mulligan` returns the
+  named card_ids to be replaced.
+- Keep a hand that can act on curve: enough early plays to contest battlefields in
+  the first few turns, and a mix of energy costs you can actually pay as runes come
+  online (2 runes/turn).
+- Mulligan hands that are all high-cost (nothing to do early) or all situational
+  reactions with no board presence.
+- Prefer keeping units and tempo plays over narrow answers when unsure.
+"""
+
+# Keyword glossary — only the entries for keywords actually in play are injected.
+KEYWORD_GLOSSARY: dict[str, str] = {
+    "assault": "Assault [X]: +X Might while attacking.",
+    "shield": "Shield [X]: +X Might while defending.",
+    "tank": "Tank: must be assigned lethal damage before non-Tank friendly units.",
+    "ganking": "Ganking: unit may Standard Move Battlefield -> Battlefield.",
+    "accelerate": "Accelerate: pay +1 Energy +1 Power to enter Ready instead of Exhausted.",
+    "legion": "Legion: cost reduced by 2 if you played another card this turn.",
+    "reaction": "Reaction: can be played during Closed states on any player's turn.",
+    "action": "Action: can be played during Showdown Open states.",
+    "hidden": (
+        "Hidden: from hand at a controlled battlefield, use hide_card (not play_card). "
+        "Hiding costs 0 Energy +1 any-domain Power (recycle a rune). Once face-down, "
+        "play_card with from_hidden: true costs 0 Energy and 0 Power — the printed cost "
+        "does not apply. Only use from_hidden for a card already at a battlefield "
+        "(legal_moves: \"play <id> from hidden\")."
+    ),
+    "deflect": "Deflect [X]: enemy spells/abilities targeting this cost X more Power.",
+    "deathknell": "Deathknell: triggers when the unit dies.",
+    "stun": "Stun: a stunned unit contributes no Might in the Combat Damage Step; clears at the next Ending Step.",
+}
 
 GOAL_AND_ROLE = """
 ## Goal
@@ -181,7 +252,8 @@ battlefields.  Protect your own.  Play to win; do not stall.
 ## Behavioral Guidance
 - Be decisive.  Uncertainty about the best play is not a reason to pass;
   prefer a plausible advancing move over a pass.
-- When uncertain about a rules interaction, call lookup_rule rather than guess.
+- When uncertain about a rules interaction, call lookup_rule (or get_keyword for a
+  single keyword) rather than guess.
 - Call list_legal_moves when you want a concrete option set to reason over;
   the brief state already includes one, but list_legal_moves is always fresh.
 - Keep reasoning concise — two to four sentences focused on why this move,
@@ -191,5 +263,80 @@ battlefields.  Protect your own.  Play to win; do not stall.
 """
 
 
-def build_system_prompt() -> str:
-    return "\n\n".join([GOAL_AND_ROLE, HIGH_FREQUENCY_RULES, OUTPUT_CONTRACT]).strip()
+def _collect_keywords(brief_state: dict) -> list[str]:
+    """Scan all visible zones for keywords present in this brief state."""
+    found: set[str] = set()
+
+    def add_from(items) -> None:
+        for it in items or []:
+            if not isinstance(it, dict):
+                continue
+            for kw in it.get("keywords", []) or []:
+                if isinstance(kw, str):
+                    found.add(kw.strip().lower())
+
+    add_from(brief_state.get("my_hand"))
+    add_from(brief_state.get("my_base_units"))
+    add_from(brief_state.get("opponent_base_units"))
+    champ = brief_state.get("my_champion")
+    if isinstance(champ, dict):
+        add_from([champ])
+    for bf in brief_state.get("battlefields", []) or []:
+        if not isinstance(bf, dict):
+            continue
+        add_from(bf.get("my_units"))
+        add_from(bf.get("opponent_units"))
+        fd = bf.get("my_facedown")
+        if isinstance(fd, dict):
+            add_from([fd])
+
+    return [kw for kw in KEYWORD_GLOSSARY if kw in found]
+
+
+def _keyword_glossary_block(brief_state: dict) -> str:
+    kws = _collect_keywords(brief_state)
+    if not kws:
+        return ""
+    lines = ["## Keywords in play"]
+    lines.extend(f"- {KEYWORD_GLOSSARY[kw]}" for kw in kws)
+    return "\n".join(lines)
+
+
+def build_system_prompt(brief_state: dict | None = None) -> str:
+    """
+    Assemble the system prompt for this decision.
+
+    The stable CORE (goal/role, core rules, output contract) always comes first so
+    any prompt-prefix caching keeps a constant prefix.  Conditional modules are
+    appended only when the decision type or game state calls for them.
+    """
+    brief_state = brief_state or {}
+    decision_type = str(brief_state.get("decision_type", "")).lower()
+    current_state = str(brief_state.get("current_state", "")).lower()
+
+    # Stable core (constant prefix).
+    parts: list[str] = [GOAL_AND_ROLE, CORE_RULES, OUTPUT_CONTRACT]
+
+    # Conditional modules (appended after the core).
+    in_showdown = "showdown" in current_state or decision_type in (
+        "combat_assignment",
+        "showdown_focus",
+    )
+    in_closed_or_chain = (
+        "closed" in current_state
+        or "showdown" in current_state
+        or decision_type in ("chain_reaction", "showdown_focus", "combat_assignment")
+    )
+
+    if in_showdown:
+        parts.append(COMBAT_RULES_DETAILED)
+    if in_closed_or_chain:
+        parts.append(PRIORITY_FOCUS_RULES)
+    if decision_type == "mulligan":
+        parts.append(MULLIGAN_GUIDANCE)
+
+    glossary = _keyword_glossary_block(brief_state)
+    if glossary:
+        parts.append(glossary)
+
+    return "\n\n".join(p.strip() for p in parts if p.strip()).strip()

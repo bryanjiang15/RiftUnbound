@@ -136,8 +136,41 @@ def lookup_rule(query: str) -> str:
         return f"No rules passage found matching '{query}'."
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    top = "\n\n---\n\n".join(s for _, s in scored[:2])
+    top = "\n\n---\n\n".join(_trim_section(s) for _, s in scored[:2])
     return f"Rules excerpt (query: '{query}'):\n\n{top}"
+
+
+# Maximum characters returned per matched rules section.  Keeps a lookup from
+# negating the token savings of the layered system prompt.
+_RULE_SECTION_CHAR_CAP = 1200
+
+
+def _trim_section(section: str) -> str:
+    """Trim a matched rules section to a bounded length on a line boundary."""
+    section = section.strip()
+    if len(section) <= _RULE_SECTION_CHAR_CAP:
+        return section
+    clipped = section[:_RULE_SECTION_CHAR_CAP]
+    # Cut back to the last full line so we never end mid-sentence.
+    nl = clipped.rfind("\n")
+    if nl > 0:
+        clipped = clipped[:nl]
+    return clipped.rstrip() + "\n… (truncated — call lookup_rule with a narrower query for more)"
+
+
+def get_keyword(name: str) -> str:
+    """Return the precise glossary entry for a single keyword, if known."""
+    from .system_prompt import KEYWORD_GLOSSARY
+
+    key = (name or "").strip().lower()
+    if key in KEYWORD_GLOSSARY:
+        return KEYWORD_GLOSSARY[key]
+    # Fall back to a fuzzy match on the rules text for unknown keywords.
+    available = ", ".join(sorted(KEYWORD_GLOSSARY))
+    return (
+        f"No glossary entry for '{name}'. Known keywords: {available}. "
+        f"Try lookup_rule('{name}') for a rules passage."
+    )
 
 
 # ── Helper Skills ─────────────────────────────────────────────────────────────

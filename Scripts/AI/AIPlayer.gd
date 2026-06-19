@@ -13,7 +13,9 @@ var player_index: int = 1
 
 const AGENT_URL := "http://localhost:8765/decision"
 const THINK_DELAY := 0.5       # seconds before each decision
-const HTTP_TIMEOUT := 8.0      # seconds before falling back to heuristic
+const HTTP_TIMEOUT := 60.0     # seconds before falling back to heuristic
+                               # (the agent may make several sequential LLM
+                               # calls per decision; 8s was far too short)
 const MAX_RETRIES := 3         # max rejection retry attempts
 
 var _http: HTTPRequest = null
@@ -42,16 +44,21 @@ func setup(gc: GameController, pi: int) -> void:
 
 func take_turn() -> void:
 	if controller == null or controller.gs == null:
+		print("[AIPlayer] take_turn: no controller/gs — skip")
 		return
 	var gs = controller.gs
 	if gs.game_over:
+		print("[AIPlayer] take_turn: game_over — skip")
 		return
 	if _waiting_for_http:
+		print("[AIPlayer] take_turn: still waiting for previous HTTP — skip")
 		return
 
 	if not _can_act_now(gs):
+		print("[AIPlayer] take_turn: cannot act now (player %d) — skip" % player_index)
 		return
 	if _legal_moves_for(gs).is_empty():
+		print("[AIPlayer] take_turn: no legal moves — skip")
 		return
 
 	# Delay slightly so the game log is readable
@@ -60,10 +67,13 @@ func take_turn() -> void:
 		return
 
 	if not _can_act_now(gs):
+		print("[AIPlayer] take_turn: cannot act after delay — skip")
 		return
 	if _legal_moves_for(gs).is_empty():
+		print("[AIPlayer] take_turn: no legal moves after delay — skip")
 		return
 
+	print("[AIPlayer] take_turn: requesting decision (player %d)" % player_index)
 	_retry_count = 0
 	_last_rejected_move = {}
 	_last_rejection_reason = ""
@@ -79,13 +89,16 @@ func _request_decision(gs: GameState) -> void:
 	var payload := JSON.stringify(_build_request_payload())
 	var headers := PackedStringArray(["Content-Type: application/json"])
 
+	print("[AIPlayer] POST %s (payload %d bytes)" % [AGENT_URL, payload.length()])
 	var err = _http.request(AGENT_URL, headers, HTTPClient.METHOD_POST, payload)
 	if err != OK:
 		push_warning("AIPlayer: HTTPRequest failed to start (err=%d). Using heuristic." % err)
+		print("[AIPlayer] _http.request returned ERROR %d — using heuristic" % err)
 		_heuristic_fallback(gs)
 		return
 
 	_waiting_for_http = true
+	print("[AIPlayer] request started, waiting for response…")
 
 
 func _build_request_payload() -> Dictionary:
