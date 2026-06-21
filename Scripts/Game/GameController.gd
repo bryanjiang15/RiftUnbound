@@ -195,6 +195,11 @@ func submit_command(player_index: int, raw: String) -> void:
 		_:
 			_log("[ERROR] Unknown command '%s'. Type 'help' for available commands." % verb)
 
+	# Refresh conditional passive Might / keyword auras after every command so
+	# effects like "while you have 8+ runes" or Legend auras stay current.
+	if gs.pending_prompt.is_empty() and trigger_dispatcher != null and gs.players.size() == 2:
+		trigger_dispatcher.emit_passive_auras(gs)
+
 	board_updated.emit()
 	_maybe_trigger_ai()
 
@@ -637,14 +642,17 @@ func _kill_temporary_units(turn_pi: int) -> void:
 func _place_unit(player_index: int, card: CardInstance, destination: String, use_accelerate: bool) -> void:
 	var ps: PlayerState = gs.players[player_index]
 
+	# Confront and similar effects let units you play this turn enter ready.
+	var enters_ready := use_accelerate or ps.units_enter_ready_this_turn
+
 	# Default: send to base
 	if destination.is_empty() or destination == "base":
 		card.location = "base"
-		card.is_exhausted = not use_accelerate  # enters exhausted unless Accelerate
+		card.is_exhausted = not enters_ready  # enters exhausted unless Accelerate
 		ps.base_permanents.append(card)
 		_log("> %s placed at P%d base (%s)" % [
 			card.definition.name, player_index + 1,
-			"ready" if use_accelerate else "exhausted"
+			"ready" if enters_ready else "exhausted"
 		])
 	elif destination.begins_with("battlefield"):
 		var bf_idx = gs.board.get_battlefield_index(destination)
@@ -653,10 +661,10 @@ func _place_unit(player_index: int, card: CardInstance, destination: String, use
 			ps.base_permanents.append(card)
 			card.location = "base"
 			return
-		card.is_exhausted = not use_accelerate
+		card.is_exhausted = not enters_ready
 		gs.board.add_unit_to_battlefield(card, bf_idx)
 		_log("> %s placed at %s (%s)" % [
-			card.definition.name, destination, "ready" if use_accelerate else "exhausted"
+			card.definition.name, destination, "ready" if enters_ready else "exhausted"
 		])
 		# Mark contested if opponent controls or has units
 		var bf = gs.board.battlefields[bf_idx]

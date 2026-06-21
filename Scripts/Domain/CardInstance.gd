@@ -26,6 +26,9 @@ var attached_to: CardInstance = null
 var temp_might_bonus: int = 0
 var temp_keywords: Array = []
 var passive_keywords: Array = []
+# Recomputed by TriggerDispatcher.emit_passive_auras from conditional passive
+# Might abilities (e.g. "while alone", "while you have 8+ runes") and Legend auras.
+var passive_might_bonus: int = 0
 
 # Tracking
 var played_this_turn: bool = false
@@ -39,7 +42,7 @@ func _init(def: CardDefinition, inst_id: String, owner_idx: int) -> void:
 
 
 func get_base_might() -> int:
-	var base = definition.might + buff_counters + temp_might_bonus
+	var base = definition.might + buff_counters + temp_might_bonus + passive_might_bonus
 	for gear in attached_gear:
 		if gear.definition.might_bonus != null and gear.definition.might_bonus != "":
 			base += int(str(gear.definition.might_bonus).replace("+", ""))

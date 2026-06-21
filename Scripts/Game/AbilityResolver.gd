@@ -43,6 +43,14 @@ func resolve_ability(ability: Dictionary, source: Variant, target: CardInstance,
 			log_lines.append_array(_discard_then_draw(params, card_source, gs, owner_pi, ctx))
 		"channel_rune":
 			log_lines.append_array(_channel_rune(params, gs, owner_pi))
+		"channel_rune_or_draw":
+			log_lines.append_array(_channel_rune_or_draw(params, gs, owner_pi))
+		"units_enter_ready_this_turn":
+			log_lines.append_array(_units_enter_ready_this_turn(gs, owner_pi))
+		"give_might_with_alone_bonus":
+			log_lines.append_array(_give_might_with_alone_bonus(params, target, gs))
+		"deal_damage_all_enemies_in_combat":
+			log_lines.append_array(_deal_damage_all_enemies_in_combat(params, card_source, gs))
 		"ready_permanent":
 			log_lines.append_array(_ready_permanent(target))
 		"ready_runes":
@@ -265,11 +273,71 @@ func _discard_then_draw(params: Dictionary, source: CardInstance, gs: GameState,
 
 func _channel_rune(params: Dictionary, gs: GameState, owner: int) -> Array:
 	var amount: int = params.get("amount", 1)
+	var exhausted: bool = params.get("exhausted", false)
 	var log_lines: Array[String] = []
 	var ps: PlayerState = gs.players[owner]
 	for _i in range(amount):
-		if ps.channel_rune():
-			log_lines.append("> P%d channeled an extra rune" % (owner + 1))
+		if ps.channel_rune(exhausted):
+			log_lines.append("> P%d channeled an extra rune%s" % [
+				owner + 1, " (exhausted)" if exhausted else ""
+			])
+	return log_lines
+
+
+func _channel_rune_or_draw(params: Dictionary, gs: GameState, owner: int) -> Array:
+	# Channel N rune(s); if the rune deck is empty (can't channel), draw instead.
+	var channel_amount: int = params.get("channel_amount", params.get("amount", 1))
+	var exhausted: bool = params.get("exhausted", false)
+	var draw_amount: int = params.get("draw_amount", 1)
+	var ps: PlayerState = gs.players[owner]
+	if ps.rune_deck.is_empty():
+		return _draw({"amount": draw_amount}, null, gs, owner)
+	return _channel_rune({"amount": channel_amount, "exhausted": exhausted}, gs, owner)
+
+
+func _units_enter_ready_this_turn(gs: GameState, owner: int) -> Array:
+	gs.players[owner].units_enter_ready_this_turn = true
+	return ["> P%d: units played this turn enter ready" % (owner + 1)]
+
+
+func _give_might_with_alone_bonus(params: Dictionary, target: CardInstance, gs: GameState) -> Array:
+	if target == null:
+		return ["[INFO] give_might_with_alone_bonus: no target provided"]
+	var amount: int = params.get("amount", 1)
+	var alone_bonus: int = params.get("alone_bonus", 0)
+	var total := amount
+	# "the only unit you control there" — count friendly units at target's location.
+	if alone_bonus != 0 and _is_only_friendly_unit_here(target, gs):
+		total += alone_bonus
+	target.temp_might_bonus += total
+	return ["> %s +%d Might (this turn)" % [target.display_name(), total]]
+
+
+func _is_only_friendly_unit_here(unit: CardInstance, gs: GameState) -> bool:
+	var owner := unit.owner_index
+	if unit.is_at_battlefield():
+		var bf = gs.board.battlefields[unit.battlefield_index]
+		return bf.units[owner].size() == 1
+	# At base: "there" is the base; alone if it's the only base unit.
+	return gs.players[owner].get_units_at_base().size() == 1
+
+
+func _deal_damage_all_enemies_in_combat(params: Dictionary, source: CardInstance, gs: GameState) -> Array:
+	var amount: int = params.get("amount", 1)
+	if gs.combat_bf_index < 0:
+		return ["[INFO] Cannon Barrage: no combat in progress — no targets"]
+	var caster_owner := source.owner_index if source else gs.focus_player_index
+	# Enemy = the side opposing the caster among the two combatants.
+	var enemy_pi := 1 - caster_owner
+	var bf = gs.board.battlefields[gs.combat_bf_index]
+	var log_lines: Array[String] = []
+	for u in Array(bf.units[enemy_pi]):
+		u.add_damage(amount)
+		log_lines.append("> Cannon Barrage dealt %d to %s (total: %d/%d)" % [
+			amount, u.display_name(), u.damage, u.get_base_might()
+		])
+	if log_lines.is_empty():
+		log_lines.append("> Cannon Barrage: no enemy units in combat")
 	return log_lines
 
 
