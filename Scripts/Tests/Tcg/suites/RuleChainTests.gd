@@ -40,9 +40,9 @@ static func _test_deferred_target_resolves_duplicate_instance_id(assertions) -> 
 	assertions.assert_ne(p1_duplicate.instance_id, enemy.instance_id,
 		"P1 duplicate and enemy copy have distinct game-wide ids")
 	h.controller.submit_command(0, "play void-seeker")
+	h.controller.submit_command(0, "choose %s" % enemy.instance_id)
 	h.controller.submit_command(1, "pass")
 	h.controller.submit_command(0, "pass")
-	h.controller.submit_command(0, "choose %s" % enemy.instance_id)
 	assertions.assert_no_error(h.controller, "void seeker targets enemy id without error")
 	assertions.assert_true(p1_ally.damage == 0 and p1_duplicate.damage == 0,
 		"P1 units are not damaged when enemy copy is targeted")
@@ -77,9 +77,9 @@ static func _test_battlefield_same_card_instance_ids_are_globally_unique(asserti
 	assertions.assert_ne(p1_unit.instance_id, p2_unit.instance_id,
 		"contested battlefield units get distinct instance ids")
 	h.controller.submit_command(0, "play void-seeker")
+	h.controller.submit_command(0, "choose %s" % p2_unit.instance_id)
 	h.controller.submit_command(1, "pass")
 	h.controller.submit_command(0, "pass")
-	h.controller.submit_command(0, "choose %s" % p2_unit.instance_id)
 	assertions.assert_no_error(h.controller, "void seeker can target enemy by unique id")
 	assertions.assert_eq(p1_unit.damage, 0, "friendly unit is not damaged")
 	assertions.assert_true(
