@@ -151,6 +151,39 @@ static func _test_gust_might_filter(assertions) -> void:
 	var targets = TargetResolver.filter_with_params("unit_at_battlefield", {"condition": {"type": "might_lte", "value": 3}}, null, h.gs(), {"player_index": 0})
 	assertions.assert_true(targets.is_empty(), "gust cannot target might > 3")
 
+	var h2 = TcgTestHarness.new()
+	h2.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_CLOSED",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 2, "power": {}}, "hand": ["gust"], "deck_size": 5, "rune_deck_size": 12},
+			{"battlefield-a": [{"id": "flame-chompers", "owner": 1,
+				"keywords": [{"id": "shield", "value": 1}]}], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	var chompers = h2.find_unit("flame-chompers")
+	chompers.is_defender = true
+	var boosted_targets = TargetResolver.filter_with_params("unit_at_battlefield", {"condition": {"type": "might_lte", "value": 3}}, null, h2.gs(), {"player_index": 0})
+	assertions.assert_true(boosted_targets.is_empty(), "gust cannot target current might > 3")
+
+	var h3 = TcgTestHarness.new()
+	h3.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_CLOSED",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 2, "power": {}}, "hand": ["gust"], "deck_size": 5, "rune_deck_size": 12},
+			{"legend": "master-yi-wuju-bladesman",
+			 "battlefield-a": [{"id": "stalwart-poro", "owner": 1}], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	var poro = h3.find_unit("stalwart-poro")
+	poro.is_defender = true
+	h3.gs().combat_bf_index = 0
+	h3.controller.trigger_dispatcher.emit_passive_auras(h3.gs())
+	h3.controller.submit_command(0, "play gust target stalwart-poro")
+	assertions.assert_true(h3.controller.last_command_error, "gust rejects explicit invalid target")
+	assertions.assert_log_contains(h3.controller, "Invalid target 'stalwart-poro'", "gust direct target is filter checked")
+
 
 static func _test_fight_or_flight_move_base(assertions) -> void:
 	var h = TcgTestHarness.new()
