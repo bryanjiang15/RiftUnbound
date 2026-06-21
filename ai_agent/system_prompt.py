@@ -81,10 +81,16 @@ CORE_RULES = """
 - Cards have an Energy Cost (number) and optional Power Cost (domain symbols).
 - **play_card auto-pays its full cost** by tapping and/or recycling your runes as
   needed.  You never manually tap or recycle runes — go straight to play_card.
+- **Energy and Power are paid differently:** Energy (the number) is paid by **tapping
+  untapped runes** (+1E each); exhausted runes cannot pay Energy. Power (domain symbols)
+  is paid by **recycling a rune of that domain** — this can use an **exhausted OR untapped**
+  rune, but recycling sends that rune to the bottom of your Rune Deck (a real cost). So
+  having only exhausted runes still lets you pay Power costs.
 - The brief state shows one resource line: `Resources: XE playable  [N untapped ...]`.
-  **XE playable** is a rough capacity hint (untapped runes + floating pool energy);
-  each untapped rune auto-taps for +1E and +1 domain power. Domain totals (FUR,
-  MIN, etc.) include untapped runes plus any floating pool power.
+  **XE playable** and the domain power totals (FUR, MIN, etc.) count only **untapped**
+  runes. The `[... | M exhausted ...]` note lists exhausted runes you can ALSO recycle to
+  pay Power (at the cost of recycling them), so do not assume a Power cost is unpayable
+  just because the listed totals look short.
 - **Card costs in hand are for strategic planning only** — printed base cost
   (e.g. 3E+1FUR). They do NOT tell you whether a play is legal, and do NOT include
   optional costs like Accelerate.

@@ -1706,12 +1706,10 @@ func _log(text: String) -> void:
 
 func _maybe_trigger_ai() -> void:
 	if _ai_player_index < 0 or gs.game_over:
-		print("[GC] _maybe_trigger_ai: disabled (ai_index=%d, game_over=%s)" % [_ai_player_index, gs.game_over])
 		return
 	# Mulligan is outside the normal turn-state machine; handle it separately.
 	if gs.mulligan_phase:
 		if not gs.mulligan_done[_ai_player_index]:
-			print("[GC] _maybe_trigger_ai: mulligan → trigger")
 			call_deferred("_trigger_ai_turn")
 		return
 	# Trigger for every situation where the AI seat has the right to act:
@@ -1719,16 +1717,10 @@ func _maybe_trigger_ai() -> void:
 	# and combat damage assignment all route through can_player_act().
 	# Empty or single-option legal moves are handled inside AIPlayer.take_turn().
 	if gs.can_player_act(_ai_player_index):
-		print("[GC] _maybe_trigger_ai: can_player_act(%d)=true → trigger" % _ai_player_index)
 		call_deferred("_trigger_ai_turn")
-	else:
-		print("[GC] _maybe_trigger_ai: can_player_act(%d)=false → no trigger" % _ai_player_index)
 
 
 func _trigger_ai_turn() -> void:
 	var ai_node = get_node_or_null("AIPlayer")
 	if ai_node:
-		print("[GC] _trigger_ai_turn: calling AIPlayer.take_turn()")
 		ai_node.take_turn()
-	else:
-		print("[GC] _trigger_ai_turn: AIPlayer node NOT FOUND")
