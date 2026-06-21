@@ -1,0 +1,28 @@
+{
+  "deck_id": "ogs-master-yi-calm-body",
+  "player_label": "Master Yi (Calm/Body)",
+  "legend": "master-yi-wuju-bladesman",
+  "chosen_champion": "master-yi-meditative",
+  "main_deck": [
+    {"card_id": "en-garde", "count": 3},
+    {"card_id": "meditation", "count": 3},
+    {"card_id": "stalwart-poro", "count": 3},
+    {"card_id": "playful-phantom", "count": 3},
+    {"card_id": "wielder-of-water", "count": 3},
+    {"card_id": "cannon-barrage", "count": 3},
+    {"card_id": "confront", "count": 2},
+    {"card_id": "stormclaw-ursine", "count": 3},
+    {"card_id": "mountain-drake", "count": 2},
+    {"card_id": "master-yi-meditative", "count": 2},
+    {"card_id": "zephyr-sage", "count": 3},
+    {"card_id": "gentlemens-duel", "count": 3},
+    {"card_id": "master-yi-honed", "count": 2},
+    {"card_id": "highlander", "count": 2},
+    {"card_id": "mobilize", "count": 3}
+  ],
+  "rune_deck": [
+    {"card_id": "calm-rune", "count": 6},
+    {"card_id": "body-rune", "count": 6}
+  ],
+  "battlefields": ["fortified-position", "targons-peak", "reavers-row"]
+}
