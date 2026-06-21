@@ -126,12 +126,11 @@
         "effect_type": "give_keyword",
         "effect_params": {
           "target": "friendly_unit_here",
-          "targeting": "choose_one",
           "keyword": {
             "id": "shield",
             "value": 2
           },
-          "duration": "turn"
+          "duration": "combat"
         },
         "is_action": false,
         "is_reaction": false
