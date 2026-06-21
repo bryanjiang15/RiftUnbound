@@ -11,10 +11,15 @@ extends Node
 var controller: GameController
 var player_index: int = 1
 
-const AGENT_URL := "http://localhost:8765/decision"
+const AGENT_PORT := 8765
 const THINK_DELAY := 0.5       # seconds before each decision
-const HTTP_TIMEOUT := 8.0      # seconds before falling back to heuristic
+const HTTP_TIMEOUT := 10.0     # seconds before falling back to heuristic
+							   # (the agent may make several sequential LLM
+							   # calls per decision; 8s was far too short)
 const MAX_RETRIES := 3         # max rejection retry attempts
+
+# Resolved in setup() so it can differ per OS (see _agent_base_url()).
+var AGENT_URL := ""
 
 var _http: HTTPRequest = null
 var _pending_brief_state: Dictionary = {}
@@ -31,6 +36,7 @@ var _game_over_reported: bool = false
 func setup(gc: GameController, pi: int) -> void:
 	controller = gc
 	player_index = pi
+	AGENT_URL = _agent_base_url() + "/decision"
 	_http = HTTPRequest.new()
 	_http.timeout = HTTP_TIMEOUT
 	add_child(_http)
@@ -38,6 +44,15 @@ func setup(gc: GameController, pi: int) -> void:
 	# Phase 1: detect game-over and opponent actions
 	controller.board_updated.connect(_on_board_updated)
 	controller.game_log_message.connect(_on_game_log_message)
+
+
+func _agent_base_url() -> String:
+	# Windows resolves "localhost" to IPv6 (::1) first, but the agent binds to
+	# IPv4 only, so the connection stalls before falling back to 127.0.0.1.
+	# Use the explicit IPv4 loopback on Windows; "localhost" works elsewhere
+	# (macOS/Linux) where resolution doesn't incur that stall.
+	var host := "127.0.0.1" if OS.get_name() == "Windows" else "localhost"
+	return "http://%s:%d" % [host, AGENT_PORT]
 
 
 func take_turn() -> void:

@@ -43,7 +43,14 @@ _client: Optional[AsyncOpenAI] = None
 def get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
-        _client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        # Explicit timeout + bounded retries so a slow/unreachable API fails
+        # fast instead of hanging on the SDK default (600s), which would block
+        # the decision long after Godot has already timed out client-side.
+        _client = AsyncOpenAI(
+            api_key=os.environ.get("OPENAI_API_KEY"),
+            timeout=30.0,
+            max_retries=1,
+        )
     return _client
 
 
@@ -137,6 +144,24 @@ TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "get_keyword",
+            "description": (
+                "Return the precise glossary definition for a single keyword "
+                "(e.g. Tank, Assault, Stun, Accelerate, Hidden). Cheaper and more "
+                "exact than lookup_rule for one keyword."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The keyword name."}
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "simulate_move",
             "description": (
                 "Apply a hypothetical move to a copy of the brief state and report "
@@ -189,6 +214,8 @@ def _dispatch_tool(name: str, arguments: dict) -> Any:
         return skill_module.get_opponent_history()
     if name == "lookup_rule":
         return skill_module.lookup_rule(arguments.get("query", ""))
+    if name == "get_keyword":
+        return skill_module.get_keyword(arguments.get("name", ""))
     if name == "simulate_move":
         return skill_module.simulate_move(arguments.get("move", {}))
     if name == "evaluate_position":
@@ -275,7 +302,7 @@ async def decide(
     rejection_context is non-None on a retry after a Godot rejection.
     """
     model = os.environ.get("RIFTBOUND_AI_MODEL", DEFAULT_MODEL)
-    system = build_system_prompt()
+    system = build_system_prompt(brief_state)
 
     # Assemble initial messages
     messages: list[ChatCompletionMessageParam] = [
