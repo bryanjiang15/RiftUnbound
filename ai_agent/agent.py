@@ -243,13 +243,148 @@ def _parse_decision(content: str) -> Optional[Decision]:
         return None
 
 
-def _command_in_legal_moves(cmd: str, legal: list) -> bool:
-    """Return True if cmd matches an enumerated legal move."""
+# Modifier keywords that introduce a parameter (or flag) inside a command.
+# Everything before the first one of these is the command "head" (verb + ids).
+_CMD_KEYWORDS = frozenset({"to", "target", "at", "from", "accelerate"})
+
+
+def _parse_command(cmd: str) -> Optional[dict]:
+    """Parse a console command into a normalized structure for comparison.
+
+    Returns a dict with the verb, the identifying head tokens (card / unit ids),
+    and any optional modifiers (destination, target, at, flags). Returns None
+    when the command contains a token we don't know how to validate, so the
+    caller can fall back to rejecting it.
+    """
+    tokens = cmd.split()
+    if not tokens:
+        return None
+
+    parsed: dict[str, Any] = {
+        "verb": tokens[0],
+        "head": [],
+        "to": None,
+        "target": None,
+        "at": None,
+        "flags": set(),
+    }
+
+    rest = tokens[1:]
+    i = 0
+    # Head tokens run until the first modifier keyword.
+    while i < len(rest) and rest[i] not in _CMD_KEYWORDS:
+        parsed["head"].append(rest[i])
+        i += 1
+
+    while i < len(rest):
+        tok = rest[i]
+        if tok in ("to", "target", "at") and i + 1 < len(rest):
+            parsed[tok] = rest[i + 1]
+            i += 2
+        elif tok == "from" and i + 1 < len(rest):
+            parsed["flags"].add(f"from {rest[i + 1]}")
+            i += 2
+        elif tok == "accelerate":
+            parsed["flags"].add("accelerate")
+            i += 1
+        else:
+            # Dangling keyword or unrecognized token — not safely validatable.
+            return None
+
+    parsed["head"] = tuple(parsed["head"])
+    return parsed
+
+
+def _norm_dest(dest: Optional[str]) -> Optional[str]:
+    """Treat an omitted destination and an explicit 'base' as equivalent.
+
+    The enumerator emits ``play <id>`` (no destination) for cards going to base,
+    while the model may emit ``play <id> to base``; both mean the same thing.
+    """
+    return None if dest == "base" else dest
+
+
+def _visible_instance_ids(brief_state: Optional[dict]) -> set[str]:
+    """Collect every instance_id the seat can see, for validating target params."""
+    ids: set[str] = set()
+    if not brief_state:
+        return ids
+
+    def _add(entries: Any) -> None:
+        for e in entries or []:
+            iid = e.get("instance_id") if isinstance(e, dict) else None
+            if iid:
+                ids.add(iid)
+
+    _add(brief_state.get("my_hand"))
+    _add(brief_state.get("my_base_units"))
+    _add(brief_state.get("opponent_base_units"))
+    champ = brief_state.get("my_champion")
+    if isinstance(champ, dict) and champ.get("instance_id"):
+        ids.add(champ["instance_id"])
+    for bf in brief_state.get("battlefields", []) or []:
+        _add(bf.get("my_units"))
+        _add(bf.get("opponent_units"))
+        fd = bf.get("my_facedown")
+        if isinstance(fd, dict) and fd.get("instance_id"):
+            ids.add(fd["instance_id"])
+    return ids
+
+
+def _matches_legal_move(cand: dict, legal: dict, valid_target_ids: set[str]) -> bool:
+    """True if a candidate command is permitted by an enumerated legal move.
+
+    Matches token-by-token rather than as an opaque string: the verb, ids,
+    destination, location, and flags must agree, and a target may be added on
+    top of a base (untargeted) legal move as long as it names a visible
+    instance. This lets targeted spells/reactions — whose enumerated form is the
+    bare ``play <id>`` / ``react <id>`` (target chosen via a follow-up prompt) —
+    pass with an inline ``target <id>`` too, since the engine accepts both.
+    """
+    if cand["verb"] != legal["verb"]:
+        return False
+    if cand["head"] != legal["head"]:
+        return False
+    if _norm_dest(cand["to"]) != _norm_dest(legal["to"]):
+        return False
+    if cand["at"] != legal["at"]:
+        return False
+    if cand["flags"] != legal["flags"]:
+        return False
+
+    if cand["target"] == legal["target"]:
+        return True
+    # The enumerated move carries no target but the candidate adds one: accept
+    # it when it references a real, visible instance (the engine validates the
+    # precise target legality itself on submit).
+    if legal["target"] is None and cand["target"] is not None:
+        return (not valid_target_ids) or (cand["target"] in valid_target_ids)
+    return False
+
+
+def _command_in_legal_moves(
+    cmd: str, legal: list, brief_state: Optional[dict] = None
+) -> bool:
+    """Return True if cmd is permitted, validating each token/param.
+
+    Falls back from an exact string match to a structured, per-parameter
+    comparison so that legitimate variations (e.g. ``play <id> to base`` for a
+    base play, or ``play <id> target <id>`` for a targeted spell) are accepted
+    even though only the canonical form is enumerated.
+    """
     if cmd in legal:
         return True
-    # play_card with explicit "to base" matches bare "play <id>" in legal_moves
-    if cmd.endswith(" to base"):
-        if cmd[: -len(" to base")] in legal:
+
+    cand = _parse_command(cmd)
+    if cand is None:
+        return False
+
+    valid_target_ids = _visible_instance_ids(brief_state)
+    for lm in legal:
+        parsed_lm = _parse_command(lm)
+        if parsed_lm is None:
+            continue
+        if _matches_legal_move(cand, parsed_lm, valid_target_ids):
             return True
     return False
 
@@ -377,7 +512,7 @@ async def decide(
         if decision is not None:
             cmd = decision.move.to_command()
             legal = brief_state.get("legal_moves", [])
-            if legal and not _command_in_legal_moves(cmd, legal):
+            if legal and not _command_in_legal_moves(cmd, legal, brief_state):
                 logger.warning(
                     "Decision command not in legal_moves: %s (have %d moves)",
                     cmd,
