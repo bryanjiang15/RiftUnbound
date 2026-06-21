@@ -234,7 +234,7 @@ the Main Menu ("Master Yi Deck (vs AI)").
 | Card | File | Status |
 |---|---|---|
 | Calm Rune (OGN-042), Body Rune (OGN-126) | `runes.json` | ✅ Full (tap energy / recycle power) |
-| Fortified Position (OGN-279) | `battlefields.json` | ✅ `on_defend` grants Shield 2 (give_keyword) |
+| Fortified Position (OGN-279) | `battlefields.json` | ✅ `on_defend` grants Shield 2 for the combat (give_keyword, `duration: combat`) — see triggered-target note below |
 | Master Yi - Wuju Bladesman (OGS-019) — Legend | `legends.json` | ✅ Aura: +2 Might to a lone defender (`aura_might`) |
 | Stalwart Poro (OGN-052), Zephyr Sage (OGS-005) | `units.json` | ✅ Shield keyword |
 | Playful Phantom (OGN-049), Mountain Drake (OGN-142) | `units.json` | ✅ Vanilla |
@@ -282,6 +282,26 @@ the Main Menu ("Master Yi Deck (vs AI)").
 4. **Two-target resolution generally.** `_play_spell` only sets up one `choose_one` target
    prompt per spell. Cards needing two distinct chosen targets (e.g. Gentlemen's Duel) need a
    target queue on the chain item.
+5. **Triggered-ability target selection.** Triggered abilities (e.g. Fortified Position's
+   `on_defend`, Reaver's Row) auto-pick the *first* valid target via
+   `TriggerDispatcher._resolve_trigger_target`; they cannot yet prompt the controller to
+   choose among several valid targets. `targeting: choose_one` is therefore only honored for
+   spells (via `_play_spell`), not triggered abilities. Fortified Position drops the
+   (no-op) `targeting` field and grants Shield 2 to the first friendly defender; with a
+   single defender — the common case — this matches the card.
+
+### Engine timing fixes (from PR review)
+
+- Conditional passive Might is recomputed (`emit_passive_auras`) **after the Channel Phase**
+  and **before lethal-damage checks** (`CleanupProcessor._process_deaths`,
+  `CombatProcessor.proceed_to_damage`), not just after player commands, so rune-count and
+  "alone" auras are never stale when Might is read.
+- `while_combat_alone` / `while_defending_alone` only apply to the unit in the **active**
+  combat (`combat_bf_index`), since cleanup designates attacker/defender on every contested
+  battlefield.
+- `give_keyword` supports `duration: combat`, cleared by `CardInstance.clear_combat_effects`
+  in `CombatProcessor.finalize_combat`, so Fortified Position's Shield does not leak past the
+  combat or into a later combat the same turn.
 
 ### Battlefields note
 

@@ -13,6 +13,7 @@ static func run(assertions) -> void:
 	_test_meditative_no_bonus_under_8(assertions)
 	_test_wielder_alone_in_combat(assertions)
 	_test_wielder_not_alone(assertions)
+	_test_wielder_no_bonus_on_other_battlefield(assertions)
 	_test_legend_aura_defending_alone(assertions)
 	_test_stormclaw_channels_exhausted(assertions)
 	_test_honed_enters_ready(assertions)
@@ -23,6 +24,7 @@ static func run(assertions) -> void:
 	_test_en_garde_no_bonus_with_ally(assertions)
 	_test_cannon_barrage_hits_combat(assertions)
 	_test_fortified_position_shield(assertions)
+	_test_fortified_position_shield_clears_after_combat(assertions)
 
 
 static func _runes(rune_id: String, n: int) -> Array:
@@ -90,6 +92,8 @@ static func _test_wielder_alone_in_combat(assertions) -> void:
 	})
 	var w = h.find_unit("wielder-of-water")
 	w.is_attacker = true
+	h.gs().combat_bf_index = 0
+	h.gs().attacker_player_index = 0
 	h.controller.trigger_dispatcher.emit_passive_auras(h.gs())
 	assertions.assert_eq(w.get_current_might(), 4, "wielder +2 attacking alone")
 
@@ -106,8 +110,30 @@ static func _test_wielder_not_alone(assertions) -> void:
 	})
 	var w = h.find_unit("wielder-of-water")
 	w.is_attacker = true
+	h.gs().combat_bf_index = 0
+	h.gs().attacker_player_index = 0
 	h.controller.trigger_dispatcher.emit_passive_auras(h.gs())
 	assertions.assert_eq(w.get_current_might(), 2, "wielder no bonus when not alone")
+
+
+static func _test_wielder_no_bonus_on_other_battlefield(assertions) -> void:
+	# A unit flagged attacker/defender (cleanup marks all contested battlefields)
+	# must not get the "alone" bonus unless it is in the active combat.
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["fortified-position", "targons-peak"],
+		"players": [
+			{"battlefield-b": [{"id": "wielder-of-water"}]},
+			{},
+		],
+	})
+	var w = h.find_unit("wielder-of-water")
+	w.is_attacker = true
+	h.gs().combat_bf_index = 0  # active combat is battlefield-a, not -b
+	h.gs().attacker_player_index = 0
+	h.controller.trigger_dispatcher.emit_passive_auras(h.gs())
+	assertions.assert_eq(w.get_current_might(), 2, "wielder no bonus outside active combat")
 
 
 static func _test_legend_aura_defending_alone(assertions) -> void:
@@ -123,6 +149,8 @@ static func _test_legend_aura_defending_alone(assertions) -> void:
 	})
 	var p = h.find_unit("playful-phantom")
 	p.is_defender = true
+	h.gs().combat_bf_index = 0
+	h.gs().attacker_player_index = 1
 	h.controller.trigger_dispatcher.emit_passive_auras(h.gs())
 	assertions.assert_eq(p.get_current_might(), 7, "legend aura +2 to lone defender")
 
@@ -288,3 +316,23 @@ static func _test_fortified_position_shield(assertions) -> void:
 	h.controller.ability_resolver.resolve_ability(ab, null, p, h.gs(), {})
 	p.is_defender = true
 	assertions.assert_eq(p.get_current_might(), 7, "fortified position grants Shield 2")
+
+
+static func _test_fortified_position_shield_clears_after_combat(assertions) -> void:
+	# Fortified Position grants Shield 2 "this combat" — it must not persist once
+	# the combat resolves (clear_combat_effects).
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["fortified-position", "targons-peak"],
+		"players": [
+			{"battlefield-a": [{"id": "playful-phantom"}]},
+			{},
+		],
+	})
+	var p = h.find_unit("playful-phantom")
+	var ab = CardLoader.get_card("fortified-position").abilities[0]
+	h.controller.ability_resolver.resolve_ability(ab, null, p, h.gs(), {})
+	assertions.assert_true(p.has_keyword("shield"), "shield granted for the combat")
+	p.clear_combat_effects()
+	assertions.assert_false(p.has_keyword("shield"), "shield cleared after combat")
