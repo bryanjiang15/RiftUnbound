@@ -15,6 +15,7 @@ static func run(assertions) -> void:
 	_test_rhasa_cost_reduction(assertions)
 	_test_gust_might_filter(assertions)
 	_test_fight_or_flight_move_base(assertions)
+	_test_gentlemens_duel_applies_buffed_fight_damage(assertions)
 	_test_brazen_buccaneer_discount(assertions)
 	_test_cemetery_attendant(assertions)
 	_test_get_excited(assertions)
@@ -167,6 +168,26 @@ static func _test_fight_or_flight_move_base(assertions) -> void:
 	})
 	h.cmd_with_choices(0, "play fight-or-flight", ["vi-destructive"])
 	assertions.assert_log_contains(h.controller, "moved to base", "fight or flight returns unit to base")
+
+
+static func _test_gentlemens_duel_applies_buffed_fight_damage(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "SHOWDOWN_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 6, "power": {"body": 1}}, "hand": ["gentlemens-duel"],
+			 "battlefield-a": [{"id": "zephyr-sage", "owner": 0}], "deck_size": 5, "rune_deck_size": 12},
+			{"battlefield-a": [{"id": "chemtech-enforcer", "owner": 1}], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.gs().focus_player_index = 0
+	h.cmd_with_choices(0, "play gentlemens-duel", ["zephyr-sage", "chemtech-enforcer"])
+	var friendly = h.find_unit("zephyr-sage")
+	assertions.assert_true(friendly != null and friendly.damage == 2,
+		"gentlemens duel friendly takes enemy might as reciprocal damage")
+	assertions.assert_true(h.find_unit("chemtech-enforcer") == null,
+		"gentlemens duel uses buffed might to kill chosen enemy")
 
 
 static func _test_brazen_buccaneer_discount(assertions) -> void:
