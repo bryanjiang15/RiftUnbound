@@ -62,7 +62,8 @@ static func handle_pass(gs: GameState, ability_resolver: AbilityResolver, contro
 			"type": "choose_target",
 			"chain_item": item,
 			"prompt": item.target_prompt,
-			"valid_choices": item.valid_targets if not item.valid_targets.is_empty() else []
+			"valid_choices": item.valid_targets if not item.valid_targets.is_empty() else [],
+			"target_params": item.target_params if not item.target_params.is_empty() else {},
 		}
 		log_lines.append("[PROMPT] %s" % item.target_prompt)
 		return log_lines
@@ -92,10 +93,18 @@ static func _execute_chain_item(item: ChainItem, gs: GameState, ability_resolver
 		var card = item.source_card
 		if card == null:
 			return log_lines
+		var chosen_target_idx := 0
 		# Execute all triggered (resolution-timing) abilities
 		for ab in card.definition.abilities:
 			if ab.get("timing", "") == "resolution":
-				var target = item.targets[0] if not item.targets.is_empty() else null
+				var target: CardInstance = null
+				var params: Dictionary = ab.get("effect_params", {})
+				if params.get("targeting", "") == "choose_one":
+					if chosen_target_idx < item.targets.size():
+						target = item.targets[chosen_target_idx]
+					chosen_target_idx += 1
+				elif not item.targets.is_empty():
+					target = item.targets[0]
 				var owner_pi = card.owner_index
 				var cost = ab.get("cost", {})
 				if not cost.is_empty():
@@ -118,7 +127,11 @@ static func _execute_chain_item(item: ChainItem, gs: GameState, ability_resolver
 						paid = true
 					if not paid:
 						continue
-				var ctx = {"controller": controller, "player_index": owner_pi}
+				var ctx = {
+					"controller": controller,
+					"player_index": owner_pi,
+					"chosen_targets": item.targets,
+				}
 				var ab_lines = ability_resolver.resolve_ability(ab, card, target, gs, ctx)
 				log_lines.append_array(ab_lines)
 				if not gs.pending_prompt.is_empty():

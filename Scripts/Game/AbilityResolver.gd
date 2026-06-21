@@ -51,6 +51,8 @@ func resolve_ability(ability: Dictionary, source: Variant, target: CardInstance,
 			log_lines.append_array(_give_might_with_alone_bonus(params, target, gs))
 		"deal_damage_all_enemies_in_combat":
 			log_lines.append_array(_deal_damage_all_enemies_in_combat(params, card_source, gs))
+		"fight_chosen_units":
+			log_lines.append_array(_fight_chosen_units(card_source, target, ctx))
 		"ready_permanent":
 			log_lines.append_array(_ready_permanent(target))
 		"ready_runes":
@@ -343,6 +345,25 @@ func _deal_damage_all_enemies_in_combat(params: Dictionary, source: CardInstance
 	if log_lines.is_empty():
 		log_lines.append("> Cannon Barrage: no enemy units in combat")
 	return log_lines
+
+
+func _fight_chosen_units(_source: CardInstance, chosen_enemy: CardInstance, ctx: Dictionary) -> Array:
+	var chosen_targets: Array = ctx.get("chosen_targets", [])
+	var buffed_friendly: CardInstance = null
+	if not chosen_targets.is_empty() and chosen_targets[0] is CardInstance:
+		buffed_friendly = chosen_targets[0]
+	if buffed_friendly == null:
+		return ["[INFO] fight_chosen_units: missing friendly target"]
+	if chosen_enemy == null:
+		return ["[INFO] fight_chosen_units: missing enemy target"]
+	var friendly_might = buffed_friendly.get_current_might()
+	var enemy_might = chosen_enemy.get_current_might()
+	chosen_enemy.add_damage(friendly_might)
+	buffed_friendly.add_damage(enemy_might)
+	return [
+		"> %s dealt %d to %s" % [buffed_friendly.display_name(), friendly_might, chosen_enemy.display_name()],
+		"> %s dealt %d to %s" % [chosen_enemy.display_name(), enemy_might, buffed_friendly.display_name()],
+	]
 
 
 func _ready_permanent(target: CardInstance) -> Array:
