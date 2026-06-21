@@ -42,11 +42,8 @@ func _init(def: CardDefinition, inst_id: String, owner_idx: int) -> void:
 
 
 func get_base_might() -> int:
-	var base = definition.might + buff_counters + temp_might_bonus + passive_might_bonus
-	for gear in attached_gear:
-		if gear.definition.might_bonus != null and gear.definition.might_bonus != "":
-			base += int(str(gear.definition.might_bonus).replace("+", ""))
-	return base
+	return definition.might + buff_counters + temp_might_bonus \
+		+ passive_might_bonus + _gear_might_bonus()
 
 
 func get_current_might() -> int:
@@ -56,6 +53,44 @@ func get_current_might() -> int:
 	if is_defender:
 		base += get_keyword_value("shield")
 	return base
+
+
+# Net might gained (+) or lost (-) relative to the card's printed might.
+func get_might_delta() -> int:
+	return get_current_might() - definition.might
+
+
+func _gear_might_bonus() -> int:
+	var total := 0
+	for gear in attached_gear:
+		if gear.definition.might_bonus != null and gear.definition.might_bonus != "":
+			total += int(str(gear.definition.might_bonus).replace("+", ""))
+	return total
+
+
+# Breakdown of every might contribution beyond the printed base might.
+# Each entry is { "source": String, "symbol": String, "amount": int } where the
+# amount is signed. Used by the UI to label where might was gained or lost from.
+func get_might_breakdown() -> Array:
+	var parts: Array = []
+	if buff_counters != 0:
+		parts.append({ "source": "buff", "symbol": "★", "amount": buff_counters })
+	if temp_might_bonus != 0:
+		parts.append({ "source": "temp", "symbol": "⚡", "amount": temp_might_bonus })
+	if passive_might_bonus != 0:
+		parts.append({ "source": "passive", "symbol": "✦", "amount": passive_might_bonus })
+	var gear_bonus := _gear_might_bonus()
+	if gear_bonus != 0:
+		parts.append({ "source": "gear", "symbol": "⚙", "amount": gear_bonus })
+	if is_attacker:
+		var assault := get_keyword_value("assault")
+		if assault != 0:
+			parts.append({ "source": "assault", "symbol": "⚔", "amount": assault })
+	if is_defender:
+		var shield := get_keyword_value("shield")
+		if shield != 0:
+			parts.append({ "source": "shield", "symbol": "🛡", "amount": shield })
+	return parts
 
 
 func has_keyword(keyword_id: String) -> bool:
