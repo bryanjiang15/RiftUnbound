@@ -331,6 +331,10 @@ func _execute_start_of_turn() -> void:
 	gs.players[0].rune_pool.empty()
 	gs.players[1].rune_pool.empty()
 
+	# Refresh conditional passive Might now that Channel has added runes, so
+	# rune-count auras (e.g. Master Yi - Meditative) are correct entering Main.
+	trigger_dispatcher.emit_passive_auras(gs)
+
 	# Main Phase
 	gs.current_phase = TurnStateMachine.Phase.MAIN
 	gs.current_state = TurnStateMachine.State.NEUTRAL_OPEN

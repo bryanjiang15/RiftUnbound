@@ -170,8 +170,12 @@ func _give_keyword(params: Dictionary, target: CardInstance) -> Array:
 	var kw_id: String = kw.get("id", kw) if kw is Dictionary else str(kw)
 	var kw_val: int = kw.get("value", params.get("value", 1)) if kw is Dictionary else params.get("value", 1)
 	var duration: String = params.get("duration", "turn")
-	if duration == "turn" or duration.is_empty():
-		target.temp_keywords.append({"id": kw_id, "value": kw_val})
+	if duration.is_empty():
+		duration = "turn"
+	# "turn" effects clear at end-of-turn cleanup; "combat" effects clear when the
+	# current combat resolves (CombatProcessor.finalize_combat).
+	if duration == "turn" or duration == "combat":
+		target.temp_keywords.append({"id": kw_id, "value": kw_val, "duration": duration})
 	return ["> %s gained %s" % [target.display_name(), kw_id]]
 
 

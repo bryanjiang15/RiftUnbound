@@ -44,6 +44,12 @@ static func _is_combat_alone(unit: CardInstance, gs: GameState) -> bool:
 		return false
 	if not unit.is_at_battlefield():
 		return false
+	# Only the unit in the *active* combat counts as "attacking/defending alone".
+	# Cleanup designates attacker/defender on every contested battlefield while a
+	# combat is in progress, so gating on combat_bf_index avoids granting the
+	# bonus to units sitting at a different contested battlefield.
+	if gs.combat_bf_index < 0 or unit.battlefield_index != gs.combat_bf_index:
+		return false
 	var bf = gs.board.battlefields[unit.battlefield_index]
 	return bf.units[unit.owner_index].size() == 1
 

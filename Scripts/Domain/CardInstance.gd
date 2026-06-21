@@ -113,6 +113,17 @@ func clear_temp_effects() -> void:
 	played_this_turn = false
 
 
+# Remove keywords that were granted only for the duration of a single combat
+# (e.g. Fortified Position's Shield 2 "this combat").
+func clear_combat_effects() -> void:
+	var kept: Array = []
+	for kw in temp_keywords:
+		if kw is Dictionary and kw.get("duration", "") == "combat":
+			continue
+		kept.append(kw)
+	temp_keywords = kept
+
+
 func apply_stun() -> void:
 	is_stunned = true
 
