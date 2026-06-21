@@ -1,0 +1,440 @@
+OGS-019 Master Yi - Wuju Bladesman - Starter
+Effect
+While a friendly unit defends alone, it gets +2 rb_might.
+Title
+Master Yi - Wuju Bladesman - Starter
+Set
+OGS - Proving Grounds
+Card Number
+019
+Rarity
+Rare
+Promo
+No
+Legality
+Legal
+Tags
+Master Yi
+Card type
+Legend
+Super type
+Champion
+Color
+Calm
+Body
+
+OGN-046 En Garde
+Effect
+Reaction (Play any time, even before spells and abilities resolve.)
+Give a friendly unit +1 rb_might this turn, then an additional +1 rb_might this turn if it is the only unit you control there.
+Flavor
+“Is this supposed to be a challenge?” —Fiora
+Title
+En Garde
+Set
+OGN - Origins
+Card Number
+046
+Rarity
+Common
+Cost
+1
+Promo
+No
+Legality
+Legal
+Card type
+Spell
+Color
+Calm
+
+OGN-134 Mobilize
+Effect
+Channel 1 rune exhausted. If you can't, draw 1.
+Flavor
+The sound of the trumpets is the first blow struck in battle.
+Title
+Mobilize
+Set
+OGN - Origins
+Card Number
+134
+Rarity
+Common
+Cost
+2
+Promo
+No
+Legality
+Legal
+Card type
+Spell
+Color
+Body
+
+OGN-129 Confront
+Effect
+Action (Play on your turn or in showdowns.)
+Units you play this turn enter ready. Draw 1.
+Flavor
+Now is the only moment that matters.
+Title
+Confront
+Set
+OGN - Origins
+Card Number
+129
+Rarity
+Common
+Cost
+2
+Promo
+No
+Legality
+Legal
+Card type
+Spell
+Color
+Body
+
+OGN-127 Cannon Barrage
+Effect
+Reaction (Play any time, even before spells and abilities resolve.)
+Deal 2 to all enemy units in combat.
+Flavor
+If you’ve got enough guns, you don’t need to aim.
+Title
+Cannon Barrage
+Set
+OGN - Origins
+Card Number
+127
+Rarity
+Common
+Cost
+2
+Power Cost
+1 Body
+Promo
+No
+Legality
+Legal
+Card type
+Spell
+Color
+Body
+
+OGN-048 Meditation
+Effect
+Reaction (Play any time, even before spells and abilities resolve.)
+As an additional cost to play this, you may exhaust a friendly unit. If you do, draw 2. Otherwise, draw 1.
+Title
+Meditation
+Set
+OGN - Origins
+Card Number
+048
+Rarity
+Common
+Cost
+2
+Promo
+No
+Legality
+Legal
+Card type
+Spell
+Color
+Calm
+
+OGS-020 Highlander
+Effect
+Reaction (Play any time, even before spells and abilities resolve.)
+Choose a friendly unit. The next time it would die this turn, heal it, exhaust it, and recall it instead. (Send it to base. This isn't a move.)
+Errata
+Reaction (Play any time, even before spells and abilities resolve.)
+Choose a friendly unit. The next time it would die this turn, heal it, exhaust it, and recall it instead. (Send it to base. This isn't a move.)
+Title
+Highlander
+Set
+OGS - Proving Grounds
+Card Number
+020
+Rarity
+Epic
+Cost
+4
+Promo
+No
+Legality
+Legal
+Tags
+Master Yi
+Card type
+Spell
+Super type
+Signature
+Color
+Calm
+Body
+
+OGS-008 Gentlemen's Duel
+Effect
+Action (Play on your turn or in showdowns.)
+Give a friendly unit +3 rb_might this turn. Then choose an enemy unit. They deal damage equal to their Mights to each other.
+Flavor
+A proper and formal way to kill your enemies.
+Title
+Gentlemen's Duel
+Set
+OGS - Proving Grounds
+Card Number
+008
+Rarity
+Common
+Cost
+6
+Power Cost
+Body 1
+Promo
+No
+Legality
+Legal
+Card type
+Spell
+Color
+Body
+
+OGN-052 Stalwart Poro
+Effect
+Shield (+1 rb_might while I'm a defender.)
+Flavor
+It suits him.
+Title
+Stalwart Poro
+Set
+OGN - Origins
+Card Number
+052
+Rarity
+Common
+Might
+2
+Cost
+2
+Promo
+No
+Legality
+Legal
+Tags
+Poro
+Card type
+Unit
+Color
+Calm
+
+OGN-055 Wielder of Water
+Effect
+While I'm attacking or defending alone, I have +2 rb_might.
+Flavor
+Each drop an ocean of possibilities.
+Title
+Wielder of Water
+Set
+OGN - Origins
+Card Number
+055
+Rarity
+Common
+Might
+2
+Cost
+3
+Promo
+No
+Legality
+Legal
+Tags
+Ionia
+Card type
+Unit
+Color
+Calm
+
+OGS-004 Master Yi - Meditative
+Effect
+While you have 8+ runes, I have +4 rb_might.
+Flavor
+“Anger gives motivation without purpose.”
+Title
+Master Yi - Meditative
+Set
+OGS - Proving Grounds
+Card Number
+004
+Rarity
+Rare
+Might
+4
+Cost
+5
+Power Cost
+Calm 1
+Promo
+No
+Legality
+Legal
+Tags
+Master Yi
+Ionia
+Card type
+Unit
+Super type
+Champion
+Color
+Calm
+
+OGN-049 Playful Phantom
+Flavor
+“My toys break so easily.”
+Title
+Playful Phantom
+Set
+OGN - Origins
+Card Number
+049
+Rarity
+Common
+Might
+5
+Cost
+5
+Promo
+No
+Legality
+Legal
+Tags
+Spirit
+Shadow Isles
+Card type
+Unit
+Color
+Calm
+
+OGS-005 Zephyr Sage
+Effect
+Shield (+1 rb_might while I'm a defender.)
+Flavor
+“A true master is an eternal student.” – Master Yi
+Title
+Zephyr Sage
+Set
+OGS - Proving Grounds
+Card Number
+005
+Rarity
+Uncommon
+Might
+6
+Cost
+6
+Promo
+No
+Legality
+Legal
+Tags
+Ionia
+Bird
+Card type
+Unit
+Color
+Calm
+
+OGS-009 Master Yi - Honed
+Effect
+Ganking (I can move from battlefield to battlefield.)
+I enter ready.
+Flavor
+“The focused mind can pierce through stone.”
+Title
+Master Yi - Honed
+Set
+OGS - Proving Grounds
+Card Number
+009
+Rarity
+Epic
+Might
+6
+Cost
+7
+Power Cost
+Body 1
+Promo
+No
+Legality
+Legal
+Tags
+Master Yi
+Ionia
+Card type
+Unit
+Super type
+Champion
+Color
+Body
+
+OGN-137 Stormclaw Ursine
+Effect
+Tank (I must be assigned combat damage first.)
+When you play me, channel 1 rune exhausted.
+Flavor
+“The Ursine speak for man, and the wild responds.”
+Title
+Stormclaw Ursine
+Set
+OGN - Origins
+Card Number
+137
+Rarity
+Common
+Might
+6
+Cost
+7
+Promo
+No
+Legality
+Legal
+Tags
+Freljord
+Card type
+Unit
+Color
+Body
+
+OGN-142 Mountain Drake
+Flavor
+After centuries spent trying to understand dragon behavior, researchers can agree on one thing: If you're seeing that behavior up close ... run.
+Title
+Mountain Drake
+Set
+OGN - Origins
+Card Number
+142
+Rarity
+Uncommon
+Might
+10
+Cost
+9
+Promo
+No
+Legality
+Legal
+Tags
+Dragon
+Card type
+Unit
+Color
+Body
