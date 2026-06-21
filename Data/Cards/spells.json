@@ -240,5 +240,342 @@
     ],
     "flavor_text": "You too shall pass.",
     "image": "CardArts/OGN-180.webp"
+  },
+  {
+    "id": "en-garde",
+    "name": "En Garde",
+    "set": "OGN",
+    "card_number": "046",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "calm"
+    ],
+    "rarity": "Common",
+    "energy_cost": 1,
+    "power_cost": [],
+    "keywords": [
+      {
+        "id": "reaction"
+      }
+    ],
+    "is_action": false,
+    "is_reaction": true,
+    "effect_text": "Reaction (Play any time, even before spells and abilities resolve.)\nGive a friendly unit +1 Might this turn, then an additional +1 Might this turn if it is the only unit you control there.",
+    "abilities": [
+      {
+        "ability_id": "en-garde-buff",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "give_might_with_alone_bonus",
+        "effect_params": {
+          "amount": 1,
+          "alone_bonus": 1,
+          "duration": "turn",
+          "target": "friendly_unit",
+          "targeting": "choose_one"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "\"Is this supposed to be a challenge?\" —Fiora",
+    "image": "CardArts/OGN-046.webp"
+  },
+  {
+    "id": "mobilize",
+    "name": "Mobilize",
+    "set": "OGN",
+    "card_number": "134",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "body"
+    ],
+    "rarity": "Common",
+    "energy_cost": 2,
+    "power_cost": [],
+    "keywords": [],
+    "is_action": false,
+    "is_reaction": false,
+    "effect_text": "Channel 1 rune exhausted. If you can't, draw 1.",
+    "abilities": [
+      {
+        "ability_id": "mobilize-channel",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "channel_rune_or_draw",
+        "effect_params": {
+          "channel_amount": 1,
+          "exhausted": true,
+          "draw_amount": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "The sound of the trumpets is the first blow struck in battle.",
+    "image": "CardArts/OGN-134.webp"
+  },
+  {
+    "id": "confront",
+    "name": "Confront",
+    "set": "OGN",
+    "card_number": "129",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "body"
+    ],
+    "rarity": "Common",
+    "energy_cost": 2,
+    "power_cost": [],
+    "keywords": [
+      {
+        "id": "action"
+      }
+    ],
+    "is_action": true,
+    "is_reaction": false,
+    "effect_text": "Action (Play on your turn or in showdowns.)\nUnits you play this turn enter ready. Draw 1.",
+    "abilities": [
+      {
+        "ability_id": "confront-enter-ready",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "units_enter_ready_this_turn",
+        "effect_params": {},
+        "is_action": false,
+        "is_reaction": false
+      },
+      {
+        "ability_id": "confront-draw",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "draw",
+        "effect_params": {
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "Now is the only moment that matters.",
+    "image": "CardArts/OGN-129.webp"
+  },
+  {
+    "id": "cannon-barrage",
+    "name": "Cannon Barrage",
+    "set": "OGN",
+    "card_number": "127",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "body"
+    ],
+    "rarity": "Common",
+    "energy_cost": 2,
+    "power_cost": [
+      {
+        "domain": "body",
+        "amount": 1
+      }
+    ],
+    "keywords": [
+      {
+        "id": "reaction"
+      }
+    ],
+    "is_action": false,
+    "is_reaction": true,
+    "effect_text": "Reaction (Play any time, even before spells and abilities resolve.)\nDeal 2 to all enemy units in combat.",
+    "abilities": [
+      {
+        "ability_id": "cannon-barrage-damage",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "deal_damage_all_enemies_in_combat",
+        "effect_params": {
+          "amount": 2
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "If you've got enough guns, you don't need to aim.",
+    "image": "CardArts/OGN-127.webp"
+  },
+  {
+    "id": "meditation",
+    "name": "Meditation",
+    "set": "OGN",
+    "card_number": "048",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "calm"
+    ],
+    "rarity": "Common",
+    "energy_cost": 2,
+    "power_cost": [],
+    "keywords": [
+      {
+        "id": "reaction"
+      }
+    ],
+    "is_action": false,
+    "is_reaction": true,
+    "effect_text": "Reaction (Play any time, even before spells and abilities resolve.)\nAs an additional cost to play this, you may exhaust a friendly unit. If you do, draw 2. Otherwise, draw 1.",
+    "abilities": [
+      {
+        "ability_id": "meditation-draw",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {
+          "custom": "may_exhaust_friendly_unit"
+        },
+        "effect_type": "draw",
+        "effect_params": {
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "",
+    "image": "CardArts/OGN-048.webp"
+  },
+  {
+    "id": "highlander",
+    "name": "Highlander",
+    "set": "OGS",
+    "card_number": "020",
+    "card_type": "spell",
+    "supertypes": [
+      "signature"
+    ],
+    "tags": [
+      "Master Yi"
+    ],
+    "domain": [
+      "calm"
+    ],
+    "rarity": "Epic",
+    "energy_cost": 4,
+    "power_cost": [],
+    "keywords": [
+      {
+        "id": "reaction"
+      }
+    ],
+    "is_action": false,
+    "is_reaction": true,
+    "effect_text": "Reaction (Play any time, even before spells and abilities resolve.)\nChoose a friendly unit. The next time it would die this turn, heal it, exhaust it, and recall it instead. (Send it to base. This isn't a move.)",
+    "abilities": [
+      {
+        "ability_id": "highlander-replace-death",
+        "ability_type": "replacement",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "death_replacement_recall",
+        "effect_params": {
+          "target": "friendly_unit",
+          "targeting": "choose_one",
+          "duration": "turn"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "",
+    "image": "CardArts/OGS-020.webp"
+  },
+  {
+    "id": "gentlemens-duel",
+    "name": "Gentlemen's Duel",
+    "set": "OGS",
+    "card_number": "008",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "body"
+    ],
+    "rarity": "Common",
+    "energy_cost": 6,
+    "power_cost": [
+      {
+        "domain": "body",
+        "amount": 1
+      }
+    ],
+    "keywords": [
+      {
+        "id": "action"
+      }
+    ],
+    "is_action": true,
+    "is_reaction": false,
+    "effect_text": "Action (Play on your turn or in showdowns.)\nGive a friendly unit +3 Might this turn. Then choose an enemy unit. They deal damage equal to their Mights to each other.",
+    "abilities": [
+      {
+        "ability_id": "gentlemens-duel-buff",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "give_might",
+        "effect_params": {
+          "amount": 3,
+          "duration": "turn",
+          "target": "friendly_unit",
+          "targeting": "choose_one"
+        },
+        "is_action": false,
+        "is_reaction": false
+      },
+      {
+        "ability_id": "gentlemens-duel-fight",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "fight_chosen_units",
+        "effect_params": {
+          "target": "enemy_unit",
+          "targeting": "choose_one"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "A proper and formal way to kill your enemies.",
+    "image": "CardArts/OGS-008.webp"
   }
 ]

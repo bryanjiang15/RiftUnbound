@@ -99,5 +99,43 @@
       }
     ],
     "image": "CardArts/OGN-285.webp"
+  },
+  {
+    "id": "fortified-position",
+    "name": "Fortified Position",
+    "set": "OGN",
+    "card_number": "279",
+    "card_type": "battlefield",
+    "supertypes": [],
+    "tags": [],
+    "domain": [],
+    "rarity": "Uncommon",
+    "energy_cost": 0,
+    "power_cost": [],
+    "facedown_capacity": 1,
+    "keywords": [],
+    "effect_text": "When you defend here, choose a unit. It gains Shield 2 this combat. (+2 Might while it's a defender.)",
+    "abilities": [
+      {
+        "ability_id": "fortified-position-defend",
+        "ability_type": "triggered",
+        "timing": "on_defend",
+        "condition": null,
+        "is_optional": true,
+        "cost": {},
+        "effect_type": "give_keyword",
+        "effect_params": {
+          "target": "friendly_unit_here",
+          "keyword": {
+            "id": "shield",
+            "value": 2
+          },
+          "duration": "combat"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "image": "CardArts/OGN-279.webp"
   }
 ]

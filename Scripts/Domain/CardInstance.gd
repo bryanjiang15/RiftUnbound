@@ -26,6 +26,9 @@ var attached_to: CardInstance = null
 var temp_might_bonus: int = 0
 var temp_keywords: Array = []
 var passive_keywords: Array = []
+# Recomputed by TriggerDispatcher.emit_passive_auras from conditional passive
+# Might abilities (e.g. "while alone", "while you have 8+ runes") and Legend auras.
+var passive_might_bonus: int = 0
 
 # Tracking
 var played_this_turn: bool = false
@@ -39,7 +42,7 @@ func _init(def: CardDefinition, inst_id: String, owner_idx: int) -> void:
 
 
 func get_base_might() -> int:
-	var base = definition.might + buff_counters + temp_might_bonus
+	var base = definition.might + buff_counters + temp_might_bonus + passive_might_bonus
 	for gear in attached_gear:
 		if gear.definition.might_bonus != null and gear.definition.might_bonus != "":
 			base += int(str(gear.definition.might_bonus).replace("+", ""))
@@ -73,21 +76,24 @@ func has_keyword(keyword_id: String) -> bool:
 	return false
 
 
+# Keyword values stack: a unit holding the same keyword from multiple sources
+# (e.g. printed Shield 2 plus a combat-granted Shield 1) sums their values.
 func get_keyword_value(keyword_id: String) -> int:
+	var total := 0
 	for kw in definition.keywords:
 		if kw.get("id", "") == keyword_id:
-			return kw.get("value", 1)
+			total += kw.get("value", 1)
 	for kw in passive_keywords:
 		if kw.get("id", "") == keyword_id:
-			return kw.get("value", 1)
+			total += kw.get("value", 1)
 	for kw in temp_keywords:
 		if kw.get("id", "") == keyword_id:
-			return kw.get("value", 1)
+			total += kw.get("value", 1)
 	for gear in attached_gear:
 		for kw in gear.definition.attached_keywords:
 			if kw.get("id", "") == keyword_id:
-				return kw.get("value", 1)
-	return 0
+				total += kw.get("value", 1)
+	return total
 
 
 func has_lethal_damage() -> bool:
@@ -108,6 +114,17 @@ func clear_temp_effects() -> void:
 	temp_keywords.clear()
 	passive_keywords.clear()
 	played_this_turn = false
+
+
+# Remove keywords that were granted only for the duration of a single combat
+# (e.g. Fortified Position's Shield 2 "this combat").
+func clear_combat_effects() -> void:
+	var kept: Array = []
+	for kw in temp_keywords:
+		if kw is Dictionary and kw.get("duration", "") == "combat":
+			continue
+		kept.append(kw)
+	temp_keywords = kept
 
 
 func apply_stun() -> void:

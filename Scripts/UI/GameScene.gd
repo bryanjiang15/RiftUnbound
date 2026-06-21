@@ -90,7 +90,23 @@ func _setup_controller() -> void:
 	_controller.name = "GameController"
 	if _game_mode == "pvp":
 		_controller._ai_player_index = -1
+
+	# Optional per-match deck overrides set by the Main Menu.
+	var deck_config := {}
+	var p1_deck := str(Engine.get_meta("p1_deck", ""))
+	var p2_deck := str(Engine.get_meta("p2_deck", ""))
+	if p1_deck != "":
+		deck_config["p1_deck"] = p1_deck
+	if p2_deck != "":
+		deck_config["p2_deck"] = p2_deck
+
+	if not deck_config.is_empty():
+		_controller.skip_auto_start = true
+
 	add_child(_controller)
+
+	if not deck_config.is_empty():
+		_controller.start_game_from_config(deck_config)
 
 
 func _setup_ai() -> void:

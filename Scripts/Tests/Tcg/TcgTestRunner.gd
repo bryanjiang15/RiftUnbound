@@ -11,6 +11,7 @@ const RuleChainTests = preload("res://Scripts/Tests/Tcg/suites/RuleChainTests.gd
 const RuleCleanupTests = preload("res://Scripts/Tests/Tcg/suites/RuleCleanupTests.gd")
 const RuleResourcesTests = preload("res://Scripts/Tests/Tcg/suites/RuleResourcesTests.gd")
 const CardScenarioTests = preload("res://Scripts/Tests/Tcg/suites/CardScenarioTests.gd")
+const MasterYiDeckTests = preload("res://Scripts/Tests/Tcg/suites/MasterYiDeckTests.gd")
 
 const SUITE_ORDER: Array[String] = [
 	"RuleSetup",
@@ -23,6 +24,7 @@ const SUITE_ORDER: Array[String] = [
 	"RuleCleanup",
 	"RuleResources",
 	"CardScenario",
+	"MasterYiDeck",
 ]
 
 const SUITES := {
@@ -36,6 +38,7 @@ const SUITES := {
 	"RuleCleanup": RuleCleanupTests,
 	"RuleResources": RuleResourcesTests,
 	"CardScenario": CardScenarioTests,
+	"MasterYiDeck": MasterYiDeckTests,
 }
 
 

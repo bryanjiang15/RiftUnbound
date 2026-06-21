@@ -90,6 +90,11 @@ static func _process_deaths(gs: GameState, ability_resolver: AbilityResolver, co
 	var log_lines: Array[String] = []
 	var units_to_kill: Array = []
 
+	# Refresh conditional passive Might (e.g. "while alone", Legend auras) using the
+	# combat designations just assigned, so lethal-damage checks use current Might.
+	if controller != null and controller.trigger_dispatcher != null:
+		controller.trigger_dispatcher.emit_passive_auras(gs)
+
 	for ps in gs.players:
 		for u in ps.get_units_at_base():
 			if u.has_lethal_damage():

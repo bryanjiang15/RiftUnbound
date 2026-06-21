@@ -574,5 +574,297 @@
     ],
     "flavor_text": "It feeds well on death, but better on madness.",
     "image": "CardArts/OGN-195.webp"
+  },
+  {
+    "id": "stalwart-poro",
+    "name": "Stalwart Poro",
+    "set": "OGN",
+    "card_number": "052",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Poro"
+    ],
+    "domain": [
+      "calm"
+    ],
+    "rarity": "Common",
+    "energy_cost": 2,
+    "power_cost": [],
+    "might": 2,
+    "might_bonus": null,
+    "keywords": [
+      {
+        "id": "shield",
+        "value": 1
+      }
+    ],
+    "effect_text": "Shield (+1 Might while I'm a defender.)",
+    "abilities": [],
+    "flavor_text": "It suits him.",
+    "image": "CardArts/OGN-052.webp"
+  },
+  {
+    "id": "wielder-of-water",
+    "name": "Wielder of Water",
+    "set": "OGN",
+    "card_number": "055",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Ionia"
+    ],
+    "domain": [
+      "calm"
+    ],
+    "rarity": "Common",
+    "energy_cost": 3,
+    "power_cost": [],
+    "might": 2,
+    "might_bonus": null,
+    "keywords": [],
+    "effect_text": "While I'm attacking or defending alone, I have +2 Might.",
+    "abilities": [
+      {
+        "ability_id": "wielder-of-water-alone",
+        "ability_type": "passive",
+        "timing": null,
+        "condition": {
+          "type": "while_combat_alone"
+        },
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "conditional_might",
+        "effect_params": {
+          "amount": 2
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "Each drop an ocean of possibilities.",
+    "image": "CardArts/OGN-055.webp"
+  },
+  {
+    "id": "master-yi-meditative",
+    "name": "Master Yi - Meditative",
+    "set": "OGS",
+    "card_number": "004",
+    "card_type": "unit",
+    "supertypes": [
+      "champion"
+    ],
+    "tags": [
+      "Master Yi",
+      "Ionia"
+    ],
+    "domain": [
+      "calm"
+    ],
+    "rarity": "Rare",
+    "energy_cost": 5,
+    "power_cost": [
+      {
+        "domain": "calm",
+        "amount": 1
+      }
+    ],
+    "might": 4,
+    "might_bonus": null,
+    "keywords": [],
+    "effect_text": "While you have 8+ runes, I have +4 Might.",
+    "abilities": [
+      {
+        "ability_id": "master-yi-meditative-runes",
+        "ability_type": "passive",
+        "timing": null,
+        "condition": {
+          "type": "rune_count_gte",
+          "value": 8
+        },
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "conditional_might",
+        "effect_params": {
+          "amount": 4
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "\"Anger gives motivation without purpose.\"",
+    "image": "CardArts/OGS-004.webp"
+  },
+  {
+    "id": "playful-phantom",
+    "name": "Playful Phantom",
+    "set": "OGN",
+    "card_number": "049",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Spirit",
+      "Shadow Isles"
+    ],
+    "domain": [
+      "calm"
+    ],
+    "rarity": "Common",
+    "energy_cost": 5,
+    "power_cost": [],
+    "might": 5,
+    "might_bonus": null,
+    "keywords": [],
+    "effect_text": "",
+    "abilities": [],
+    "flavor_text": "\"My toys break so easily.\"",
+    "image": "CardArts/OGN-049.webp"
+  },
+  {
+    "id": "zephyr-sage",
+    "name": "Zephyr Sage",
+    "set": "OGS",
+    "card_number": "005",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Ionia",
+      "Bird"
+    ],
+    "domain": [
+      "calm"
+    ],
+    "rarity": "Uncommon",
+    "energy_cost": 6,
+    "power_cost": [],
+    "might": 6,
+    "might_bonus": null,
+    "keywords": [
+      {
+        "id": "shield",
+        "value": 1
+      }
+    ],
+    "effect_text": "Shield (+1 Might while I'm a defender.)",
+    "abilities": [],
+    "flavor_text": "\"A true master is an eternal student.\" – Master Yi",
+    "image": "CardArts/OGS-005.webp"
+  },
+  {
+    "id": "master-yi-honed",
+    "name": "Master Yi - Honed",
+    "set": "OGS",
+    "card_number": "009",
+    "card_type": "unit",
+    "supertypes": [
+      "champion"
+    ],
+    "tags": [
+      "Master Yi",
+      "Ionia"
+    ],
+    "domain": [
+      "body"
+    ],
+    "rarity": "Epic",
+    "energy_cost": 7,
+    "power_cost": [
+      {
+        "domain": "body",
+        "amount": 1
+      }
+    ],
+    "might": 6,
+    "might_bonus": null,
+    "keywords": [
+      {
+        "id": "ganking"
+      }
+    ],
+    "effect_text": "Ganking (I can move from battlefield to battlefield.)\nI enter ready.",
+    "abilities": [
+      {
+        "ability_id": "master-yi-honed-enter-ready",
+        "ability_type": "triggered",
+        "timing": "on_play",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "enter_ready",
+        "effect_params": {},
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "\"The focused mind can pierce through stone.\"",
+    "image": "CardArts/OGS-009.webp"
+  },
+  {
+    "id": "stormclaw-ursine",
+    "name": "Stormclaw Ursine",
+    "set": "OGN",
+    "card_number": "137",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Freljord"
+    ],
+    "domain": [
+      "body"
+    ],
+    "rarity": "Common",
+    "energy_cost": 7,
+    "power_cost": [],
+    "might": 6,
+    "might_bonus": null,
+    "keywords": [
+      {
+        "id": "tank"
+      }
+    ],
+    "effect_text": "Tank (I must be assigned combat damage first.)\nWhen you play me, channel 1 rune exhausted.",
+    "abilities": [
+      {
+        "ability_id": "stormclaw-ursine-play",
+        "ability_type": "triggered",
+        "timing": "on_play",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "channel_rune",
+        "effect_params": {
+          "amount": 1,
+          "exhausted": true
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "\"The Ursine speak for man, and the wild responds.\"",
+    "image": "CardArts/OGN-137.webp"
+  },
+  {
+    "id": "mountain-drake",
+    "name": "Mountain Drake",
+    "set": "OGN",
+    "card_number": "142",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Dragon"
+    ],
+    "domain": [
+      "body"
+    ],
+    "rarity": "Uncommon",
+    "energy_cost": 9,
+    "power_cost": [],
+    "might": 10,
+    "might_bonus": null,
+    "keywords": [],
+    "effect_text": "",
+    "abilities": [],
+    "flavor_text": "If you're seeing that behavior up close ... run.",
+    "image": "CardArts/OGN-142.webp"
   }
 ]

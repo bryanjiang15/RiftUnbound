@@ -64,6 +64,16 @@ func _build_ui() -> void:
 	pvai_entry.get_node("Button").pressed.connect(_on_pvai_pressed)
 	vbox.add_child(pvai_entry)
 
+	# Player vs AI — Master Yi (Calm/Body) deck mirror
+	var yi_entry := _make_entry(
+		"Master Yi Deck (vs AI)",
+		"Pilot the Calm/Body Master Yi deck  —  P2 is AI",
+		Color(0.20, 0.50, 0.30),
+		Color(0.26, 0.64, 0.38)
+	)
+	yi_entry.get_node("Button").pressed.connect(_on_master_yi_pressed)
+	vbox.add_child(yi_entry)
+
 	# Footer
 	var footer := Label.new()
 	footer.text = "v0.1 — Riftbound Simulation"
@@ -114,11 +124,29 @@ func _make_entry(label_text: String, desc_text: String, color_bg: Color, color_h
 	return wrapper
 
 
+const MASTER_YI_DECK := "res://Data/Decks/master-yi-calm-body.json"
+
+
+func _clear_deck_overrides() -> void:
+	Engine.remove_meta("p1_deck")
+	Engine.remove_meta("p2_deck")
+
+
 func _on_pvp_pressed() -> void:
 	Engine.set_meta("game_mode", "pvp")
+	_clear_deck_overrides()
 	get_tree().change_scene_to_file("res://Scenes/GameScene.tscn")
 
 
 func _on_pvai_pressed() -> void:
 	Engine.set_meta("game_mode", "pvai")
+	_clear_deck_overrides()
+	get_tree().change_scene_to_file("res://Scenes/GameScene.tscn")
+
+
+func _on_master_yi_pressed() -> void:
+	Engine.set_meta("game_mode", "pvai")
+	# Human (P1) pilots the new deck; AI (P2) mirrors it.
+	Engine.set_meta("p1_deck", MASTER_YI_DECK)
+	Engine.set_meta("p2_deck", MASTER_YI_DECK)
 	get_tree().change_scene_to_file("res://Scenes/GameScene.tscn")

@@ -23,6 +23,8 @@ var cards_played_this_turn: int = 0
 var cards_discarded_count: int = 0
 var discarded_this_turn: Array[CardInstance] = []
 var battlefields_scored_this_turn: Array[int] = []
+# Set by Confront ("Units you play this turn enter ready"); reset each turn.
+var units_enter_ready_this_turn: bool = false
 
 # Deck configuration (battlefield IDs from deck file)
 var deck_battlefields: Array[String] = []
@@ -93,12 +95,12 @@ func draw_card() -> CardInstance:
 	return card
 
 
-func channel_rune() -> CardInstance:
+func channel_rune(enter_exhausted: bool = false) -> CardInstance:
 	if rune_deck.is_empty():
 		return null
 	var rune = rune_deck.pop_front()
 	rune.location = "rune_zone"
-	rune.is_exhausted = false
+	rune.is_exhausted = enter_exhausted
 	channeled_runes.append(rune)
 	return rune
 
@@ -183,6 +185,7 @@ func reset_turn_state() -> void:
 	cards_discarded_count = 0
 	discarded_this_turn.clear()
 	battlefields_scored_this_turn.clear()
+	units_enter_ready_this_turn = false
 	for c in base_permanents:
 		c.played_this_turn = false
 	for c in hand:

@@ -17,12 +17,12 @@ This document records **what works today**, **what card data expects**, and **wh
 
 | File | Count | Notes |
 |---|---|---|
-| `units.json` | 12 | Fury and Chaos units for both starter decks |
-| `spells.json` | 5 | Mix of Action, Reaction, and Hidden spells |
+| `units.json` | 20 | Fury/Chaos starter units + Calm/Body Master Yi units |
+| `spells.json` | 12 | Action, Reaction, Hidden, and Master Yi spells |
 | `gear.json` | 1 | Scrapheap (on-play / on-discard / on-death triggers) |
-| `battlefields.json` | 3 | Each has a triggered ability on conquer or defend |
-| `legends.json` | 1 | Jinx — Loose Cannon (beginning-phase draw) |
-| `runes.json` | 2 | Fury Rune, Chaos Rune (tap + recycle activated) |
+| `battlefields.json` | 4 | Conquer/defend triggers (incl. Fortified Position) |
+| `legends.json` | 2 | Jinx — Loose Cannon, Master Yi — Wuju Bladesman |
+| `runes.json` | 4 | Fury, Chaos, Calm, Body Runes (tap + recycle activated) |
 | `tokens.json` | 0 | Empty — no token definitions yet |
 
 **Starter deck scope:** 24 unique card IDs, 40+ main-deck cards each, 12 runes, 3 battlefields per deck (2 placed at game start).
@@ -219,6 +219,94 @@ The starter-deck simulation can be considered **feature-complete for the current
 4. Optional costs and targets prompt the active player (human or AI via `choose`).
 5. Hold, Conquer, Burn Out, and Winning Point scoring match §13.
 6. `LegalMoveEnumerator` lists only genuinely legal commands for each decision point.
+
+---
+
+## 8b. OGS Master Yi (Calm/Body) Deck — Status & Remaining Gaps
+
+A second deck was added (`Data/Decks/master-yi-calm-body.json`, source: `Docs/decklist-2`,
+`Docs/cardlist-2.txt`). It introduces the **Calm** and **Body** domains, a Legend with a
+combat aura, conditional passive Might, and several new spell effects. It is selectable from
+the Main Menu ("Master Yi Deck (vs AI)").
+
+### New content added
+
+| Card | File | Status |
+|---|---|---|
+| Calm Rune (OGN-042), Body Rune (OGN-126) | `runes.json` | ✅ Full (tap energy / recycle power) |
+| Fortified Position (OGN-279) | `battlefields.json` | ✅ `on_defend` grants Shield 2 for the combat (give_keyword, `duration: combat`) — see triggered-target note below |
+| Master Yi - Wuju Bladesman (OGS-019) — Legend | `legends.json` | ✅ Aura: +2 Might to a lone defender (`aura_might`) |
+| Stalwart Poro (OGN-052), Zephyr Sage (OGS-005) | `units.json` | ✅ Shield keyword |
+| Playful Phantom (OGN-049), Mountain Drake (OGN-142) | `units.json` | ✅ Vanilla |
+| Master Yi - Honed (OGS-009) | `units.json` | ✅ Ganking + `enter_ready` on play |
+| Stormclaw Ursine (OGN-137) | `units.json` | ✅ Tank + channel 1 rune exhausted on play |
+| Wielder of Water (OGN-055) | `units.json` | ✅ +2 Might while attacking/defending alone (`conditional_might`) |
+| Master Yi - Meditative (OGS-004) | `units.json` | ✅ +4 Might while you have 8+ runes (`conditional_might`) |
+| En Garde (OGN-046) | `spells.json` | ✅ `give_might_with_alone_bonus` |
+| Mobilize (OGN-134) | `spells.json` | ✅ `channel_rune_or_draw` |
+| Confront (OGN-129) | `spells.json` | ✅ `units_enter_ready_this_turn` + draw |
+| Cannon Barrage (OGN-127) | `spells.json` | ✅ `deal_damage_all_enemies_in_combat` |
+| Meditation (OGN-048) | `spells.json` | ⚠️ Partial — see gaps |
+| Gentlemen's Duel (OGS-008) | `spells.json` | ⚠️ Partial — see gaps |
+| Highlander (OGS-020) | `spells.json` | ❌ Not implemented — see gaps |
+
+### Engine features added for this deck
+
+- `CardInstance.passive_might_bonus`, recomputed in `TriggerDispatcher.emit_passive_auras`
+  (also called after every command in `GameController.submit_command`). Driven by passive
+  `conditional_might` (self) and Legend `aura_might` abilities.
+- `ConditionEvaluator`: `rune_count_gte`, `while_combat_alone`, `while_defending_alone`.
+- `AbilityResolver`: `channel_rune` now honors `exhausted`; new `channel_rune_or_draw`,
+  `give_might_with_alone_bonus`, `units_enter_ready_this_turn`,
+  `deal_damage_all_enemies_in_combat`.
+- `PlayerState.channel_rune(enter_exhausted)`, `PlayerState.units_enter_ready_this_turn`,
+  and `_place_unit` honoring that flag.
+
+### Remaining gaps (require further engine work)
+
+1. **Replacement effects (Highlander, OGS-020).** "The next time a friendly unit would die
+   this turn, heal/exhaust/recall it instead." The engine has no replacement-effect layer;
+   `CleanupProcessor.process_deaths` moves lethally-damaged units straight to Trash. Needs:
+   a per-unit/turn "death replacement" registry consulted before a unit dies, plus a recall
+   (heal + exhaust + send to base, not a move). The JSON ability is present
+   (`effect_type: death_replacement_recall`, `ability_type: replacement`) but logs `[INFO]`.
+2. **Optional additional costs (Meditation, OGN-048).** "You may exhaust a friendly unit; if
+   you do, draw 2, otherwise draw 1." Costs that prompt the player to choose-and-exhaust a
+   unit, with a branching effect, are not supported. Current behavior: draws 1 (the floor);
+   the exhaust-for-+1-draw upside is unimplemented (ability `cost.custom = may_exhaust_friendly_unit`).
+3. **Multi-target / "fight" effects (Gentlemen's Duel, OGS-008).** The +3 Might half resolves
+   (`give_might`), but the second clause — choose an enemy unit, then have the buffed unit and
+   that enemy deal damage equal to their Mights to each other — needs (a) carrying a second
+   chosen target through resolution and (b) a mutual-damage ("fight") effect. The
+   `fight_chosen_units` ability currently logs `[INFO]`.
+4. **Two-target resolution generally.** `_play_spell` only sets up one `choose_one` target
+   prompt per spell. Cards needing two distinct chosen targets (e.g. Gentlemen's Duel) need a
+   target queue on the chain item.
+5. **Triggered-ability target selection.** Triggered abilities (e.g. Fortified Position's
+   `on_defend`, Reaver's Row) auto-pick the *first* valid target via
+   `TriggerDispatcher._resolve_trigger_target`; they cannot yet prompt the controller to
+   choose among several valid targets. `targeting: choose_one` is therefore only honored for
+   spells (via `_play_spell`), not triggered abilities. Fortified Position drops the
+   (no-op) `targeting` field and grants Shield 2 to the first friendly defender; with a
+   single defender — the common case — this matches the card.
+
+### Engine timing fixes (from PR review)
+
+- Conditional passive Might is recomputed (`emit_passive_auras`) **after the Channel Phase**
+  and **before lethal-damage checks** (`CleanupProcessor._process_deaths`,
+  `CombatProcessor.proceed_to_damage`), not just after player commands, so rune-count and
+  "alone" auras are never stale when Might is read.
+- `while_combat_alone` / `while_defending_alone` only apply to the unit in the **active**
+  combat (`combat_bf_index`), since cleanup designates attacker/defender on every contested
+  battlefield.
+- `give_keyword` supports `duration: combat`, cleared by `CardInstance.clear_combat_effects`
+  in `CombatProcessor.finalize_combat`, so Fortified Position's Shield does not leak past the
+  combat or into a later combat the same turn.
+
+### Battlefields note
+
+`Docs/decklist-2` lists only one battlefield (Fortified Position). A Riftbound deck carries 3,
+so `targons-peak` and `reavers-row` were added to round out the deck's `battlefields` list.
 
 ---
 

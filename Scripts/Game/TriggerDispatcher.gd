@@ -71,15 +71,33 @@ func emit_passive_auras(gs: GameState) -> void:
 		all_units.append_array(gs.board.get_all_units_on_board(ps.player_index))
 		for u in all_units:
 			u.passive_keywords.clear()
+			u.passive_might_bonus = 0
+		# Self passive abilities (keyword grants + conditional Might).
+		for u in all_units:
 			for ab in u.definition.abilities:
 				if ab.get("ability_type", "") != "passive":
 					continue
-				if ab.get("effect_type", "") != "gain_keywords":
-					continue
 				if not ConditionEvaluatorScript.evaluate(ab.get("condition", null), u, gs, {}):
 					continue
-				for kw in ab.get("effect_params", {}).get("keywords", []):
-					u.passive_keywords.append(kw)
+				match ab.get("effect_type", ""):
+					"gain_keywords":
+						for kw in ab.get("effect_params", {}).get("keywords", []):
+							u.passive_keywords.append(kw)
+					"conditional_might":
+						u.passive_might_bonus += int(ab.get("effect_params", {}).get("amount", 0))
+		# Legend auras that buff friendly units (e.g. Master Yi - Wuju Bladesman).
+		if ps.legend != null:
+			for ab in ps.legend.definition.abilities:
+				if ab.get("ability_type", "") != "passive":
+					continue
+				if ab.get("effect_type", "") != "aura_might":
+					continue
+				var amount := int(ab.get("effect_params", {}).get("amount", 0))
+				var cond = ab.get("condition", null)
+				for u in all_units:
+					# The aura condition is evaluated per affected unit.
+					if ConditionEvaluatorScript.evaluate(cond, u, gs, {}):
+						u.passive_might_bonus += amount
 
 
 func queue_end_of_turn(source: Variant, ability: Dictionary, ctx: Dictionary) -> void:

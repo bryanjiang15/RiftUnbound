@@ -64,6 +64,10 @@ static func proceed_to_damage(gs: GameState, controller: GameController = null) 
 		return finalize_combat(gs, log_lines, controller)
 
 	_ensure_combat_designations(gs)
+	# Recompute conditional passive Might now that attacker/defender are set so
+	# "while alone" bonuses and Legend auras are reflected in the damage step.
+	if controller != null and controller.trigger_dispatcher != null:
+		controller.trigger_dispatcher.emit_passive_auras(gs)
 	atk_units = Array(bf.units[attacker])
 	def_units = Array(bf.units[defender])
 
@@ -226,6 +230,13 @@ static func finalize_combat(gs: GameState, log_lines: Array, controller: GameCon
 		for u in player_units:
 			u.is_attacker = false
 			u.is_defender = false
+
+	# Expire effects granted only for this combat (e.g. Fortified Position Shield).
+	for ps in gs.players:
+		for u in ps.get_units_at_base():
+			u.clear_combat_effects()
+		for u in gs.board.get_all_units_on_board(ps.player_index):
+			u.clear_combat_effects()
 
 	gs.combat_bf_index = -1
 	gs.attacker_player_index = -1

@@ -39,5 +39,48 @@
       }
     ],
     "image": "CardArts/OGN-251.webp"
+  },
+  {
+    "id": "master-yi-wuju-bladesman",
+    "name": "Master Yi - Wuju Bladesman - Starter",
+    "set": "OGS",
+    "card_number": "019",
+    "card_type": "legend",
+    "supertypes": [
+      "champion"
+    ],
+    "tags": [
+      "Master Yi"
+    ],
+    "domain": [
+      "calm",
+      "body"
+    ],
+    "rarity": "Rare",
+    "energy_cost": 0,
+    "power_cost": [],
+    "champion_tag": "Master Yi",
+    "keywords": [],
+    "effect_text": "While a friendly unit defends alone, it gets +2 Might.",
+    "abilities": [
+      {
+        "ability_id": "master-yi-wuju-bladesman-aura",
+        "ability_type": "passive",
+        "timing": null,
+        "condition": {
+          "type": "while_defending_alone"
+        },
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "aura_might",
+        "effect_params": {
+          "target": "friendly_unit",
+          "amount": 2
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "image": "CardArts/OGS-019.webp"
   }
 ]

@@ -23,8 +23,35 @@ static func evaluate(condition: Variant, source: CardInstance, gs: GameState, ct
 			if target == null:
 				return false
 			return target.get_base_might() <= int(condition.get("value", 0))
+		"rune_count_gte":
+			var pi = source.owner_index if source else ctx.get("player_index", 0)
+			return gs.players[pi].channeled_runes.size() >= int(condition.get("value", 0))
+		"while_combat_alone":
+			# Unit is attacking or defending and is the only friendly unit at its
+			# battlefield (i.e. fighting "alone").
+			return _is_combat_alone(source, gs)
+		"while_defending_alone":
+			# Unit is a defender and the only friendly unit at its battlefield.
+			return source != null and source.is_defender and _is_combat_alone(source, gs)
 		_:
 			return true
+
+
+static func _is_combat_alone(unit: CardInstance, gs: GameState) -> bool:
+	if unit == null:
+		return false
+	if not (unit.is_attacker or unit.is_defender):
+		return false
+	if not unit.is_at_battlefield():
+		return false
+	# Only the unit in the *active* combat counts as "attacking/defending alone".
+	# Cleanup designates attacker/defender on every contested battlefield while a
+	# combat is in progress, so gating on combat_bf_index avoids granting the
+	# bonus to units sitting at a different contested battlefield.
+	if gs.combat_bf_index < 0 or unit.battlefield_index != gs.combat_bf_index:
+		return false
+	var bf = gs.board.battlefields[unit.battlefield_index]
+	return bf.units[unit.owner_index].size() == 1
 
 
 static func evaluate_target_filter(params: Dictionary, target: CardInstance, source: CardInstance, gs: GameState) -> bool:
