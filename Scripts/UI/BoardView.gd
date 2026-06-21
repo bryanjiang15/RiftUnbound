@@ -796,6 +796,12 @@ func _refresh_chain(gs: GameState) -> void:
 		pos_lbl.add_theme_color_override("font_color", item_col)
 		vbox.add_child(pos_lbl)
 
+		# Card art thumbnail — matches the battlefield/base card visuals
+		if item.source_card != null:
+			var thumb_center := CenterContainer.new()
+			thumb_center.add_child(_make_card_thumb(item.source_card))
+			vbox.add_child(thumb_center)
+
 		_chain_items_vbox.add_child(item_pc)
 
 
@@ -889,6 +895,10 @@ func _make_card_thumb(inst: CardInstance) -> Control:
 		badge_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		card.add_child(badge_lbl)
 
+	# Might display (units only): current value plus per-source gain/loss labels
+	if inst.definition.card_type == "unit":
+		_add_might_overlay(card, inst)
+
 	# Exhausted: dim overlay + rotate 90° (TCG "tapped" look)
 	if inst.is_exhausted:
 		var dim := ColorRect.new()
@@ -900,6 +910,74 @@ func _make_card_thumb(inst: CardInstance) -> Control:
 		card.rotation_degrees = 90.0
 
 	return wrapper
+
+
+# Might gem (top-right) + per-source gain/loss labels showing where might came from.
+# Green = net gain, red = net loss, neutral = unmodified printed might.
+func _add_might_overlay(card: Control, inst: CardInstance) -> void:
+	var current := inst.get_current_might()
+	var delta := inst.get_might_delta()
+
+	var accent: Color
+	if delta > 0:
+		accent = Color(0.35, 0.88, 0.40)
+	elif delta < 0:
+		accent = Color(0.92, 0.34, 0.34)
+	else:
+		accent = Color(0.92, 0.86, 0.55)
+
+	# Current might gem in the top-right corner
+	var gem_bg := Panel.new()
+	gem_bg.anchor_left = 0.66; gem_bg.anchor_right  = 1.0
+	gem_bg.anchor_top  = 0.0;  gem_bg.anchor_bottom = 0.20
+	gem_bg.add_theme_stylebox_override("panel",
+		_flat_sb(Color(0.0, 0.0, 0.0, 0.80), accent, 2, 4))
+	gem_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(gem_bg)
+
+	var gem_lbl := Label.new()
+	gem_lbl.text = str(current)
+	gem_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	gem_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	gem_lbl.anchor_left = 0.66; gem_lbl.anchor_right  = 1.0
+	gem_lbl.anchor_top  = 0.0;  gem_lbl.anchor_bottom = 0.20
+	gem_lbl.add_theme_font_size_override("font_size", 13)
+	gem_lbl.add_theme_color_override("font_color", accent)
+	gem_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(gem_lbl)
+
+	# Per-source breakdown labels (e.g. "⚔+2", "🛡+1", "⚡-1")
+	var parts := inst.get_might_breakdown()
+	if parts.is_empty():
+		return
+
+	var lines: Array[String] = []
+	for p in parts:
+		var amt: int = p["amount"]
+		var sgn := "+" if amt > 0 else ""
+		lines.append("%s%s%d" % [p["symbol"], sgn, amt])
+
+	var line_h := 0.115
+	var top := 0.21
+	var bottom: float = min(top + line_h * lines.size(), 0.86)
+
+	var brk_bg := ColorRect.new()
+	brk_bg.color = Color(0.0, 0.0, 0.0, 0.74)
+	brk_bg.anchor_left = 0.52; brk_bg.anchor_right  = 1.0
+	brk_bg.anchor_top  = top;  brk_bg.anchor_bottom = bottom
+	brk_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(brk_bg)
+
+	var brk_lbl := Label.new()
+	brk_lbl.text = "\n".join(lines)
+	brk_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	brk_lbl.anchor_left = 0.52; brk_lbl.anchor_right  = 1.0
+	brk_lbl.anchor_top  = top;  brk_lbl.anchor_bottom = bottom
+	brk_lbl.offset_right = -2
+	brk_lbl.add_theme_font_size_override("font_size", 8)
+	brk_lbl.add_theme_color_override("font_color", Color(0.96, 0.96, 0.98))
+	brk_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(brk_lbl)
 
 
 func _make_facedown_thumb(inst: CardInstance) -> Control:
