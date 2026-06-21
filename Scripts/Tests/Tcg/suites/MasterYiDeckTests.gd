@@ -25,6 +25,7 @@ static func run(assertions) -> void:
 	_test_cannon_barrage_hits_combat(assertions)
 	_test_fortified_position_shield(assertions)
 	_test_fortified_position_shield_clears_after_combat(assertions)
+	_test_fortified_position_shield_stacks(assertions)
 
 
 static func _runes(rune_id: String, n: int) -> Array:
@@ -336,3 +337,24 @@ static func _test_fortified_position_shield_clears_after_combat(assertions) -> v
 	assertions.assert_true(p.has_keyword("shield"), "shield granted for the combat")
 	p.clear_combat_effects()
 	assertions.assert_false(p.has_keyword("shield"), "shield cleared after combat")
+
+static func _test_fortified_position_shield_stacks(assertions) -> void:
+	# Shield stacks: a unit with printed Shield 1 that also gains Fortified
+	# Position's combat Shield 2 defends with +3 Might (1 + 2), not just +2.
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["fortified-position", "targons-peak"],
+		"players": [
+			{"battlefield-a": [{"id": "stalwart-poro"}]},
+			{},
+		],
+	})
+	var p = h.find_unit("stalwart-poro")
+	p.is_defender = true
+	assertions.assert_eq(p.get_keyword_value("shield"), 1, "printed Shield 1 before grant")
+	assertions.assert_eq(p.get_current_might(), 3, "printed Shield 1 grants +1 while defending")
+	var ab = CardLoader.get_card("fortified-position").abilities[0]
+	h.controller.ability_resolver.resolve_ability(ab, null, p, h.gs(), {})
+	assertions.assert_eq(p.get_keyword_value("shield"), 3, "Shield 1 + Shield 2 stack to 3")
+	assertions.assert_eq(p.get_current_might(), 5, "stacked Shield grants +3 while defending")

@@ -76,21 +76,24 @@ func has_keyword(keyword_id: String) -> bool:
 	return false
 
 
+# Keyword values stack: a unit holding the same keyword from multiple sources
+# (e.g. printed Shield 2 plus a combat-granted Shield 1) sums their values.
 func get_keyword_value(keyword_id: String) -> int:
+	var total := 0
 	for kw in definition.keywords:
 		if kw.get("id", "") == keyword_id:
-			return kw.get("value", 1)
+			total += kw.get("value", 1)
 	for kw in passive_keywords:
 		if kw.get("id", "") == keyword_id:
-			return kw.get("value", 1)
+			total += kw.get("value", 1)
 	for kw in temp_keywords:
 		if kw.get("id", "") == keyword_id:
-			return kw.get("value", 1)
+			total += kw.get("value", 1)
 	for gear in attached_gear:
 		for kw in gear.definition.attached_keywords:
 			if kw.get("id", "") == keyword_id:
-				return kw.get("value", 1)
-	return 0
+				total += kw.get("value", 1)
+	return total
 
 
 func has_lethal_damage() -> bool:
