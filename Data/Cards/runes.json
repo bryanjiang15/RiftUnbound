@@ -114,5 +114,121 @@
       }
     ],
     "image": "Champ_Card.jpg"
+  },
+  {
+    "id": "calm-rune",
+    "name": "Calm Rune",
+    "set": "OGN",
+    "card_number": "042",
+    "card_type": "rune",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "calm"
+    ],
+    "energy_cost": 0,
+    "power_cost": [],
+    "is_basic": true,
+    "keywords": [],
+    "effect_text": "Tap: Add 1 energy to your pool.\nRecycle: Add 1 Calm power to your pool.",
+    "abilities": [
+      {
+        "ability_id": "calm-rune-tap",
+        "ability_type": "activated",
+        "timing": null,
+        "condition": null,
+        "is_optional": true,
+        "cost": {
+          "energy": 0,
+          "power": [],
+          "exhaust": true
+        },
+        "effect_type": "add_energy",
+        "effect_params": {
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": true
+      },
+      {
+        "ability_id": "calm-rune-recycle",
+        "ability_type": "activated",
+        "timing": null,
+        "condition": null,
+        "is_optional": true,
+        "cost": {
+          "energy": 0,
+          "power": [],
+          "exhaust": false,
+          "recycle_self": true
+        },
+        "effect_type": "add_power",
+        "effect_params": {
+          "domain": "calm",
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": true
+      }
+    ],
+    "image": "Champ_Card.jpg"
+  },
+  {
+    "id": "body-rune",
+    "name": "Body Rune",
+    "set": "OGN",
+    "card_number": "126",
+    "card_type": "rune",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "body"
+    ],
+    "energy_cost": 0,
+    "power_cost": [],
+    "is_basic": true,
+    "keywords": [],
+    "effect_text": "Tap: Add 1 energy to your pool.\nRecycle: Add 1 Body power to your pool.",
+    "abilities": [
+      {
+        "ability_id": "body-rune-tap",
+        "ability_type": "activated",
+        "timing": null,
+        "condition": null,
+        "is_optional": true,
+        "cost": {
+          "energy": 0,
+          "power": [],
+          "exhaust": true
+        },
+        "effect_type": "add_energy",
+        "effect_params": {
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": true
+      },
+      {
+        "ability_id": "body-rune-recycle",
+        "ability_type": "activated",
+        "timing": null,
+        "condition": null,
+        "is_optional": true,
+        "cost": {
+          "energy": 0,
+          "power": [],
+          "exhaust": false,
+          "recycle_self": true
+        },
+        "effect_type": "add_power",
+        "effect_params": {
+          "domain": "body",
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": true
+      }
+    ],
+    "image": "Champ_Card.jpg"
   }
 ]
