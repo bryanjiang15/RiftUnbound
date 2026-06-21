@@ -572,12 +572,83 @@ def _is_priority_legal_move(move: str) -> bool:
     return any(move.startswith(prefix) for prefix in _LEGAL_MOVE_PRIORITY_PREFIXES)
 
 
+def _head_label(verb: str, head: tuple[str, ...]) -> str:
+    if not head:
+        return verb
+    return f"{verb} {' '.join(head)}"
+
+
+def _ordered_values(values: set[str]) -> list[str]:
+    ordered = sorted(values)
+    if "base" in values:
+        ordered = ["base"] + [v for v in ordered if v != "base"]
+    return ordered
+
+
+def _build_legal_move_option_lines(legal: list[str]) -> list[str]:
+    """Build a compact parameter-options summary grouped by move identity."""
+    destination_verbs = {"play", "move"}
+    grouped: dict[tuple[str, tuple[str, ...]], dict[str, set[str]]] = {}
+    raw_moves: list[str] = []
+
+    for move in legal:
+        parsed = _parse_command(move)
+        if parsed is None:
+            raw_moves.append(move)
+            continue
+
+        key = (parsed["verb"], parsed["head"])
+        entry = grouped.setdefault(key, {
+            "to": set(),
+            "target": set(),
+            "at": set(),
+            "flags": set(),
+        })
+        if parsed["to"] is not None:
+            entry["to"].add(parsed["to"])
+        elif parsed["verb"] in destination_verbs:
+            entry["to"].add("base")
+        if parsed["target"] is not None:
+            entry["target"].add(parsed["target"])
+        if parsed["at"] is not None:
+            entry["at"].add(parsed["at"])
+        for flag in parsed["flags"]:
+            entry["flags"].add(flag)
+
+    lines: list[str] = []
+    for (verb, head), params in sorted(grouped.items(), key=lambda x: _head_label(x[0][0], x[0][1])):
+        parts: list[str] = []
+        to_vals = params["to"]
+        target_vals = params["target"]
+        at_vals = params["at"]
+        flag_vals = params["flags"]
+
+        if to_vals:
+            parts.append("to: " + "|".join(_ordered_values(to_vals)))
+        if at_vals:
+            parts.append("at: " + "|".join(_ordered_values(at_vals)))
+        if target_vals:
+            parts.append("target: " + "|".join(_ordered_values(target_vals)))
+        if flag_vals:
+            parts.append("flags: " + "|".join(sorted(flag_vals)))
+
+        suffix = f" [{'; '.join(parts)}]" if parts else ""
+        lines.append(f"    {_head_label(verb, head)}{suffix}")
+
+    for move in sorted(raw_moves):
+        lines.append(f"    {move}")
+
+    return lines
+
+
 def _append_legal_moves(lines: list[str], legal: list) -> None:
     """Show all play/move/choose lines; list remaining moves separately."""
     priority = [mv for mv in legal if _is_priority_legal_move(mv)]
     other = [mv for mv in legal if not _is_priority_legal_move(mv)]
 
     lines.append(f"Legal moves ({len(legal)} total):")
+    lines.append("  Parameter options by move:")
+    lines.extend(_build_legal_move_option_lines(legal))
     if priority:
         lines.append(f"  Play/move options ({len(priority)}):")
         for mv in priority:
