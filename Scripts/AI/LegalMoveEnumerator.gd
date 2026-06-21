@@ -59,6 +59,7 @@ static func enumerate(gs: GameState, player_index: int) -> Array:
 		if gs.focus_player_index != player_index:
 			return []
 		moves.append("pass")
+		_add_action_plays(gs, player_index, moves)
 		_add_reaction_plays(gs, player_index, moves)
 		return moves
 
@@ -231,6 +232,28 @@ static func _add_play_from_hidden(gs: GameState, player_index: int, moves: Array
 		if not CostCalculator.can_afford_with_autopay(player_index, cost, gs):
 			continue
 		var cmd := "play %s from hidden" % card.instance_id
+		if not cmd in moves:
+			moves.append(cmd)
+
+
+static func _add_action_plays(gs: GameState, player_index: int, moves: Array) -> void:
+	# Action spells may be played by the focus holder during a Showdown Open
+	# state (TurnStateMachine.can_play_card permits is_action spells there).
+	# Reaction spells are handled separately by _add_reaction_plays.
+	var ps: PlayerState = gs.players[player_index]
+	for card in ps.hand:
+		if card.definition.card_type != "spell":
+			continue
+		if not card.definition.is_action:
+			continue
+		if card.definition.is_reaction:
+			continue
+		if not TurnStateMachine.can_play_card(card, gs.current_state, player_index, gs):
+			continue
+		var cost = CostCalculator.compute_play_cost(card, player_index, gs)
+		if not CostCalculator.can_afford_with_autopay(player_index, cost, gs):
+			continue
+		var cmd := "play %s" % card.instance_id
 		if not cmd in moves:
 			moves.append(cmd)
 
