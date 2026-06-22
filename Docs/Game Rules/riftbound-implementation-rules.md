@@ -409,6 +409,8 @@ Arguments are space-separated. Targets are identified by their **instance ID** a
 move noxus-hopeful to battlefield-a
 move noxus-hopeful noxus-hopeful-2 to battlefield-a
 play void-seeker target iron-juggernaut
+hide fight-or-flight at battlefield-a
+equip scrapheap target noxus-hopeful
 tap rune-0
 recycle rune-2
 ```
@@ -449,6 +451,7 @@ The output log always prints the current instance IDs of cards so players know e
 | `play <id> target <id>` | `play void-seeker target iron-juggernaut` | Play a spell targeting a specific permanent |
 | `play <id> from champion` | `play jinx-rebel from champion` | Play the Chosen Champion from the Champion Zone |
 | `play <id> from hidden` | `play void-seeker from hidden` | Play a face-down Hidden card at its Battlefield |
+| `hide <id> at <battlefield-a\|battlefield-b>` | `hide fight-or-flight at battlefield-a` | Pay the Hidden hide cost and place a Hidden card face-down at a controlled Battlefield |
 
 #### Movement
 
@@ -463,6 +466,7 @@ The output log always prints the current instance IDs of cards so players know e
 |---|---|---|
 | `use <card-id>` | `use iron-ballista` | Activate the card's only Activated Ability |
 | `use <card-id> target <id>` | `use iron-ballista target noxus-hopeful` | Activate an Activated Ability with a target |
+| `equip <gear-id> target <unit-id>` | `equip scrapheap target noxus-hopeful` | Attach Gear to a unit; this is syntactic sugar for `use <gear-id> target <unit-id>` |
 
 #### Showdown / Chain Responses
 
@@ -491,6 +495,16 @@ When the engine requires a choice (e.g. choosing a target on resolution, picking
 | `choose <id>` | `choose noxus-hopeful` | Respond to an engine-prompted choice (target, hand card to discard, etc.) |
 | `choose yes` / `choose no` | `choose yes` | Accept or decline an optional ability prompt |
 | `choose none` | `choose none` | Decline an optional choice (not valid for mandatory discards) |
+
+Prompt `type` values currently handled by the controller:
+
+| Prompt `type` | Resolved by | Notes |
+|---|---|---|
+| `choose_target` | `choose <instance-id>` | Target prompts may be queued before a spell enters the Chain when multiple resolution abilities need targets |
+| `choose_discard` | `choose <hand-card-id>` | Used for discard costs/effects so `on_discard` triggers fire correctly |
+| `choose_optional` | `choose yes` / `choose no` | Optional ability or optional cost branch |
+| `choose_battlefield` | `choose <battlefield-id>` | Selects a staged combat/showdown battlefield |
+| `choose_trash_return` | `choose <trash-card-id>` | Handler exists, but `return_from_trash` currently auto-returns the last matching trash card instead of opening this prompt |
 
 Discard prompts appear when an effect or cost requires discarding from hand:
 
@@ -547,6 +561,8 @@ An AI player connects to the same command interface as a human. From the engine'
 The AI does **not** get a privileged API — it must issue the same text commands. This keeps the human and AI interaction paths identical and makes it straightforward to swap one for the other.
 
 AI command injection is handled by the `AIPlayer` node, which calls `GameController.submit_command()` directly, bypassing the text input field but going through the same validation path as the console.
+
+AI-generated Gear commands must use the same accepted syntax as the console: `equip <gear-id> target <unit-id>`. The parser does not accept `equip <gear-id> to <unit-id>`.
 
 ---
 
