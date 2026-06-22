@@ -77,7 +77,7 @@ Abilities are defined as structured objects. They are **not free-form text** in 
   "ability_type": "passive | triggered | activated | replacement",
   "timing": "play | hold | conquer | attack | defend | end_of_turn | start_of_turn | on_death | on_move | on_damage | null",
   "condition": {
-    "type": "string — 'legion' | 'level' | 'while_alone' | 'while_attacking' | 'while_defending' | 'if_mighty' | null",
+    "type": "string — 'legion' | 'hand_size_lte' | 'discarded_card_this_turn' | 'might_lte' | 'rune_count_gte' | 'while_combat_alone' | 'while_defending_alone' | null",
     "value": "optional"
   },
   "is_optional": false,
@@ -104,7 +104,7 @@ Abilities are defined as structured objects. They are **not free-form text** in 
 |---|---|---|
 | `ability_type` | `passive`, `triggered`, `activated`, `replacement` | Determines when/how the ability is evaluated |
 | `timing` | See list above | For triggered abilities: when the trigger fires. `null` for passives and activated abilities |
-| `condition.type` | `legion`, `level`, `while_alone`, `while_attacking`, `while_defending`, `if_mighty`, `null` | Dependent keyword conditions. `null` means always active |
+| `condition.type` | See Implemented Conditions below | Evaluated by `ConditionEvaluator.gd`. `null` or an empty string means always active |
 | `is_optional` | `true` / `false` | If `true`, the controller chooses whether to trigger/activate |
 | `cost` | object | All cost sub-fields default to zero/false if omitted |
 | `effect_type` | string | Must match a key in the Effect Type Registry (§2.5) |
@@ -112,41 +112,80 @@ Abilities are defined as structured objects. They are **not free-form text** in 
 | `is_action` | `true` / `false` | Can be used during Showdowns |
 | `is_reaction` | `true` / `false` | Can be used during Closed States on any player's turn |
 
+### Implemented Conditions
+
+`ConditionEvaluator.gd` treats unknown condition types as `true`, so card authors should use only the implemented names below unless they also add evaluator coverage and tests.
+
+| `condition.type` | Required fields | Runtime meaning |
+|---|---|---|
+| `legion` | none | Controller has played another card this turn (`cards_played_this_turn > 0`) |
+| `hand_size_lte` | `value` | Controller's hand size is less than or equal to `value` |
+| `discarded_card_this_turn` | none | Controller has discarded at least one card this turn |
+| `might_lte` | `value` | Target's current Might, including passive/temporary/keyword bonuses, is less than or equal to `value` |
+| `rune_count_gte` | `value` | Controller has at least `value` channeled runes |
+| `while_combat_alone` | none | Source unit is the sole friendly unit at the active combat battlefield and is attacking or defending |
+| `while_defending_alone` | none | Source unit is defending alone at the active combat battlefield |
+
+Combat-alone conditions are gated by `GameState.combat_bf_index`. Cleanup can designate units on multiple contested battlefields, but only the active combat receives the bonus.
+
 ---
 
 ## 2.5 Effect Type Registry
 
-Each `effect_type` string maps to a handler in `AbilityResolver.gd`. The following effect types cover the base game:
+Each `effect_type` string maps to a handler in `AbilityResolver.gd` unless the notes name a different subsystem. Keep this registry in sync with the resolver `match` block and `TriggerDispatcher.emit_passive_auras()`.
 
 | `effect_type` | Description | Key `effect_params` |
 |---|---|---|
-| `"add_energy"` | Add N Energy to Rune Pool | `{ "amount": 2 }` |
-| `"add_power"` | Add N Power of domain to Rune Pool | `{ "domain": "fury", "amount": 1 }` |
-| `"draw"` | Draw N cards | `{ "amount": 1 }` |
-| `"deal_damage"` | Deal N damage to target(s) | `{ "amount": 3, "target": "unit_at_battlefield", "split": false }` |
-| `"heal"` | Heal N damage from target | `{ "amount": "all", "target": "friendly_unit" }` |
-| `"kill"` | Kill a target permanent | `{ "target": "enemy_unit" }` |
-| `"give_might"` | Give unit +N Might (this turn or permanent) | `{ "amount": 2, "duration": "turn" }` |
-| `"give_keyword"` | Grant a keyword to a unit | `{ "keyword": "shield", "value": 2, "duration": "turn" }` |
-| `"buff_unit"` | Place a Buff counter on a unit | `{ "target": "friendly_unit" }` |
-| `"spend_buff"` | Spend a Buff counter | `{ "target": "self" }` |
-| `"move_unit"` | Move a unit to a location | `{ "target": "friendly_unit", "destination": "any_battlefield" }` |
-| `"stun_unit"` | Stun a unit | `{ "target": "enemy_unit" }` |
-| `"banish"` | Banish card(s) | `{ "target": "top_of_deck", "amount": 1 }` |
-| `"recycle"` | Recycle card(s) to deck | `{ "from": "trash", "amount": 1 }` |
-| `"discard"` | Discard N cards from hand (player chooses which cards; `on_discard` triggers fire) | `{ "amount": 1 }` |
-| `"channel_rune"` | Channel additional rune(s) | `{ "amount": 1, "exhausted": false }` |
-| `"ready_permanent"` | Ready a permanent | `{ "target": "friendly_unit" }` |
-| `"play_token"` | Create and play a token | `{ "token_type": "recruit_1m", "location": "base" }` |
-| `"gain_xp"` | Gain N XP | `{ "amount": 1 }` |
-| `"gain_points"` | Gain N Victory Points | `{ "amount": 1 }` |
-| `"prevent_damage"` | Prevent next N damage | `{ "amount": 3, "target": "self", "duration": "turn" }` |
-| `"cost_reduction"` | Reduce cost of cards | `{ "amount": 1, "scope": "spells", "duration": "turn" }` |
-| `"counter_spell"` | Counter a spell/ability on the chain | `{ "target": "spell_on_chain" }` |
-| `"attach"` | Attach this gear to a unit | `{ "target": "friendly_unit" }` |
-| `"predict"` | Look at top N cards; recycle any | `{ "amount": 2 }` |
-| `"return_to_hand"` | Return a permanent to its owner's hand | `{ "target": "friendly_unit" }` |
-| `"custom"` | Complex effect — handled by card-specific script | `{ "script": "res://Scripts/Cards/Special/card_id.gd" }` |
+| `"add_energy"` | Add Energy to the controller's Rune Pool | `{ "amount": 2 }` |
+| `"add_power"` | Add domain Power to the controller's Rune Pool | `{ "domain": "fury", "amount": 1 }` |
+| `"draw"` | Draw cards; Burn Out scoring applies when the deck recycles from trash | `{ "amount": 1 }` |
+| `"deal_damage"` | Deal fixed damage to a chosen/resolved target | `{ "amount": 4, "target": "unit_at_battlefield", "targeting": "choose_one" }` |
+| `"heal"` | Heal target damage; `"all"` clears all damage | `{ "amount": "all", "target": "friendly_unit" }` |
+| `"kill"` | Move a target permanent to trash | `{ "target": "enemy_unit" }` |
+| `"give_might"` | Add temporary Might for a duration currently modeled as this turn | `{ "amount": 3, "duration": "turn", "target": "friendly_unit" }` |
+| `"give_keyword"` | Grant a temporary keyword. `duration` may be `"turn"`, `"combat"`, or omitted; `temporary` defaults to Beginning Phase cleanup | `{ "keyword": { "id": "shield", "value": 2 }, "duration": "combat" }` |
+| `"buff_unit"` | Place one Buff counter on the target unit | `{ "target": "friendly_unit" }` |
+| `"move_unit"` | Move target unit to its base; currently delegates to `move_unit_to_base` | `{ "target": "friendly_unit" }` |
+| `"move_unit_to_base"` | Move a battlefield unit to its owner's base exhausted | `{ "target": "unit_at_battlefield", "targeting": "choose_one" }` |
+| `"stun_unit"` | Mark a target unit Stunned | `{ "target": "enemy_unit" }` |
+| `"recycle"` | Return cards from trash to hand in current implementation | `{ "from": "trash", "amount": 1 }` |
+| `"discard"` | Discard cards from hand; controller prompts preserve `on_discard` triggers | `{ "amount": 1 }` |
+| `"discard_then_draw"` | Prompt for discards, then draw after the discard continuation resolves | `{ "discard_amount": 1, "draw_amount": 1 }` |
+| `"channel_rune"` | Channel additional rune(s); can enter exhausted | `{ "amount": 1, "exhausted": true }` |
+| `"channel_rune_or_draw"` | Channel rune(s), or draw if the rune deck is empty | `{ "channel_amount": 1, "exhausted": true, "draw_amount": 1 }` |
+| `"units_enter_ready_this_turn"` | Set a player flag so units played later this turn enter ready | `{}` |
+| `"give_might_with_alone_bonus"` | Give Might and add a bonus if the target is the only friendly unit at its location | `{ "amount": 1, "alone_bonus": 1, "target": "friendly_unit" }` |
+| `"deal_damage_all_enemies_in_combat"` | During combat, damage every enemy unit at `combat_bf_index` | `{ "amount": 2 }` |
+| `"fight_chosen_units"` | Use the spell's first chosen target as the buffed friendly unit and this ability's target as the enemy; both deal current Might to each other | `{ "target": "enemy_unit", "targeting": "choose_one" }` |
+| `"ready_permanent"` | Ready a target permanent | `{ "target": "friendly_unit" }` |
+| `"ready_runes"` | Ready up to N channeled runes; `TriggerDispatcher` can queue this for end of turn | `{ "amount": 2, "timing": "end_of_turn" }` |
+| `"play_token"` | Create and play a token definition, if present in `tokens.json` | `{ "token_type": "recruit_1m", "location": "base" }` |
+| `"gain_points"` | Gain Victory Points | `{ "amount": 1 }` |
+| `"counter_spell"` | Remove the top spell/ability from the chain | `{ "target": "spell_on_chain" }` |
+| `"predict"` | Reveal top cards in logs; recycle choice is not modeled | `{ "amount": 2 }` |
+| `"return_to_hand"` | Return a permanent to its owner's hand | `{ "target": "unit_at_battlefield" }` |
+| `"enter_ready"` | Ready the source card as it enters; used by Accelerate-style abilities | `{}` |
+| `"return_from_trash"` | Return the last matching trash card to hand; no prompt is opened yet | `{ "target": "unit" }` |
+| `"other_friendly_units_enter_ready"` | Special-cased after a unit is played; readies other friendly units already on board/base | `{}` |
+| `"gain_keywords"` | Append passive keywords to the source when passive auras refresh | `{ "keywords": [{ "id": "assault", "value": 1 }] }` |
+| `"play_self"` | Move the source card from trash to base after its ability cost is paid | `{}` |
+| `"deal_damage_equal_to_discarded_energy_cost"` | Damage target by the Energy cost of the most recently discarded card this turn | `{ "target": "unit_at_battlefield", "targeting": "choose_one" }` |
+| `"cost_reduction"` | Read by `CostCalculator`; resolver intentionally does nothing | `{ "amount": 2, "scope": "self", "duration": "play" }` |
+| `"attach"` | Attach this Gear to a target unit | `{ "target": "friendly_unit" }` |
+
+Passive aura effects are refreshed by `TriggerDispatcher.emit_passive_auras()` rather than normal chain resolution:
+
+| `effect_type` | Description | Key `effect_params` |
+|---|---|---|
+| `"conditional_might"` | Add to a unit's `passive_might_bonus` while its condition evaluates true | `{ "amount": 2 }` |
+| `"aura_might"` | Legend aura that adds Might to each friendly unit whose condition evaluates true | `{ "target": "friendly_unit", "amount": 2 }` |
+| `"gain_keywords"` | Add passive keywords while the source's condition evaluates true | `{ "keywords": [{ "id": "ganking" }] }` |
+
+Declared but unsupported effect names should be treated as gaps until a handler and tests are added: `"spend_buff"`, `"banish"`, `"gain_xp"`, `"prevent_damage"`, `"custom"`, and `"death_replacement_recall"` (Highlander replacement effect).
+
+### Multi-Target Spell Resolution
+
+For spells with multiple resolution abilities that each use `targeting: "choose_one"`, `GameController._queue_spell_target_prompt()` prompts for each target before the spell is put onto the Chain. The resulting `ChainItem.targets` array is passed to the resolver as `ctx.chosen_targets`; `fight_chosen_units` uses the first chosen target as the friendly unit buffed by Gentlemen's Duel and the second target as the enemy fight target.
 
 ### Target Value Reference
 
