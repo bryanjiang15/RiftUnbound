@@ -15,5 +15,6 @@
 | [BUG-017](entries/BUG-017-playing-unit-to-controlled-battlefield-is-not-allowed.md) | fixed | high | engine | PLaying unit to controlled battlefield is not allowed | 2026-06-17 | #32 |
 | [BUG-018](entries/BUG-018-reaction-card-not-allowed-to-play-in-showdown-open-state.md) | fixed | high | engine | Reaction card not allowed to play in showdown open state | 2026-06-17 | #33 |
 | [BUG-019](entries/BUG-019-unit-with-increased-might-does-not-deal-correct-damage.md) | open | high | engine | Unit with increased might does not deal correct damage | 2026-06-21 | #40 |
+| [BUG-020](entries/BUG-020-vi-destructive-ability-does-not-recycle-card-as-cost.md) | open | high | engine | vi destructive ability does not recycle card as cost | 2026-06-21 | #45 |
 
-**Counts:** 4 open · 0 investigating · 0 confirmed · 7 fixed · 0 wontfix
+**Counts:** 5 open · 0 investigating · 0 confirmed · 7 fixed · 0 wontfix
