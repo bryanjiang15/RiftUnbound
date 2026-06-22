@@ -591,6 +591,9 @@ func _cmd_play(player_index: int, args: Array) -> void:
 		_log("[ERROR] Cannot play %s in current state (%s)." % [card.definition.name, gs.get_state_name()])
 		return
 
+	if not _validate_explicit_target_for_card(card, target_id, player_index):
+		return
+
 	# Units may normally deploy to controlled Battlefields. Ambush is the exception
 	# that permits direct Battlefield deployment outside that normal control check.
 	if card.definition.card_type == "unit" and destination.begins_with("battlefield"):
@@ -1714,6 +1717,28 @@ func _build_target_prompt(card: CardInstance, ab: Dictionary, player_index: int,
 	return "[PROMPT] Choose a target for %s — use: choose <%s>" % [
 		card.definition.name, "|".join(ids) if not ids.is_empty() else "id"
 	]
+
+
+func _validate_explicit_target_for_card(card: CardInstance, target_id: String, player_index: int) -> bool:
+	if target_id.is_empty():
+		return true
+	var target = gs.find_instance_anywhere(target_id)
+	if target == null:
+		_log("[ERROR] Target '%s' not found." % target_id)
+		return false
+	var ab = _choose_one_target_ability(card)
+	if ab.is_empty():
+		return true
+	var params: Dictionary = ab.get("effect_params", {})
+	var target_filter: String = params.get("target", "")
+	var valid = TargetResolverScript.filter_with_params(
+		target_filter, params, card, gs, {"player_index": player_index}
+	)
+	for valid_target in valid:
+		if valid_target == target:
+			return true
+	_log("[ERROR] Invalid target '%s'." % target_id)
+	return false
 
 
 # ─── Auto-pay ────────────────────────────────────────────────────────────────

@@ -22,7 +22,7 @@ static func evaluate(condition: Variant, source: CardInstance, gs: GameState, ct
 			var target: CardInstance = ctx.get("target")
 			if target == null:
 				return false
-			return target.get_base_might() <= int(condition.get("value", 0))
+			return target.get_current_might() <= int(condition.get("value", 0))
 		"rune_count_gte":
 			var pi = source.owner_index if source else ctx.get("player_index", 0)
 			return gs.players[pi].channeled_runes.size() >= int(condition.get("value", 0))
