@@ -46,6 +46,7 @@ Architectures](https://arxiv.org/html/2603.29194v1)).
 | 4 | Situation & card retrieval | Semantic (retrieval) | Not started |
 | 5 | Memory governance | All layers | Not started |
 | 6 | Claude migration + prompt caching | Infra | Not started |
+| 7 | Resolved-effect & pass-intent enrichment | Working / episodic (in-game) | Not started |
 
 ---
 
@@ -225,6 +226,53 @@ a single release.
 
 ---
 
+## Phase 7 — Resolved-Effect & Pass-Intent Enrichment
+
+**Goal:** today's `timeline_slice()` (see Phase 1 update above) shows *what
+move was submitted* and whether it was accepted, but not *what actually
+happened as a result* — a `use_ability` or `play_card` line never says "Vi's
+Might increased to 11" or "unit X died," and a `pass` line never shows what
+was on the chain that prompted it. This phase closes that gap using
+machinery that already exists on the Godot side, unused for this purpose.
+
+**What already exists:**
+- `GameController._log()` (`Scripts/Game/GameController.gd:1847`) emits a
+  `game_log_message` signal for every resolved effect, including the
+  human-readable lines `ability_resolver.resolve_ability()` returns (Might
+  changes, deaths, draws, zone moves) — not just command echoes.
+- `AIPlayer.gd._on_game_log_message()` already subscribes to that signal, but
+  today it only pattern-matches the `[P{n}] > {command}` line to detect
+  opponent commands; it discards the effect lines that follow.
+- `decisions.outcome_summary` (schema column, `update_outcome()` method) has
+  existed since before Phase 1 but has never been written to anywhere — it's
+  the natural home for this data once populated.
+
+**Plan:**
+- In `AIPlayer.gd`, capture the `_log()` lines that follow a command (own or
+  opponent's) up to the next command/prompt boundary, and forward a short
+  joined effect string alongside the existing `/outcome` and
+  `/opponent_action` payloads.
+- In `memory.py`, accept that effect text in `update_acceptance_by_game()` /
+  `record_opponent_action()` and store it (`outcome_summary` for own
+  decisions; extend `opponent_actions` with an `effect` column for the
+  opponent side).
+- In `timeline_slice()`, append the effect text to each line when present:
+  `Turn 7 [main_phase]: You use_ability(...) → OK — Vi's Might increased to 11`.
+- **Pass-intent is mostly free once this ships**, not a separate feature: a
+  `pass` line has no effect text of its own, but because `timeline_slice` is
+  already chronological (Phase 1 update), the triggering action's effect text
+  sits directly above the resulting pass — e.g. "opponent played Gust
+  targeting Vi" followed by "You passed" reads as cause-and-effect without
+  any special-cased "passed on X" string.
+- **Signal-to-noise risk:** `ability_resolver`'s log lines are written for a
+  human reading a scrolling log, not for LLM context — some (rune-tap
+  bookkeeping, internal state transitions) will need filtering before being
+  surfaced. Prototype on a handful of real log lines from `agent_inputs.log`-
+  style captures before committing to a filtering ruleset, rather than
+  assuming all `_log()` output is useful as-is.
+
+---
+
 ## Sequencing Notes
 
 - Phases 2 and 3 are pure backend/offline work (no `/decision` path changes)
@@ -237,6 +285,9 @@ a single release.
   retrieval at all.
 - Phase 5 isn't a release, it's an ongoing discipline applied inside Phases
   3/4's consolidation code as the lesson store grows.
+- Phase 7 is the only phase that requires a Godot-side (`AIPlayer.gd`) change
+  in addition to Python — sequence it whenever Godot work is convenient,
+  independent of the cross-game phases above it.
 
 ## Sources
 

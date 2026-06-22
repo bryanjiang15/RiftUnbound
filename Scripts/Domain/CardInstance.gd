@@ -151,6 +151,17 @@ func clear_temp_effects() -> void:
 	played_this_turn = false
 
 
+func expire_turn_effects() -> void:
+	temp_might_bonus = 0
+	var kept_keywords: Array = []
+	for kw in temp_keywords:
+		if kw is Dictionary and kw.get("duration", "") == "until_beginning":
+			kept_keywords.append(kw)
+	temp_keywords = kept_keywords
+	passive_keywords.clear()
+	played_this_turn = false
+
+
 # Remove keywords that were granted only for the duration of a single combat
 # (e.g. Fortified Position's Shield 2 "this combat").
 func clear_combat_effects() -> void:

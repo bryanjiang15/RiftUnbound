@@ -114,6 +114,9 @@ func shuffle_trash_into_deck() -> void:
 
 
 func move_to_trash(inst: CardInstance) -> void:
+	if inst.definition.card_type == "gear" and inst.attached_to != null:
+		inst.attached_to.attached_gear.erase(inst)
+		inst.attached_to = null
 	_remove_from_all_zones(inst)
 	inst.location = "trash"
 	inst.is_exhausted = false

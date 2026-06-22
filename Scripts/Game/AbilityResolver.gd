@@ -174,9 +174,12 @@ func _give_keyword(params: Dictionary, target: CardInstance) -> Array:
 	var duration: String = params.get("duration", "turn")
 	if duration.is_empty():
 		duration = "turn"
+	if kw_id == "temporary" and duration == "turn":
+		duration = "until_beginning"
 	# "turn" effects clear at end-of-turn cleanup; "combat" effects clear when the
-	# current combat resolves (CombatProcessor.finalize_combat).
-	if duration == "turn" or duration == "combat":
+	# current combat resolves (CombatProcessor.finalize_combat). Temporary lasts
+	# until the start of the marked permanent's controller's next Beginning Phase.
+	if duration == "turn" or duration == "combat" or duration == "until_beginning":
 		target.temp_keywords.append({"id": kw_id, "value": kw_val, "duration": duration})
 	return ["> %s gained %s" % [target.display_name(), kw_id]]
 

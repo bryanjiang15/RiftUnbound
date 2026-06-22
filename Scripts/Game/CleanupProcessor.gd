@@ -216,8 +216,8 @@ static func heal_all_units(gs: GameState) -> void:
 
 static func expire_turn_effects(gs: GameState) -> void:
 	for ps in gs.players:
-		for u in ps.get_units_at_base():
-			u.clear_temp_effects()
+		for perm in ps.base_permanents:
+			perm.expire_turn_effects()
 		for u in gs.board.get_all_units_on_board(ps.player_index):
-			u.clear_temp_effects()
+			u.expire_turn_effects()
 		ps.reset_turn_state()

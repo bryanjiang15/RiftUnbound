@@ -287,7 +287,8 @@ func _execute_start_of_turn() -> void:
 	# Beginning Phase — triggers before Hold scoring
 	gs.current_phase = TurnStateMachine.Phase.BEGINNING
 	_log("> Beginning Phase")
-	_kill_temporary_units(turn_pi)
+	if _kill_temporary_permanents(turn_pi):
+		_run_cleanup()
 	var trig_ctx = {"player_index": turn_pi, "controller": self}
 	for line in trigger_dispatcher.emit("beginning_phase_start", trig_ctx, gs, self):
 		_log(line)
@@ -631,19 +632,40 @@ func _cmd_play(player_index: int, args: Array) -> void:
 	_complete_play(card, player_index, destination, target_id, from_zone, use_accelerate, false)
 
 
-func _kill_temporary_units(turn_pi: int) -> void:
+func _kill_temporary_permanents(turn_pi: int) -> bool:
+	var killed_any := false
 	for ps in gs.players:
 		var to_kill: Array = []
-		for u in ps.get_units_at_base():
-			if u.has_keyword("temporary") and u.owner_index == turn_pi:
-				to_kill.append(u)
-		for u in gs.board.get_all_units_on_board(ps.player_index):
-			if u.has_keyword("temporary") and u.owner_index == turn_pi:
-				to_kill.append(u)
-		for u in to_kill:
-			_log("> %s (Temporary) is killed at Beginning Phase" % u.display_name())
-			gs.board.remove_unit_from_battlefield(u)
-			ps.move_to_trash(u)
+		for perm in ps.base_permanents:
+			if _is_temporary_permanent_for_turn(perm, turn_pi):
+				to_kill.append(perm)
+		for perm in gs.board.get_all_units_on_board(ps.player_index):
+			if _is_temporary_permanent_for_turn(perm, turn_pi):
+				to_kill.append(perm)
+		for perm in to_kill:
+			_kill_temporary_permanent(perm)
+			killed_any = true
+	return killed_any
+
+
+func _is_temporary_permanent_for_turn(perm: CardInstance, turn_pi: int) -> bool:
+	if perm.owner_index != turn_pi:
+		return false
+	if perm.definition.card_type != "unit" and perm.definition.card_type != "gear":
+		return false
+	return perm.has_keyword("temporary")
+
+
+func _kill_temporary_permanent(perm: CardInstance) -> void:
+	_log("> %s (Temporary) is killed at Beginning Phase" % perm.display_name())
+	for ab in perm.definition.abilities:
+		if ab.get("timing", "") == "on_death":
+			_log("> %s Deathknell triggers" % perm.display_name())
+			var ctx = {"player_index": perm.owner_index, "controller": self}
+			for line in ability_resolver.resolve_ability(ab, perm, null, gs, ctx):
+				_log(line)
+	gs.board.remove_unit_from_battlefield(perm)
+	gs.players[perm.owner_index].move_to_trash(perm)
 
 
 func _place_unit(player_index: int, card: CardInstance, destination: String, use_accelerate: bool) -> void:

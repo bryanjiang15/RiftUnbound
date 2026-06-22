@@ -350,6 +350,7 @@ static func _test_fading_memories_temporary(assertions) -> void:
 	h.load_fixture_dict({
 		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
 		"battlefields": ["zaun-warrens", "targons-peak"],
+		"battlefield_control": [0, -1],
 		"players": [
 			{"pool": {"energy": 5, "power": {}}, "hand": ["fading-memories"],
 			 "runes": [{"id": "chaos-rune", "exhausted": false}],
@@ -360,6 +361,11 @@ static func _test_fading_memories_temporary(assertions) -> void:
 	h.cmd_with_choices(0, "play fading-memories", ["chemtech-enforcer"])
 	var target = h.find_unit("chemtech-enforcer")
 	assertions.assert_true(target.has_keyword("temporary"), "fading memories grants temporary")
+	h.cmd(0, "end turn")
+	assertions.assert_true(target.has_keyword("temporary"), "temporary survives until controller's beginning phase")
+	h.cmd(1, "end turn")
+	assertions.assert_eq(target.location, "trash", "temporary kills at controller's beginning phase")
+	assertions.assert_eq(h.gs().players[0].score, 0, "temporary dies before hold scoring")
 
 
 static func _test_undercover_agent_deathknell(assertions) -> void:
