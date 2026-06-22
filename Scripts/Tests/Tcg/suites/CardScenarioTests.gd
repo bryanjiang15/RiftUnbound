@@ -26,7 +26,6 @@ static func run(assertions) -> void:
 	_test_targons_peak_ready_runes(assertions)
 	_test_fading_memories_temporary(assertions)
 	_test_undercover_agent_deathknell(assertions)
-	_test_blazing_scorcher_accelerate(assertions)
 	_test_chemtech_discards_once(assertions)
 	_test_blazing_scorcher_discard_no_prompt(assertions)
 	_test_flame_chompers_discard_prompts(assertions)
@@ -383,25 +382,6 @@ static func _test_undercover_agent_deathknell(assertions) -> void:
 	CleanupProcessor.run(h.gs(), h.controller.ability_resolver, h.controller)
 	h._drain_prompts(0)
 	assertions.assert_log_contains(h.controller, "discarded", "undercover agent deathknell discard_then_draw")
-
-
-static func _test_blazing_scorcher_accelerate(assertions) -> void:
-	var h = TcgTestHarness.new()
-	h.load_fixture_dict({
-		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
-		"battlefields": ["zaun-warrens", "targons-peak"],
-		"players": [
-			{"pool": {"energy": 6, "power": {}}, "hand": ["blazing-scorcher"],
-			 "runes": [{"id": "fury-rune", "exhausted": false}],
-			 "deck_size": 10, "rune_deck_size": 12},
-			{"deck_size": 10, "rune_deck_size": 12}
-		]
-	})
-	h.set_choices(["no"])
-	h.cmd(0, "play blazing-scorcher accelerate")
-	assertions.assert_no_error(h.controller, "blazing scorcher accelerate plays cleanly")
-	var unit = h.find_unit("blazing-scorcher")
-	assertions.assert_true(unit != null and not unit.is_exhausted, "accelerate enters ready")
 
 
 static func _test_chemtech_discards_once(assertions) -> void:

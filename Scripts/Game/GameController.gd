@@ -523,11 +523,6 @@ func _cmd_recycle_rune(player_index: int, args: Array) -> void:
 func _cmd_play(player_index: int, args: Array) -> void:
 	if not _check_can_act(player_index):
 		return
-	var in_main = gs.current_phase == TurnStateMachine.Phase.MAIN
-	var in_showdown = gs.is_showdown_state()
-	if not in_main and not in_showdown:
-		_log("[ERROR] Can only play cards during Main Phase or Showdown.")
-		return
 
 	# Parse: play <id> [to <location>] [target <id>] [from champion|hidden] [accelerate]
 	var card_id = ""
@@ -535,6 +530,7 @@ func _cmd_play(player_index: int, args: Array) -> void:
 	var target_id = ""
 	var from_zone = "hand"
 	var use_accelerate = false
+	var hidden_bf_idx := -1
 
 	var i = 0
 	while i < args.size():
@@ -561,6 +557,16 @@ func _cmd_play(player_index: int, args: Array) -> void:
 		_log("[ERROR] Usage: play <card-id> [to <location>] [target <id>]")
 		return
 
+	var in_main = gs.current_phase == TurnStateMachine.Phase.MAIN
+	var in_showdown = gs.is_showdown_state()
+	if from_zone == "hidden":
+		if not in_main and not in_showdown and gs.current_state != TurnStateMachine.State.NEUTRAL_CLOSED:
+			_log("[ERROR] Hidden cards can only be played during legal Reaction windows.")
+			return
+	elif not in_main and not in_showdown:
+		_log("[ERROR] Can only play cards during Main Phase or Showdown.")
+		return
+
 	var ps: PlayerState = gs.players[player_index]
 	var card: CardInstance = null
 
@@ -571,12 +577,15 @@ func _cmd_play(player_index: int, args: Array) -> void:
 			_log("[ERROR] '%s' not in Champion Zone." % card_id)
 			return
 	elif from_zone == "hidden":
-		# Find face-down card at a controlled battlefield
-		for bf in gs.board.battlefields:
+		# Find face-down card at a controlled battlefield. Do not remove it from
+		# the slot until all legality and cost checks pass.
+		for idx in range(gs.board.battlefields.size()):
+			var bf = gs.board.battlefields[idx]
 			if bf.controller_index == player_index and bf.facedown_card and \
-			   bf.facedown_card.instance_id == card_id:
+			   bf.facedown_card.instance_id == card_id and \
+			   bf.facedown_card.owner_index == player_index:
 				card = bf.facedown_card
-				bf.facedown_card = null
+				hidden_bf_idx = idx
 				break
 		if card == null:
 			_log("[ERROR] No hidden card '%s' found at controlled Battlefield." % card_id)
@@ -588,11 +597,26 @@ func _cmd_play(player_index: int, args: Array) -> void:
 			return
 
 	# Timing check
-	if not TurnStateMachine.can_play_card(card, gs.current_state, player_index, gs):
+	if from_zone == "hidden":
+		if not TurnStateMachine.can_play_from_hidden(card, gs.current_state, player_index, gs):
+			_log("[ERROR] Cannot play %s from Hidden in current state (%s)." % [card.definition.name, gs.get_state_name()])
+			return
+		if card.definition.card_type in ["unit", "gear"]:
+			var hidden_bf_id: String = gs.board.battlefields[hidden_bf_idx].battlefield_id
+			if not destination.is_empty() and destination != hidden_bf_id:
+				_log("[ERROR] Hidden permanents must be played to %s." % hidden_bf_id)
+				return
+			destination = hidden_bf_id
+		if card.definition.card_type == "spell" and not _can_play_hidden_spell(card, player_index, hidden_bf_idx):
+			_log("[ERROR] Cannot play %s from Hidden: no valid targets at %s." % [
+				card.definition.name, gs.board.battlefields[hidden_bf_idx].display_name
+			])
+			return
+	elif not TurnStateMachine.can_play_card(card, gs.current_state, player_index, gs):
 		_log("[ERROR] Cannot play %s in current state (%s)." % [card.definition.name, gs.get_state_name()])
 		return
 
-	if not _validate_explicit_target_for_card(card, target_id, player_index):
+	if not _validate_explicit_target_for_card(card, target_id, player_index, hidden_bf_idx):
 		return
 
 	# Units may normally deploy to controlled Battlefields. Ambush is the exception
@@ -623,13 +647,14 @@ func _cmd_play(player_index: int, args: Array) -> void:
 				"destination": destination,
 				"target_id": target_id,
 				"from_zone": from_zone,
+				"hidden_bf_idx": hidden_bf_idx,
 				"use_accelerate": use_accelerate,
 			},
 		}
 		_log(gs.pending_prompt["prompt"])
 		return
 
-	_complete_play(card, player_index, destination, target_id, from_zone, use_accelerate, false)
+	_complete_play(card, player_index, destination, target_id, from_zone, use_accelerate, false, hidden_bf_idx)
 
 
 func _kill_temporary_permanents(turn_pi: int) -> bool:
@@ -713,7 +738,13 @@ func _place_gear(player_index: int, card: CardInstance, target_id: String) -> vo
 	_log("> %s placed at P%d base" % [card.definition.name, player_index + 1])
 
 
-func _play_spell(player_index: int, card: CardInstance, target_id: String, destination: String) -> void:
+func _play_spell(
+	player_index: int,
+	card: CardInstance,
+	target_id: String,
+	destination: String,
+	hidden_bf_idx: int = -1
+) -> void:
 	var ps: PlayerState = gs.players[player_index]
 	card.owner_index = player_index
 
@@ -728,6 +759,7 @@ func _play_spell(player_index: int, card: CardInstance, target_id: String, desti
 		var valid = TargetResolverScript.filter_with_params(
 			params.get("target", ""), params, card, gs, {"player_index": player_index}
 		)
+		valid = TargetResolverScript.restrict_to_hidden_battlefield(valid, hidden_bf_idx)
 		if not target_id.is_empty():
 			var target = gs.find_instance_anywhere(target_id)
 			if target == null or not target in valid:
@@ -736,7 +768,7 @@ func _play_spell(player_index: int, card: CardInstance, target_id: String, desti
 				return
 			item.targets = [target]
 			if target_abs.size() > 1:
-				if _queue_spell_target_prompt(item, card, player_index, target_abs, 1):
+				if _queue_spell_target_prompt(item, card, player_index, target_abs, 1, hidden_bf_idx):
 					return
 		else:
 			if valid.is_empty():
@@ -752,7 +784,7 @@ func _play_spell(player_index: int, card: CardInstance, target_id: String, desti
 				return
 			# No inline target supplied — prompt for it now, before the spell is
 			# placed on the Chain and before opponents may respond.
-			if _queue_spell_target_prompt(item, card, player_index, target_abs, 0):
+			if _queue_spell_target_prompt(item, card, player_index, target_abs, 0, hidden_bf_idx):
 				return
 	else:
 		var target: CardInstance = null
@@ -792,7 +824,14 @@ func _choose_one_target_abilities(card: CardInstance) -> Array:
 	return out
 
 
-func _queue_spell_target_prompt(item: ChainItem, card: CardInstance, player_index: int, target_abs: Array, target_step: int) -> bool:
+func _queue_spell_target_prompt(
+	item: ChainItem,
+	card: CardInstance,
+	player_index: int,
+	target_abs: Array,
+	target_step: int,
+	hidden_bf_idx: int = -1
+) -> bool:
 	if target_step < 0 or target_step >= target_abs.size():
 		return false
 	var ab: Dictionary = target_abs[target_step]
@@ -800,6 +839,7 @@ func _queue_spell_target_prompt(item: ChainItem, card: CardInstance, player_inde
 	var valid = TargetResolverScript.filter_with_params(
 		params.get("target", ""), params, card, gs, {"player_index": player_index}
 	)
+	valid = TargetResolverScript.restrict_to_hidden_battlefield(valid, hidden_bf_idx)
 	for chosen in item.targets:
 		if chosen is CardInstance:
 			valid.erase(chosen)
@@ -809,12 +849,18 @@ func _queue_spell_target_prompt(item: ChainItem, card: CardInstance, player_inde
 		else:
 			item.targets[target_step] = null
 		if target_step + 1 < target_abs.size():
-			return _queue_spell_target_prompt(item, card, player_index, target_abs, target_step + 1)
+			return _queue_spell_target_prompt(item, card, player_index, target_abs, target_step + 1, hidden_bf_idx)
 		return false
 
 	item.needs_target = true
 	item.target_filter = params.get("target", "")
-	item.target_prompt = _build_target_prompt(card, ab, player_index, gs)
+	var valid_ids: Array[String] = []
+	for t in valid:
+		if t is CardInstance:
+			valid_ids.append(t.instance_id)
+	item.target_prompt = "[PROMPT] Choose a target for %s — use: choose <%s>" % [
+		card.definition.name, "|".join(valid_ids) if not valid_ids.is_empty() else "id"
+	]
 	item.target_params = params
 	item.valid_targets = valid
 	gs.pending_prompt = {
@@ -827,6 +873,7 @@ func _queue_spell_target_prompt(item: ChainItem, card: CardInstance, player_inde
 		"pre_chain": true,
 		"target_step": target_step,
 		"target_abilities": target_abs,
+		"hidden_bf_idx": hidden_bf_idx,
 	}
 	_log("[PROMPT] %s" % item.target_prompt)
 	return true
@@ -851,6 +898,7 @@ func _complete_play(
 	from_zone: String,
 	use_accelerate: bool,
 	optional_discard_discount: bool,
+	hidden_bf_idx: int = -1,
 	declined_accelerate: bool = false
 ) -> void:
 	if not use_accelerate and card.has_keyword("accelerate"):
@@ -859,6 +907,15 @@ func _complete_play(
 	var cost: Dictionary
 	if from_zone == "hidden":
 		cost = CostCalculator.compute_play_from_hidden_cost()
+		if hidden_bf_idx < 0:
+			for i in range(gs.board.battlefields.size()):
+				var cand = gs.board.battlefields[i]
+				if cand.facedown_card == card and cand.controller_index == player_index:
+					hidden_bf_idx = i
+					break
+		if hidden_bf_idx < 0:
+			_log("[ERROR] Hidden source card '%s' is no longer available to play." % card.instance_id)
+			return
 	else:
 		cost = CostCalculator.compute_play_cost(
 			card, player_index, gs, use_accelerate, optional_discard_discount
@@ -869,6 +926,14 @@ func _complete_play(
 			ps.rune_pool.describe()
 		])
 		return
+	if from_zone == "hidden":
+		var play_bf = gs.board.battlefields[hidden_bf_idx]
+		play_bf.facedown_card = null
+		card.is_face_down = false
+		card.hidden_turn_number = -1
+		card.hidden_battlefield_id = ""
+		if card.definition.card_type in ["unit", "gear"]:
+			destination = play_bf.battlefield_id
 	ps.cards_played_this_turn += 1
 	card.played_this_turn = true
 
@@ -885,10 +950,10 @@ func _complete_play(
 		"gear":
 			_place_gear(player_index, card, destination)
 		"spell":
-			_play_spell(player_index, card, target_id, destination)
+			_play_spell(player_index, card, target_id, destination, hidden_bf_idx)
 
 	if card.definition.card_type != "spell":
-		_fire_on_play_triggers(card, use_accelerate, declined_accelerate)
+		_fire_on_play_triggers(card, use_accelerate, declined_accelerate, hidden_bf_idx)
 
 	if gs.pending_prompt.is_empty():
 		_run_cleanup()
@@ -909,11 +974,17 @@ func _complete_play_from_resume(play_resume: Dictionary, optional_discard_discou
 		play_resume.get("from_zone", "hand"),
 		play_resume.get("use_accelerate", false),
 		optional_discard_discount,
+		int(play_resume.get("hidden_bf_idx", -1)),
 		play_resume.get("declined_accelerate", false),
 	)
 
 
-func _fire_on_play_triggers(card: CardInstance, use_accelerate: bool = false, declined_accelerate: bool = false) -> void:
+func _fire_on_play_triggers(
+	card: CardInstance,
+	use_accelerate: bool = false,
+	declined_accelerate: bool = false,
+	hidden_bf_idx: int = -1
+) -> void:
 	var ctx = {
 		"player_index": card.owner_index,
 		"controller": self,
@@ -921,6 +992,8 @@ func _fire_on_play_triggers(card: CardInstance, use_accelerate: bool = false, de
 		"use_accelerate": use_accelerate,
 		"declined_accelerate": declined_accelerate,
 	}
+	if hidden_bf_idx >= 0:
+		ctx["hidden_bf_idx"] = hidden_bf_idx
 	for line in trigger_dispatcher.emit("on_play", ctx, gs, self):
 		_log(line)
 		if not gs.pending_prompt.is_empty():
@@ -1363,6 +1436,7 @@ func _handle_choose_target(player_index: int, choice: String) -> void:
 	var target_step: int = int(gs.pending_prompt.get("target_step", -1))
 	var pre_chain: bool = gs.pending_prompt.get("pre_chain", false)
 	var target_abilities: Array = gs.pending_prompt.get("target_abilities", [])
+	var hidden_bf_idx: int = int(gs.pending_prompt.get("hidden_bf_idx", -1))
 	var prompt_target_params: Dictionary = gs.pending_prompt.get("target_params", {})
 	var valid: Array = gs.pending_prompt.get("valid_choices", [])
 	var target: CardInstance = null
@@ -1406,7 +1480,7 @@ func _handle_choose_target(player_index: int, choice: String) -> void:
 	if pre_chain:
 		var next_step = target_step + 1
 		if not target_abilities.is_empty() and next_step < target_abilities.size():
-			if _queue_spell_target_prompt(item, item.source_card, player_index, target_abilities, next_step):
+			if _queue_spell_target_prompt(item, item.source_card, player_index, target_abilities, next_step, hidden_bf_idx):
 				return
 		# Target was chosen at play time: finalize the spell onto the Chain and
 		# open the reaction window. Resolution happens later once players pass.
@@ -1561,8 +1635,12 @@ func _cmd_hide(player_index: int, args: Array) -> void:
 	var bf_id = args[2]
 	var ps = gs.players[player_index]
 	var card = ps.get_hand_instance(card_id)
+	var from_zone := "hand"
+	if card == null and ps.champion_zone != null and ps.champion_zone.instance_id == card_id:
+		card = ps.champion_zone
+		from_zone = "champion"
 	if card == null:
-		_log("[ERROR] '%s' not in hand." % card_id)
+		_log("[ERROR] '%s' not in hand or Champion Zone." % card_id)
 		return
 	if not card.has_keyword("hidden") and not card.definition.has_keyword("hidden"):
 		_log("[ERROR] %s does not have Hidden." % card.definition.name)
@@ -1582,8 +1660,13 @@ func _cmd_hide(player_index: int, args: Array) -> void:
 	if not try_pay_cost(player_index, cost, card):
 		_log("[ERROR] Cannot afford Hidden cost (%s)." % CostCalculator.cost_to_string(cost))
 		return
-	ps.hand.erase(card)
+	if from_zone == "champion":
+		ps.champion_zone = null
+	else:
+		ps.hand.erase(card)
 	card.is_face_down = true
+	card.hidden_turn_number = gs.turn_number
+	card.hidden_battlefield_id = bf_id
 	card.location = bf_id
 	bf.facedown_card = card
 	_log("> P%d hid %s at %s" % [player_index + 1, card.definition.name, bf.display_name])
@@ -1741,7 +1824,12 @@ func _build_target_prompt(card: CardInstance, ab: Dictionary, player_index: int,
 	]
 
 
-func _validate_explicit_target_for_card(card: CardInstance, target_id: String, player_index: int) -> bool:
+func _validate_explicit_target_for_card(
+	card: CardInstance,
+	target_id: String,
+	player_index: int,
+	hidden_bf_idx: int = -1
+) -> bool:
 	if target_id.is_empty():
 		return true
 	var target = gs.find_instance_anywhere(target_id)
@@ -1756,11 +1844,24 @@ func _validate_explicit_target_for_card(card: CardInstance, target_id: String, p
 	var valid = TargetResolverScript.filter_with_params(
 		target_filter, params, card, gs, {"player_index": player_index}
 	)
+	valid = TargetResolverScript.restrict_to_hidden_battlefield(valid, hidden_bf_idx)
 	for valid_target in valid:
 		if valid_target == target:
 			return true
 	_log("[ERROR] Invalid target '%s'." % target_id)
 	return false
+
+
+func _can_play_hidden_spell(card: CardInstance, player_index: int, hidden_bf_idx: int) -> bool:
+	for ab in _choose_one_target_abilities(card):
+		var params: Dictionary = ab.get("effect_params", {})
+		var valid = TargetResolverScript.filter_with_params(
+			params.get("target", ""), params, card, gs, {"player_index": player_index}
+		)
+		valid = TargetResolverScript.restrict_to_hidden_battlefield(valid, hidden_bf_idx)
+		if valid.is_empty():
+			return false
+	return true
 
 
 # ─── Auto-pay ────────────────────────────────────────────────────────────────

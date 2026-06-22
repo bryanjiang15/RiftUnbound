@@ -1,7 +1,7 @@
 extends Control
 
 const DECKS_DIR := "res://Data/Decks/"
-const DEFAULT_P1_DECK := "res://Data/Decks/starter-deck-p1.json"
+const DEFAULT_P1_DECK := "res://Data/Decks/master-yi-calm-body.json"
 const DEFAULT_P2_DECK := "res://Data/Decks/starter-deck-p2.json"
 
 # Discovered decks: array of { "label": String, "path": String }

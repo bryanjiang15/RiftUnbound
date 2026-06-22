@@ -53,6 +53,22 @@ static func can_play_card(card: CardInstance, state: int, player_index: int, gam
 	return false
 
 
+static func can_play_from_hidden(card: CardInstance, state: int, player_index: int, game_state: GameState) -> bool:
+	if card == null:
+		return false
+	if card.owner_index != player_index:
+		return false
+	if not card.is_face_down:
+		return false
+	# Hidden cards become playable beginning on the next turn.
+	if card.hidden_turn_number >= 0 and game_state.turn_number <= card.hidden_turn_number:
+		return false
+	# Hidden grants Reaction timing while facedown / played from facedown.
+	return state == State.NEUTRAL_CLOSED or \
+		state == State.SHOWDOWN_OPEN or \
+		state == State.SHOWDOWN_CLOSED
+
+
 static func can_activate_ability(ability: Dictionary, state: int, player_index: int, game_state: GameState) -> bool:
 	var is_reaction = ability.get("is_reaction", false)
 	var is_action = ability.get("is_action", false)
