@@ -23,7 +23,7 @@ them onto our existing/planned tables so later phases share one vocabulary.
 |---|---|---|
 | **Working memory** | The current prompt/context window for this one decision | `_format_brief_state()` + the system prompt |
 | **Episodic memory** | Specific past events, replayable, time-ordered | `decisions` / `opponent_actions` tables (in-game), `games` / `card_plays` (cross-game) |
-| **Semantic memory** | Distilled facts/lessons abstracted away from any one episode | `knowledge/lessons.json`, `strategy_patterns.json` (Phase 3+) |
+| **Semantic memory** | Distilled facts/lessons abstracted away from any one episode | `knowledge/lessons.json`, `strategy_patterns.json` (Phase 4+) |
 | **Procedural memory** | Reusable "how to do X" routines | N/A for now — our action space is fixed by `legal_moves`, not learned skills |
 
 This mirrors the standard split used across current agent-memory surveys:
@@ -38,15 +38,25 @@ Architectures](https://arxiv.org/html/2603.29194v1)).
 
 ## Phase Overview
 
-| Phase | Name | Memory layer | Status |
+| Phase | Name | Track | Status |
 |---|---|---|---|
 | 1 | STM correctness fixes | Working / episodic (in-game) | **Done** |
-| 2 | Cross-game episodic store | Episodic (cross-game) | Not started |
-| 3 | Reflection → semantic lessons | Semantic | Not started |
-| 4 | Situation & card retrieval | Semantic (retrieval) | Not started |
-| 5 | Memory governance | All layers | Not started |
-| 6 | Claude migration + prompt caching | Infra | Not started |
-| 7 | Resolved-effect & pass-intent enrichment | Working / episodic (in-game) | Not started |
+| 2 | Agent decision infrastructure (router / planner / actor / validator) | Decision pipeline | Not started |
+| 2.5 | Engine-truth simulation (quiescence + branches) | Decision pipeline | Not started |
+| 3 | Cross-game episodic store | Episodic (cross-game) | Not started |
+| 4 | Reflection → semantic lessons | Semantic | Not started |
+| 5 | Situation & card retrieval | Semantic (retrieval) | Not started |
+| 6 | Memory governance | All layers | Not started |
+| 7 | Claude migration + prompt caching | Infra | Not started |
+| 8 | Resolved-effect & pass-intent enrichment | Working / episodic (in-game) | Not started |
+
+> **Track note:** Phases 2 and 2.5 are the *decision pipeline* track — they
+> restructure how a single `/decision` is produced and verified. Phases 3–8 are
+> the *memory* track and are largely independent of the pipeline work; the two
+> tracks can progress in parallel. Phases 2/2.5 were inserted ahead of the
+> memory phases because every later phase (reflection quality, retrieval value,
+> resolved-effect logging) is more useful once the agent reasons over verified
+> outcomes instead of assumptions.
 
 ---
 
@@ -58,7 +68,7 @@ See `Phase1_STM_Improvements.md` for the full design. Summary of what shipped:
 - `accepted` / `rejection_reason` are now actually written via
   `update_acceptance_by_game()` (previously always NULL).
 - `games` table + `/game_over` endpoint — Godot now reports the final
-  outcome, laying the groundwork for Phase 2.
+  outcome, laying the groundwork for Phase 3.
 
 This phase fixed *correctness* of the existing within-game window. It did
 not change the shape of what gets injected.
@@ -74,9 +84,145 @@ correctness fixes, not a new phase.
 
 ---
 
-## Phase 2 — Cross-Game Episodic Store
+## Phase 2 — Agent Decision Infrastructure
 
-**Goal:** persist what happened in *previous* games so phase 3/4 have
+**Goal:** replace the single monolithic model call in `agent.decide()` with a
+small staged pipeline — **Router → Planner → Actor → Validator** — so each
+decision spends tokens where they matter, stays consistent across the many
+decisions within one turn, and never ships an illegal or off-plan move to Godot.
+This is the structural prerequisite for Phase 2.5 (simulation) and makes every
+later memory phase more effective.
+
+The pipeline is motivated by three measured problems in today's single call:
+the full rulebook is re-sent every decision (~9,200 chars of system prompt on
+average across one recorded game), forced single-legal-move decisions still make
+a full model call, and one call jointly does state-reading, rule-recall,
+strategy, and action-emission so failures are hard to isolate.
+
+- **Router (Stage 0, no LLM):** short-circuits forced moves (`len(legal_moves)
+  ==1`), picks the minimal prompt module set, and flags whether a plan is needed.
+- **Planner (Stage 1, one LLM call per *turn*, cached):** emits a small JSON
+  intent reused by every decision that turn — the consistency win, mirroring
+  CICERO's "form an intent, keep actions consistent with it."
+- **Actor (Stage 2, per decision):** small routed prompt + the cached plan +
+  **typed** legal actions, replacing brittle string-matching against the output
+  contract.
+- **Validator (Stage 3, no LLM):** legality **and** plan-consistency gate, with
+  one targeted retry through the existing `rejection_context` path.
+
+Shipped behind `RIFTBOUND_PIPELINE=staged|legacy` (default `legacy` until
+verified). Python-only; no Godot change until Phase 2.5. **Full design,
+data-flow diagram, work items, and verification in
+`Phase2_Decision_Infrastructure.md`.**
+
+---
+
+## Phase 2.5 — Engine-Truth Simulation
+
+**Goal:** stop the agent from *predicting* rules outcomes it could *observe*.
+Today `skills.simulate_move()` (`skills.py:198`) is a heuristic text guesser
+that returns hand-wavy strings ("you will gain control if unopposed",
+"no simulation available; general effect expected"). That is the direct source
+of bad assumptions like "this move conquers the battlefield." Phase 2.5 routes
+outcome computation to the only authority that actually knows the rules — Godot —
+and makes branching explicit.
+
+### Core change: real dry-run from the rules engine
+
+Add a Godot endpoint that clones the live `GameState`, applies a candidate move
+to the **copy**, drives the chain to a stable point, serializes the resulting
+brief-state delta, and discards the copy (no real mutation):
+
+```
+Actor → POST /simulate { game_id, move }
+Godot : clone GameState → apply move on copy → auto-resolve → serialize delta
+      → return ACTUAL resulting facts, discard copy
+```
+
+`skills.simulate_move()` is rewritten to call this endpoint and return facts,
+not prose. "Conquers battlefield-a" becomes a returned field, not an LLM claim.
+
+### Simulate to quiescence, not to the next instant
+
+A move in a game with priority/chains has no single "next state" — returning the
+immediate post-move state (spell sitting on the chain awaiting passes) is
+accurate but useless. The simulator instead resolves to a **stable point**:
+
+| Stopping rule | Used when | Returns |
+|---|---|---|
+| **Resolve-if-unanswered** (auto-pass both seats) | every spell / ability | the concrete resolved board (the deterministic default line) |
+| **Next-AI-decision** | the move loops focus/priority back to the AI | state at the AI's next choice |
+| **Post-combat quiescence** | the move triggers a Showdown | board after simultaneous damage + heal, with `units_killed` listed |
+
+The Godot side needs an **auto-pass driver**: after applying the move to the
+clone, issue `pass` for both seats until the chain empties or an AI decision
+point is reached, then serialize.
+
+### Branches: facts for the default line, flags for hidden choices
+
+The simulator returns the deterministic **all-pass** resolution *plus* a flag
+recording whether a response window opened and what class of response is legal —
+without ever guessing the opponent's hidden card:
+
+```json
+{
+  "legal": true,
+  "resolved_if_unanswered": {
+    "battlefield-a": { "controller_before": "neutral", "controller_after": "me" },
+    "conquer": true, "my_score_after": 1, "units_killed": [],
+    "next_decision": "your main phase"
+  },
+  "response_window": {
+    "opponent_may_respond": true,
+    "legal_response_classes": ["Reaction"],
+    "note": "opponent holds 4 unknown cards; contested branch not resolved"
+  }
+}
+```
+
+This encodes the distinction the agent must respect: the **mechanical outcome**
+is computable (return as fact); the **opponent's hidden choice** is not (flag as
+a branch). The Actor may assert the all-pass line as fact ("conquers A *if
+unanswered*") but must hedge the contested branch.
+
+### Prompt reinforcement (cheap, ship alongside)
+
+- In `system_prompt.py`: "Do not state what a move *will* result in unless that
+  result came from a `simulate_move` call or is labeled in `legal_moves`.
+  Otherwise call `simulate_move` first or mark the outcome uncertain."
+- Require reasoning to separate `observed:` (from sim/state) vs `expecting:`
+  (genuine hidden-information uncertainty).
+- The Phase 2 Validator gains a rule: outcome claims in `reasoning` must match a
+  simulate result for this decision, or be hedged.
+
+### Work items
+
+1. Godot `/simulate`: clone `GameState`, apply move, run auto-pass driver,
+   serialize delta. Reuse the existing legality validation path.
+2. Rewrite `skills.simulate_move()` to call `/simulate` and pass the structured
+   delta through; delete the heuristic string branches.
+3. Define the `SimResult` schema (resolved-if-unanswered + response_window) in
+   `schemas.py`.
+4. Actor flow: shortlist 1–3 candidates, simulate each, pick by **observed**
+   outcome vs plan; Validator cross-checks claims against sim deltas.
+5. Prompt edits above.
+
+### Verification
+
+- On the recorded "conquer" situations, confirm the agent's `reasoning` cites a
+  simulate result rather than asserting an unverified conquer.
+- Confirm `/simulate` never mutates real state (hash the live state before/after).
+- Confirm combat-trigger moves return a deterministic trade (killed/surviving
+  units) plus an Action-window flag.
+
+> **Note:** Phase 2.5 requires Godot-side work (the clone + auto-pass driver),
+> unlike the otherwise Python-only pipeline work in Phase 2.
+
+---
+
+## Phase 3 — Cross-Game Episodic Store
+
+**Goal:** persist what happened in *previous* games so phase 4/5 have
 something to learn from. No retrieval or reflection logic yet — just the
 storage layer and basic stat queries.
 
@@ -112,7 +258,7 @@ first, vector/semantic indexing on top of them later, not instead of them.
 
 ---
 
-## Phase 3 — Reflection Loop → Semantic Lessons
+## Phase 4 — Reflection Loop → Semantic Lessons
 
 **Goal:** turn raw episodes into distilled, reusable lessons — the step that
 matters most according to both the Generative Agents and Diplomacy-agent
@@ -142,11 +288,11 @@ literature.
   keep semantic memory from growing unboundedly
   ([Architecture and Orchestration of Memory Systems](https://www.analyticsvidhya.com/blog/2026/04/memory-systems-in-ai-agents/)).
 - This is async and out-of-band — it must never block a live `/decision`
-  call. It writes to `knowledge/` for Phase 4 to read.
+  call. It writes to `knowledge/` for Phase 5 to read.
 
 ---
 
-## Phase 4 — Situation & Card Retrieval (the "remembers specific cards" phase)
+## Phase 5 — Situation & Card Retrieval (the "remembers specific cards" phase)
 
 **Goal:** at decision time, retrieve the handful of past lessons/episodes
 most relevant to *this* card or *this* situation — not a fixed recency
@@ -186,7 +332,7 @@ cards based on what they've encountered in the past":
 
 ---
 
-## Phase 5 — Memory Governance
+## Phase 6 — Memory Governance
 
 **Goal:** keep the system bounded and trustworthy as games accumulate. This
 phase is policy, not a single feature — apply it incrementally rather than as
@@ -203,14 +349,14 @@ a single release.
   Agents](https://arxiv.org/html/2603.11768v1)).
 - **Forgetting/decay:** lessons with low sample size or that haven't been
   retrieved in N games get pruned or down-weighted during consolidation
-  (Phase 3's `consolidation.py` is the natural home for this).
+  (Phase 4's `consolidation.py` is the natural home for this).
 - **Conflict resolution:** when two lessons about the same card disagree,
   consolidation should merge them into one lesson with both outcomes noted
   ("works when X, backfires when Y") rather than picking one arbitrarily.
 
 ---
 
-## Phase 6 — Claude API Migration + Prompt Caching
+## Phase 7 — Claude API Migration + Prompt Caching
 
 **Goal:** infra change, decoupled from the memory work above.
 
@@ -219,14 +365,14 @@ a single release.
 - Add `cache_control` breakpoints after the stable system-prompt prefix
   (`GOAL_AND_ROLE` + `CORE_RULES` + `OUTPUT_CONTRACT`) so repeated decisions
   within a game reuse the cached prefix — this only pays off once memory
-  injection (Phases 2-4) makes per-decision context larger and more variable,
+  injection (Phases 3-5) makes per-decision context larger and more variable,
   which is why it's sequenced after rather than before.
 - No behavior change expected; verify via the existing `agent_inputs.log`
   diffing before/after on a recorded game.
 
 ---
 
-## Phase 7 — Resolved-Effect & Pass-Intent Enrichment
+## Phase 8 — Resolved-Effect & Pass-Intent Enrichment
 
 **Goal:** today's `timeline_slice()` (see Phase 1 update above) shows *what
 move was submitted* and whether it was accepted, but not *what actually
@@ -275,19 +421,26 @@ machinery that already exists on the Godot side, unused for this purpose.
 
 ## Sequencing Notes
 
-- Phases 2 and 3 are pure backend/offline work (no `/decision` path changes)
-  and can run with the agent live in its current form.
-- Phase 4 is the first phase that changes what gets injected into a live
-  decision by anything other than recency — ship it behind a feature flag
+- **Phases 2 and 2.5 are the decision-pipeline track and should land first.**
+  Phase 2 is Python-only (`router.py`, `planner.py`, refactor of
+  `agent.decide()`), shipped behind `RIFTBOUND_PIPELINE=staged|legacy`. Phase
+  2.5 adds the Godot `/simulate` endpoint and the `simulate_move` rewrite; it
+  depends on Phase 2's Actor/Validator stages existing.
+- Phases 3 and 4 are pure backend/offline work (no `/decision` path changes)
+  and can run with the agent live in its current form, in parallel with the
+  pipeline track.
+- Phase 5 is the first *memory* phase that changes what gets injected into a
+  live decision by anything other than recency — ship it behind a feature flag
   (env var, like `RIFTBOUND_LOG_INPUTS`) so it can be disabled instantly if
   retrieval quality turns out to hurt rather than help, per the standard
   warning that bad retrieval timing/volume can make an agent worse than no
   retrieval at all.
-- Phase 5 isn't a release, it's an ongoing discipline applied inside Phases
-  3/4's consolidation code as the lesson store grows.
-- Phase 7 is the only phase that requires a Godot-side (`AIPlayer.gd`) change
-  in addition to Python — sequence it whenever Godot work is convenient,
-  independent of the cross-game phases above it.
+- Phase 6 isn't a release, it's an ongoing discipline applied inside Phases
+  4/5's consolidation code as the lesson store grows.
+- **Godot-side work is required by two phases:** Phase 2.5 (clone + auto-pass
+  simulation driver) and Phase 8 (`AIPlayer.gd` effect-line capture). All other
+  phases are Python-only. Sequence the Godot work whenever convenient,
+  independent of the memory phases above it.
 
 ## Sources
 
