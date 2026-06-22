@@ -65,8 +65,8 @@ CREATE TABLE IF NOT EXISTS games (
 );
 """
 
-# Maximum number of recent events to inject into context
-RECENT_SLICE_SIZE = 10
+# Maximum number of recent events (own decisions + opponent actions, merged) to inject into context
+TIMELINE_SLICE_SIZE = 16
 
 
 class Memory:
@@ -202,8 +202,8 @@ class Memory:
 
     # ── Reading ───────────────────────────────────────────────────────────────
 
-    def opponent_slice(self, game_id: str, n: int = 8) -> str:
-        """Return the last n opponent actions for this game as a formatted context string."""
+    def opponent_actions_text(self, game_id: str, n: int = 8) -> str:
+        """Return the last n opponent actions for this game as bullet lines (no header)."""
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT turn, action FROM opponent_actions WHERE game_id=? ORDER BY id DESC LIMIT ?",
@@ -211,43 +211,52 @@ class Memory:
             ).fetchall()
         if not rows:
             return ""
-        lines = ["## Opponent actions (recent, oldest first)"]
-        for row in reversed(rows):
-            lines.append(f"  Turn {row['turn']}: {row['action']}")
-        return "\n".join(lines)
+        return "\n".join(f"  Turn {row['turn']}: {row['action']}" for row in reversed(rows))
 
-    def recent_slice(self, game_id: str, n: int = RECENT_SLICE_SIZE) -> str:
-        """Return the last n decisions for this game as a formatted context string."""
+    def timeline_slice(self, game_id: str, n: int = TIMELINE_SLICE_SIZE) -> str:
+        """Return the last n game events — own decisions and opponent actions
+        merged into one chronologically ordered context string, oldest first.
+
+        Both tables are written with the same `datetime.now(timezone.utc).isoformat()`
+        timestamp format from this process, so ordering by timestamp reflects the
+        true turn-by-turn sequence of play.
+        """
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT turn, decision_index, decision_type, reasoning,
-                       move_json, accepted, rejection_reason, outcome_summary
-                FROM decisions
-                WHERE game_id = ?
-                ORDER BY id DESC
+                SELECT turn, timestamp, 'me' AS kind, decision_type,
+                       move_json AS detail, accepted, rejection_reason
+                FROM decisions WHERE game_id = ?
+                UNION ALL
+                SELECT turn, timestamp, 'opp' AS kind, NULL AS decision_type,
+                       action AS detail, NULL AS accepted, NULL AS rejection_reason
+                FROM opponent_actions WHERE game_id = ?
+                ORDER BY timestamp DESC
                 LIMIT ?
                 """,
-                (game_id, n),
+                (game_id, game_id, n),
             ).fetchall()
 
         if not rows:
             return ""
 
-        lines: list[str] = ["## Recent game history (oldest first)"]
+        lines: list[str] = [
+            "## Game history (chronological — your moves and the opponent's "
+            "visible actions, true turn order)"
+        ]
         for row in reversed(rows):
-            move = json.loads(row["move_json"])
+            if row["kind"] == "opp":
+                lines.append(f"  Turn {row['turn']}: Opponent {row['detail']}")
+                continue
+            move = json.loads(row["detail"])
             accepted_str = {None: "?", 1: "OK", 0: "REJECTED"}.get(row["accepted"], "?")
-            lines.append(
-                f"  Turn {row['turn']} #{row['decision_index']} [{row['decision_type']}]: "
-                f"{move.get('action', '?')}({_params_summary(move)}) → {accepted_str}"
+            line = (
+                f"  Turn {row['turn']} [{row['decision_type']}]: "
+                f"You {move.get('action', '?')}({_params_summary(move)}) → {accepted_str}"
             )
             if row["rejection_reason"]:
-                lines.append(f"    Rejection: {row['rejection_reason']}")
-            if row["outcome_summary"]:
-                lines.append(f"    Outcome: {row['outcome_summary']}")
-            if row["reasoning"]:
-                lines.append(f"    Reasoning: {row['reasoning'][:200]}")
+                line += f" (reason: {row['rejection_reason']})"
+            lines.append(line)
         return "\n".join(lines)
 
     # ── Helpers ───────────────────────────────────────────────────────────────

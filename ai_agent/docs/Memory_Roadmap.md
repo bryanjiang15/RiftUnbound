@@ -41,7 +41,6 @@ Architectures](https://arxiv.org/html/2603.29194v1)).
 | Phase | Name | Memory layer | Status |
 |---|---|---|---|
 | 1 | STM correctness fixes | Working / episodic (in-game) | **Done** |
-| 1.5 | Working-memory compression & loop detection | Working | Proposed next |
 | 2 | Cross-game episodic store | Episodic (cross-game) | Not started |
 | 3 | Reflection → semantic lessons | Semantic | Not started |
 | 4 | Situation & card retrieval | Semantic (retrieval) | Not started |
@@ -63,37 +62,14 @@ See `Phase1_STM_Improvements.md` for the full design. Summary of what shipped:
 This phase fixed *correctness* of the existing within-game window. It did
 not change the shape of what gets injected.
 
----
-
-## Phase 1.5 — Working-Memory Compression & Loop Detection
-
-**Problem observed in production** (`agent_inputs.log`, turn 7 of a real
-game): the agent called `use_ability(vi-destructive)` then `pass`, five times
-in a row, with near-duplicate reasoning text each time
-("Using Vi's ability to increase her Might will further solidify..."). The
-flat last-10 `recent_slice()` window fed the model its own last several
-repeats verbatim — wasting tokens and, worse, very likely *anchoring* the
-model toward repeating the action rather than recognizing it's stuck, since
-nothing in the injected text marks the pattern as a problem.
-
-This is the textbook failure mode of stuffing raw transcript into context
-instead of compressing it. Practical guidance from production memory
-systems converges on the same fix: *proactively summarize repeated/low-novelty
-records before they fill the window, and discard or collapse entries that are
-near-duplicates of what's already there* ([State of AI Agent Memory
-2026](https://mem0.ai/blog/state-of-ai-agent-memory-2026); this is also the
-"selective discarding" behavior reported as a learned policy in production
-memory agents).
-
-**Plan:**
-- In `memory.recent_slice()`, collapse runs of consecutive decisions that
-  share the same `decision_type` + `move.action` + `move.parameters` into one
-  line with a repeat count and turn range, instead of one line per repeat.
-- When a collapsed run reaches a threshold (e.g. 3+), append an explicit flag:
-  `⚠ REPEATED 5x with no board change — consider a different action or
-  end_turn.` This makes the stall visible to the model instead of implicit.
-- No schema change — this is purely a formatting change in the read path of
-  `decisions`, so it's low-risk and shippable in isolation.
+**Update (2026-06-21):** `recent_slice()` and `opponent_slice()` (named above
+and in `Phase1_STM_Improvements.md`) were merged into a single
+`memory.timeline_slice()` that interleaves both tables by timestamp into one
+chronological history instead of two separate per-side blocks, and trimmed
+each entry to a compact one-liner (no inline reasoning text). See
+`Agent_design_and_memory.md`'s "Short-Term Memory" section for the current
+shape. This was prompt/injection-quality polish on top of Phase 1's
+correctness fixes, not a new phase.
 
 ---
 
@@ -235,9 +211,7 @@ a single release.
 
 ## Phase 6 — Claude API Migration + Prompt Caching
 
-**Goal:** infra change, decoupled from the memory work above but worth
-sequencing after Phase 1.5 so the stable/variable split in the prompt is
-already correct.
+**Goal:** infra change, decoupled from the memory work above.
 
 - Replace `openai` client in `agent.py` with the Anthropic SDK
   (`claude-sonnet-4-6`).
@@ -253,8 +227,6 @@ already correct.
 
 ## Sequencing Notes
 
-- Phase 1.5 is the only phase that touches live decision quality with no new
-  storage — do it first regardless of what else is prioritized.
 - Phases 2 and 3 are pure backend/offline work (no `/decision` path changes)
   and can run with the agent live in its current form.
 - Phase 4 is the first phase that changes what gets injected into a live

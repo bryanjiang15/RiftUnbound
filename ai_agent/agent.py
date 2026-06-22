@@ -438,21 +438,17 @@ async def decide(
     """
     model = os.environ.get("RIFTBOUND_AI_MODEL", DEFAULT_MODEL)
     system = build_system_prompt(brief_state)
+    skill_module.set_history_context(memory, game_id)
 
     # Assemble initial messages
     messages: list[ChatCompletionMessageParam] = [
         {"role": "system", "content": system},
     ]
 
-    # Inject own decision history for this game
-    mem_slice = memory.recent_slice(game_id)
-    if mem_slice:
-        messages.append({"role": "user", "content": mem_slice})
-
-    # Inject opponent action history for this game
-    opp_slice = memory.opponent_slice(game_id)
-    if opp_slice:
-        messages.append({"role": "user", "content": opp_slice})
+    # Inject merged chronological game history (own decisions + opponent actions)
+    timeline = memory.timeline_slice(game_id)
+    if timeline:
+        messages.append({"role": "user", "content": timeline})
 
     # Brief state as the main user message
     brief_summary = _format_brief_state(brief_state)

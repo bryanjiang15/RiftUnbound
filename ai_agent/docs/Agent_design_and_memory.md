@@ -18,7 +18,7 @@ AIPlayer.gd
         (all legal commands)             agent.decide(brief_state, game_id, memory)
                                            │
                                            ├── build_system_prompt()
-                                           ├── memory.recent_slice(game_id)  ← STM
+                                           ├── memory.timeline_slice(game_id)  ← STM
                                            ├── format_brief_state()
                                            └── GPT-4o tool loop (max 6 rounds)
                                                  ├── list_legal_moves
@@ -111,10 +111,12 @@ The agent's context window is assembled in this order every turn:
    │   combat, keywords (Assault, Shield, Tank, Ganking, Accelerate, etc.)
    └── Output Contract: strict JSON schema, action names + required parameters
 
-2. MEMORY SLICE (short-term, per-game)
-   └── Last 10 decisions for this game_id, oldest first:
-       "Turn 2 #1 [main_phase]: move_unit(destination=battlefield-a) → OK
-          Reasoning: Uncontested battlefield available..."
+2. GAME HISTORY (short-term, per-game)
+   └── Last 16 events for this game_id — own decisions and the opponent's
+       visible actions merged into one chronologically ordered timeline
+       (by timestamp, not two separate per-side logs):
+       "Turn 2 [main_phase]: You move_unit(destination=battlefield-a) → OK
+        Turn 2: Opponent played unknown-card to base"
 
 3. CURRENT DECISION (fresh every turn)
    ├── Turn / Phase / State / Decision type
@@ -154,17 +156,25 @@ CREATE TABLE decisions (
 );
 ```
 
-**Injection:** `memory.recent_slice(game_id)` returns the last 10 decisions for
-the current game formatted as a readable context block. Injected before the
-current decision each turn.
+**Injection:** `memory.timeline_slice(game_id)` merges `decisions` and
+`opponent_actions` by `timestamp` (both written with
+`datetime.now(timezone.utc).isoformat()` from the same process, so sort order
+matches true turn order) into one chronological context block — a single
+sequence of "You did X → OK/REJECTED" and "Opponent did Y" lines, not two
+separate per-side logs. Each entry is a compact one-liner (action + outcome
+only); full reasoning text is written to `agent_decisions.log` for human
+review, not injected into the model's context, since it's noise for steering
+the next decision rather than something the model needs to re-read.
+
+The on-demand `get_opponent_history` tool mirrors this: it now reads
+`memory.opponent_actions_text(game_id)` (set via
+`skill_module.set_history_context()` each decision) instead of the old
+hard-coded "not yet tracked" placeholder.
 
 **Known gaps:**
-- `accepted` is never updated — the `/outcome` endpoint exists but does nothing.
-- No opponent action tracking — `get_opponent_history()` returns only the current
-  turn's public snapshot with the note `(Detailed opponent history not yet tracked.)`.
-- No game-level outcome — Python never learns whether it won or lost.
 - Memory is cleared on server restart (`agent_decisions.log` is truncated).
-  SQLite persists across restarts but is never queried cross-game.
+  SQLite persists across restarts but is never queried cross-game (see
+  `Memory_Roadmap.md` Phase 2+).
 
 ---
 

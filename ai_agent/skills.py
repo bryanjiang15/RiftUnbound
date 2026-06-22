@@ -30,6 +30,10 @@ _current_brief_state: dict = {}
 _current_full_state_text: str = ""
 _current_legal_moves: list[str] = []
 
+# History context injected by agent.py on each decision (for get_opponent_history)
+_current_memory: Any = None
+_current_game_id: str = ""
+
 
 # ── State injection (called by main.py) ──────────────────────────────────────
 
@@ -40,6 +44,13 @@ def set_state(brief_state: dict) -> None:
     _current_brief_state = brief_state
     _current_full_state_text = brief_state.get("full_state_text", "")
     _current_legal_moves = brief_state.get("legal_moves", [])
+
+
+def set_history_context(memory: Any, game_id: str) -> None:
+    """Called once per decision request so get_opponent_history can read real history."""
+    global _current_memory, _current_game_id
+    _current_memory = memory
+    _current_game_id = game_id
 
 
 # ── Read Skills ───────────────────────────────────────────────────────────────
@@ -101,8 +112,8 @@ def get_card_detail(card_id: str) -> str:
 
 def get_opponent_history() -> str:
     """
-    Return a description of what the opponent has done this game.
-    This is derived from the brief state (no separate history tracking yet).
+    Return a description of what the opponent has done this game: current
+    public snapshot plus the tracked log of visible opponent actions.
     """
     bs = _current_brief_state
     lines = [
@@ -110,8 +121,11 @@ def get_opponent_history() -> str:
         f"  Score: {bs.get('opponent_score', '?')}",
         f"  Hand size: {bs.get('opponent_hand_size', '?')}",
         f"  Base units: {_format_units(bs.get('opponent_base_units', []))}",
-        "  (Detailed opponent history not yet tracked.)",
     ]
+    recent = ""
+    if _current_memory is not None and _current_game_id:
+        recent = _current_memory.opponent_actions_text(_current_game_id)
+    lines.append(recent or "  (No opponent actions recorded yet this game.)")
     return "\n".join(lines)
 
 

@@ -256,6 +256,10 @@ battlefields.  Protect your own.  Play to win; do not stall.
 - Never try to access or infer hidden information you are not entitled to.
 
 ## Behavioral Guidance
+- The game history block shows your moves and the opponent's visible
+  actions together in true chronological order. Read it as one sequence to
+  reason about cause and effect (e.g. what you played right before the
+  opponent reacted), not as two separate logs.
 - Be decisive.  Uncertainty about the best play is not a reason to pass;
   prefer a plausible advancing move over a pass.
 - When uncertain about a rules interaction, call lookup_rule (or get_keyword for a
