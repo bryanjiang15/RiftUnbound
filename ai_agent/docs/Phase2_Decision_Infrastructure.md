@@ -100,7 +100,9 @@ independently, which is where contradictory lines come from. Phase 2 computes
 Stage 2 call that turn. This mirrors CICERO's "form an intent, then keep
 dialogue/actions consistent with it" pattern. The cache is invalidated when
 `turn_number` advances or the opponent takes an action that materially changes
-the board (detected via `brief_state` hash diff).
+the board (detected via a **strategic-state hash**, not full `brief_state`).
+Volatile fields (`legal_moves`, pending-choice prompt text, other per-decision
+metadata) are excluded so we do not replan unnecessarily within the same turn.
 
 ### Typed legal actions
 
@@ -112,6 +114,13 @@ objects (`{action, params, label}`) so "which legal action" becomes a selection
 over a typed list rather than string reconstruction. The text form is retained
 for `timeline_slice()` and logs.
 
+### Validator flexibility for tactical windows
+
+Plan-consistency is strict for broad strategic decisions (`main_phase`,
+`showdown_focus`) and soft for tactical windows (`pending_choice`,
+`chain_reaction`, `combat_assignment`) where immediate legal responses may
+correctly deviate from the turn plan.
+
 ---
 
 ## Work Items
@@ -121,11 +130,13 @@ for `timeline_slice()` and logs.
    single-legal-move decisions from `agent_inputs.log`.
 2. `planner.py`: `plan(brief_state, memory_summary, last_intent) -> Plan`. JSON
    schema + a strict parser (reuse the `Decision` parsing discipline). Add an
-   in-process `{ (game_id, turn): Plan }` cache with hash-diff invalidation.
+   in-process `{ (game_id, turn): Plan }` cache with **strategic-state hash**
+   invalidation (exclude volatile per-decision fields).
 3. Refactor `agent.decide()` into the Actor stage: consume router output, fetch
    or build the plan, assemble the **small** prompt, run the existing tool loop.
 4. Promote the post-parse check into an explicit Validator with the new
-   plan-consistency rule; route failures through the existing one-shot retry.
+   plan-consistency rule (strict for strategic decisions, soft for tactical
+   windows); route failures through the existing one-shot retry.
 5. Split `system_prompt.py` so the router can request just
    `{core, output_contract, <decision-module>}` instead of the full assembly.
 6. Emit typed legal actions from the brief-state formatter; keep the string list.
