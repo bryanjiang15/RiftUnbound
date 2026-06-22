@@ -8,6 +8,7 @@ const DEFAULT_P2_DECK := "res://Data/Decks/starter-deck-p2.json"
 var _decks: Array = []
 var _p1_picker: OptionButton
 var _p2_picker: OptionButton
+var _human_eval_check: CheckBox
 
 
 func _ready() -> void:
@@ -84,6 +85,10 @@ func _build_ui() -> void:
 	# Deck selection — choose which deck each player pilots
 	var deck_panel := _make_deck_selectors()
 	vbox.add_child(deck_panel)
+
+	# Eval option — when on, a feedback panel is shown after a Player vs AI game.
+	var eval_panel := _make_eval_toggle()
+	vbox.add_child(eval_panel)
 
 	# Player vs Player
 	var pvp_entry := _make_entry(
@@ -175,6 +180,32 @@ func _make_deck_selectors() -> VBoxContainer:
 	return wrapper
 
 
+func _make_eval_toggle() -> VBoxContainer:
+	var wrapper := VBoxContainer.new()
+	wrapper.add_theme_constant_override("separation", 4)
+
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 12)
+
+	_human_eval_check = CheckBox.new()
+	_human_eval_check.text = "Enable Human AI Evaluation"
+	_human_eval_check.button_pressed = bool(Engine.get_meta("human_eval_enabled", false))
+	_human_eval_check.add_theme_font_size_override("font_size", 16)
+	_human_eval_check.add_theme_color_override("font_color", Color(0.70, 0.74, 0.85))
+	row.add_child(_human_eval_check)
+	wrapper.add_child(row)
+
+	var desc := Label.new()
+	desc.text = "Player vs AI only — rate the AI's play after the match"
+	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc.add_theme_font_size_override("font_size", 13)
+	desc.add_theme_color_override("font_color", Color(0.48, 0.52, 0.64))
+	wrapper.add_child(desc)
+
+	return wrapper
+
+
 func _make_deck_picker(label_text: String, default_path: String) -> OptionButton:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
@@ -214,13 +245,20 @@ func _apply_deck_overrides() -> void:
 	Engine.set_meta("p2_deck", _selected_deck_path(_p2_picker, DEFAULT_P2_DECK))
 
 
+func _apply_eval_override() -> void:
+	var enabled := _human_eval_check != null and _human_eval_check.button_pressed
+	Engine.set_meta("human_eval_enabled", enabled)
+
+
 func _on_pvp_pressed() -> void:
 	Engine.set_meta("game_mode", "pvp")
 	_apply_deck_overrides()
+	_apply_eval_override()
 	get_tree().change_scene_to_file("res://Scenes/GameScene.tscn")
 
 
 func _on_pvai_pressed() -> void:
 	Engine.set_meta("game_mode", "pvai")
 	_apply_deck_overrides()
+	_apply_eval_override()
 	get_tree().change_scene_to_file("res://Scenes/GameScene.tscn")

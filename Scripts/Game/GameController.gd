@@ -304,6 +304,19 @@ func _execute_start_of_turn() -> void:
 					turn_pi + 1, bf.display_name, gs.players[0].score, gs.players[1].score
 				])
 
+	# Hold scoring can reach the victory score — check the win condition now,
+	# otherwise the game would continue into Channel/Draw/Main without ending.
+	var hold_winner = CleanupProcessor.check_win(gs)
+	if hold_winner >= 0:
+		gs.game_over = true
+		gs.winner_index = hold_winner
+		_log("> GAME OVER — P%d wins with %d points!" % [
+			hold_winner + 1, gs.players[hold_winner].score
+		])
+		_log("> Type 'new game' to play again.")
+		board_updated.emit()
+		return
+
 	# Channel Phase
 	gs.current_phase = TurnStateMachine.Phase.CHANNEL
 	_log("> Channel Phase")

@@ -51,6 +51,10 @@ static func run(gs: GameState, ability_resolver: AbilityResolver, controller: Ga
 	return log_lines
 
 
+static func check_win(gs: GameState) -> int:
+	return _check_win(gs)
+
+
 static func _check_win(gs: GameState) -> int:
 	if gs.victory_score <= 0:
 		return -1

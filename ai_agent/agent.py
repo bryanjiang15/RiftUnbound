@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -431,11 +432,32 @@ async def decide(
     game_id: str,
     memory: Memory,
     rejection_context: Optional[dict] = None,
+    eval_metrics: Optional[dict] = None,
 ) -> Decision:
     """
     Given a BriefState dict, run the agent loop and return a Decision.
     rejection_context is non-None on a retry after a Godot rejection.
+
+    eval_metrics, when supplied, is populated in-place with reliability counters
+    (model_calls, tool_rounds, parse_retries, legality_retries, latency_ms,
+    fell_back_to_pass) so the caller can persist them alongside the decision.
     """
+    _start_ts = time.monotonic()
+    metrics = eval_metrics if eval_metrics is not None else {}
+    metrics.update({
+        "model_calls": 0,
+        "tool_rounds": 0,
+        "parse_retries": 0,
+        "legality_retries": 0,
+        "fell_back_to_pass": False,
+        "latency_ms": 0,
+    })
+
+    def _finalize(decision: Decision, fell_back: bool) -> Decision:
+        metrics["fell_back_to_pass"] = fell_back
+        metrics["latency_ms"] = int((time.monotonic() - _start_ts) * 1000)
+        return decision
+
     model = os.environ.get("RIFTBOUND_AI_MODEL", DEFAULT_MODEL)
     system = build_system_prompt(brief_state)
     skill_module.set_history_context(memory, game_id)
@@ -477,15 +499,17 @@ async def decide(
                 temperature=0.3,
                 response_format={"type": "text"},
             )
+            metrics["model_calls"] += 1
         except Exception as exc:
             logger.error("OpenAI API error: %s", exc)
-            return _PASS_DECISION
+            return _finalize(_PASS_DECISION, fell_back=True)
 
         choice = response.choices[0]
         msg = choice.message
 
         # Tool calls — dispatch and loop
         if msg.tool_calls:
+            metrics["tool_rounds"] += 1
             messages.append(msg)  # type: ignore[arg-type]
             for tc in msg.tool_calls:
                 try:
@@ -509,6 +533,7 @@ async def decide(
             cmd = decision.move.to_command()
             legal = brief_state.get("legal_moves", [])
             if legal and not _command_in_legal_moves(cmd, legal, brief_state):
+                metrics["legality_retries"] += 1
                 logger.warning(
                     "Decision command not in legal_moves: %s (have %d moves)",
                     cmd,
@@ -534,9 +559,10 @@ async def decide(
                 decision.move.action,
                 decision.reasoning,
             )
-            return decision
+            return _finalize(decision, fell_back=False)
 
         # Model responded with text but not valid JSON — prompt it to fix
+        metrics["parse_retries"] += 1
         logger.warning("Round %d: model response not valid JSON, prompting fix.", round_num)
         messages.append({"role": "assistant", "content": content})
         messages.append({
@@ -549,7 +575,7 @@ async def decide(
         })
 
     logger.warning("Exhausted %d rounds without a valid decision — returning pass.", MAX_TOOL_ROUNDS)
-    return _PASS_DECISION
+    return _finalize(_PASS_DECISION, fell_back=True)
 
 
 # ── Brief state formatting ────────────────────────────────────────────────────

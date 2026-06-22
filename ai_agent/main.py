@@ -107,11 +107,13 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
     )
 
     # Run reasoning loop
+    eval_metrics: dict = {}
     decision = await decide(
         brief_state=brief_state,
         game_id=game_id,
         memory=_memory,
         rejection_context=rejection_ctx,
+        eval_metrics=eval_metrics,
     )
 
     # Record in episodic memory (accepted status unknown until Godot responds)
@@ -126,6 +128,21 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
         )
     except Exception as exc:
         logger.warning("Memory record failed: %s", exc)
+
+    # Record server-side reliability metrics for this decision (eval track).
+    try:
+        decision_index = (
+            _memory._decision_counters.get(game_id, 0) - 1 if _memory else 0
+        )
+        _memory.record_decision_metrics(
+            game_id=game_id,
+            turn=brief_state.get("turn_number", 0),
+            decision_index=decision_index,
+            decision_type=brief_state.get("decision_type", "unknown"),
+            metrics=eval_metrics,
+        )
+    except Exception as exc:
+        logger.warning("Decision metrics record failed: %s", exc)
 
     # Write human-readable decision log
     if _decision_logger:
@@ -210,11 +227,131 @@ async def game_over_endpoint(body: GameOverRequest) -> dict:
         )
     except Exception as exc:
         logger.warning("Game outcome record failed: %s", exc)
+
+    # Aggregate the reliability scorecard for this finished game (eval track).
+    try:
+        summary = _memory.summarize_game_eval(body.game_id)
+        logger.info(
+            "Eval scorecard: game=%s decisions=%d model_calls=%d avg_latency=%.0fms "
+            "p95=%dms parse_retries=%d legality_retries=%d fallbacks=%d",
+            body.game_id,
+            summary["decisions"],
+            summary["model_calls_total"],
+            summary["avg_latency_ms"],
+            summary["p95_latency_ms"],
+            summary["parse_retry_total"],
+            summary["legality_retry_total"],
+            summary["fallback_count"],
+        )
+    except Exception as exc:
+        logger.warning("Eval summary failed: %s", exc)
+
     logger.info(
         "Game over: game=%s outcome=%s score=%d-%d turns=%d",
         body.game_id, outcome, body.my_score, body.opp_score, body.total_turns,
     )
     return {"status": "ok", "outcome": outcome}
+
+
+# ── Evaluation endpoints (reliability + human feedback) ──────────────────────
+
+
+class DecisionMetricsRequest(BaseModel):
+    game_id: str
+    turn: int = 0
+    decision_type: str | None = None
+    latency_ms: int = 0
+    rejection_retries: int = 0
+    heuristic_fallback: bool = False
+    accepted: bool | None = None
+
+
+class HumanFeedbackRequest(BaseModel):
+    game_id: str
+    reviewer: str | None = None
+    scope: str = "game"          # 'game' | 'decision'
+    turn: int | None = None
+    decision_index: int | None = None
+    strategic: int | None = None
+    tactical: int | None = None
+    resource: int | None = None
+    rules: int | None = None
+    overall: int | None = None
+    tags: list[str] | None = None
+    note: str | None = None
+
+
+class MoveFeedbackRequest(BaseModel):
+    game_id: str
+    sentiment: str               # 'like' | 'neutral' | 'dislike'
+    turn: int | None = None
+    move_seq: int | None = None
+    move_desc: str | None = None
+    reviewer: str | None = None
+
+
+@app.post("/decision_metrics")
+async def decision_metrics_endpoint(body: DecisionMetricsRequest) -> dict:
+    """Godot reports engine-observed metrics for one AI decision (eval track)."""
+    if _memory is None:
+        return {"status": "no-op"}
+    try:
+        _memory.record_client_decision_metrics(
+            game_id=body.game_id,
+            turn=body.turn,
+            decision_type=body.decision_type,
+            latency_ms=body.latency_ms,
+            rejection_retries=body.rejection_retries,
+            heuristic_fallback=body.heuristic_fallback,
+            accepted=body.accepted,
+        )
+    except Exception as exc:
+        logger.warning("Client decision metrics record failed: %s", exc)
+    return {"status": "ok"}
+
+
+@app.post("/human_feedback")
+async def human_feedback_endpoint(body: HumanFeedbackRequest) -> dict:
+    """Receive a human evaluation submission from the Godot feedback panel."""
+    if _memory is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    try:
+        row_id = _memory.record_human_feedback(game_id=body.game_id, feedback=body.model_dump())
+    except Exception as exc:
+        logger.warning("Human feedback record failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not record feedback") from exc
+    logger.info("Human feedback recorded: game=%s scope=%s id=%d", body.game_id, body.scope, row_id)
+    return {"status": "ok", "id": row_id}
+
+
+@app.post("/move_feedback")
+async def move_feedback_endpoint(body: MoveFeedbackRequest) -> dict:
+    """Receive a per-move sentiment (like/neutral/dislike) from the live feedback box."""
+    if _memory is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    if body.sentiment not in ("like", "neutral", "dislike"):
+        raise HTTPException(status_code=422, detail="Invalid sentiment")
+    try:
+        row_id = _memory.record_move_feedback(
+            game_id=body.game_id,
+            sentiment=body.sentiment,
+            turn=body.turn,
+            move_seq=body.move_seq,
+            move_desc=body.move_desc,
+            reviewer=body.reviewer,
+        )
+    except Exception as exc:
+        logger.warning("Move feedback record failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not record move feedback") from exc
+    return {"status": "ok", "id": row_id}
+
+
+@app.get("/eval_report")
+async def eval_report_endpoint() -> dict:
+    """Aggregate reliability + human-feedback scorecard across all recorded games."""
+    if _memory is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    return _memory.eval_report()
 
 
 @app.post("/opponent_action")

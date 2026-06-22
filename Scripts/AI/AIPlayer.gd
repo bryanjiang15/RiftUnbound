@@ -8,6 +8,11 @@ extends Node
 # The node must be named "AIPlayer" (GameController looks it up by that name).
 # GameScene wires it up via: _ai.setup(_controller, 1)
 
+# Emitted whenever the AI commits an accepted move, so the UI can offer live
+# per-move feedback. Carries a human-readable description, the current turn,
+# and a per-game move sequence number for telemetry alignment.
+signal ai_move_completed(description: String, turn: int, move_seq: int)
+
 var controller: GameController
 var player_index: int = 1
 
@@ -28,9 +33,16 @@ var _last_rejected_move: Dictionary = {}
 var _last_rejection_reason: String = ""
 var _waiting_for_http: bool = false
 
+# Eval (reliability track): wall-clock start of the in-flight decision request,
+# used to report engine-observed latency back to the agent service.
+var _decision_start_ms: int = 0
+
 # Phase 1 additions
 var _current_game_id: String = ""
 var _game_over_reported: bool = false
+
+# Per-game counter of accepted AI moves, used to key live per-move feedback.
+var _move_seq: int = 0
 
 
 func setup(gc: GameController, pi: int) -> void:
@@ -97,9 +109,11 @@ func _request_decision(gs: GameState) -> void:
 	var err = _http.request(AGENT_URL, headers, HTTPClient.METHOD_POST, payload)
 	if err != OK:
 		push_warning("AIPlayer: HTTPRequest failed to start (err=%d). Using heuristic." % err)
+		_report_decision_metrics(true, null)
 		_heuristic_fallback(gs)
 		return
 
+	_decision_start_ms = Time.get_ticks_msec()
 	_waiting_for_http = true
 
 
@@ -124,6 +138,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
 		push_warning("AIPlayer: HTTP error (result=%d, code=%d). Using heuristic." % [result, response_code])
+		_report_decision_metrics(true, null)
 		_heuristic_fallback(gs)
 		return
 
@@ -131,6 +146,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 	var parsed = JSON.parse_string(text)
 	if parsed == null or not parsed is Dictionary:
 		push_warning("AIPlayer: Invalid JSON response. Using heuristic.")
+		_report_decision_metrics(true, null)
 		_heuristic_fallback(gs)
 		return
 
@@ -138,12 +154,14 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 	var move_dict: Dictionary = decision.get("move", {})
 	if move_dict.is_empty():
 		push_warning("AIPlayer: No 'move' in response. Using heuristic.")
+		_report_decision_metrics(true, null)
 		_heuristic_fallback(gs)
 		return
 
 	var cmd := _move_to_command(move_dict)
 	if cmd.is_empty():
 		push_warning("AIPlayer: Could not translate move to command. Using heuristic.")
+		_report_decision_metrics(true, null)
 		_heuristic_fallback(gs)
 		return
 
@@ -161,16 +179,66 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		_last_rejection_reason = "Game engine rejected the command."
 		_report_outcome(false, _last_rejection_reason)
 		if _retry_count < MAX_RETRIES:
+			_report_decision_metrics(false, false)
 			_retry_count += 1
 			push_warning("AIPlayer: Move rejected — retry %d/%d" % [_retry_count, MAX_RETRIES])
 			_request_decision(gs)  # synchronous; sets _waiting_for_http = true
 		else:
+			_report_decision_metrics(true, false)
 			push_warning("AIPlayer: Exhausted %d retries — heuristic fallback." % MAX_RETRIES)
 			_heuristic_fallback(gs)
 	else:
+		_report_decision_metrics(false, true)
 		_report_outcome(true)
+		_emit_move_completed(move_dict, gs)
 	# If the move was accepted the normal _maybe_trigger_ai() → take_turn() cycle
 	# (triggered inside submit_command) handles the next decision.  No extra work needed.
+
+
+func _emit_move_completed(move_dict: Dictionary, gs: GameState) -> void:
+	var turn: int = gs.turn_number if gs != null else 0
+	var desc := _describe_move(move_dict)
+	ai_move_completed.emit(desc, turn, _move_seq)
+	_move_seq += 1
+
+
+func _describe_move(move: Dictionary) -> String:
+	# Human-readable one-liner for the feedback box (e.g. "play card to bf-a").
+	var action: String = move.get("action", "")
+	var p: Dictionary = move.get("parameters", {})
+	match action:
+		"play_card":
+			var s := "Play %s" % p.get("card_id", "card")
+			if p.get("destination", "") not in ["", "base"]:
+				s += " to %s" % p["destination"]
+			if p.get("target_id", "") != "":
+				s += " -> %s" % p["target_id"]
+			return s
+		"move_unit":
+			var ids = p.get("unit_ids", [])
+			if ids is String:
+				ids = [ids]
+			return "Move %s to %s" % [" ".join(ids), p.get("destination", "base")]
+		"use_ability":
+			return "Use %s" % p.get("card_id", "ability")
+		"react":
+			return "React with %s" % p.get("card_id", "card")
+		"hide_card":
+			return "Hide a card at %s" % p.get("battlefield_id", "")
+		"assign_damage":
+			return "Assign %d damage to %s" % [p.get("amount", 0), p.get("target_id", "")]
+		"choose":
+			return "Choose %s" % p.get("target_id", "")
+		"choose_none":
+			return "Choose none"
+		"mulligan", "mulligan_keep":
+			return "Mulligan"
+		"pass":
+			return "Pass"
+		"end_turn":
+			return "End turn"
+		_:
+			return action if action != "" else "AI move"
 
 
 # ── Command translation ───────────────────────────────────────────────────────
@@ -389,6 +457,7 @@ func _on_session_changed(new_id: String) -> void:
 	_retry_count = 0
 	_last_rejected_move = {}
 	_last_rejection_reason = ""
+	_move_seq = 0
 
 
 func _active_game_id(gs: GameState) -> String:
@@ -408,6 +477,29 @@ func _report_outcome(accepted: bool, rejection_reason: String = "") -> void:
 	if not accepted and not rejection_reason.is_empty():
 		body["rejection_reason"] = rejection_reason
 	_fire_and_forget(AGENT_URL.replace("/decision", "/outcome"), body)
+
+
+func _report_decision_metrics(heuristic_fallback: bool, accepted) -> void:
+	# Engine-observed reliability metrics for one AI decision attempt (eval track).
+	# accepted may be true / false / null (Variant) to mirror "unknown".
+	var gs: GameState = controller.gs if controller else null
+	var game_id := _active_game_id(gs)
+	if game_id.is_empty():
+		return
+	var latency_ms := 0
+	if _decision_start_ms > 0:
+		latency_ms = Time.get_ticks_msec() - _decision_start_ms
+	var body := {
+		"game_id": game_id,
+		"turn": (gs.turn_number if gs != null else 0),
+		"decision_type": _pending_brief_state.get("decision_type", ""),
+		"latency_ms": latency_ms,
+		"rejection_retries": _retry_count,
+		"heuristic_fallback": heuristic_fallback,
+	}
+	if accepted != null:
+		body["accepted"] = accepted
+	_fire_and_forget(AGENT_URL.replace("/decision", "/decision_metrics"), body)
 
 
 func _on_board_updated() -> void:

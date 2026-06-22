@@ -99,3 +99,10 @@ Decisions are logged to `ai_agent/agent_memory.db` (SQLite).  Each record stores
 
 The last 10 decisions per game are injected into the agent's context on each
 turn to give it continuity within the game.
+
+## Metrics
+
+python ai_agent/report.py                    # console scorecard
+python ai_agent/report.py --json             # raw aggregate JSON
+python ai_agent/report.py --charts out/      # + PNG graphs
+python ai_agent/report.py --db path/to.db    # custom database
