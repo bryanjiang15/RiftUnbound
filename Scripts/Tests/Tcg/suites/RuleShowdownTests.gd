@@ -220,7 +220,7 @@ static func _test_reaction_playable_in_showdown_open(assertions) -> void:
 	h2.load_fixture_dict(fixture)
 	h2.gs().focus_player_index = 0
 	h2.gs().board.active_showdown_bf = 0
-	assertions.assert_true("react gust" in LegalMoveEnumerator.enumerate(h2.gs(), 0),
+	assertions.assert_true("react gust target flame-chompers" in LegalMoveEnumerator.enumerate(h2.gs(), 0),
 		"reaction is enumerated in showdown open")
 	h2.controller.submit_command(0, "react gust target flame-chompers")
 	assertions.assert_no_error(h2.controller, "react command works in showdown open")

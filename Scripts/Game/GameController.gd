@@ -695,41 +695,119 @@ func _play_spell(player_index: int, card: CardInstance, target_id: String, desti
 	var ps: PlayerState = gs.players[player_index]
 	card.owner_index = player_index
 
-	var target: CardInstance = null
-	if not target_id.is_empty():
-		target = gs.find_instance_anywhere(target_id)
-		if target == null:
-			_log("[ERROR] Target '%s' not found." % target_id)
-			ps.move_to_trash(card)
-			return
-
-	# Push to chain
 	var item = ChainItem.from_card(card)
-	item.targets = [target] if target != null else []
+	var target_abs = _choose_one_target_abilities(card)
 
-	# For spells needing a target but none provided, check if they need one
-	var needs_target_selection = false
-	for ab in card.definition.abilities:
-		if ab.get("timing", "") == "resolution":
-			var target_param = ab.get("effect_params", {}).get("targeting", "")
-			if target_param == "choose_one" and target == null:
-				needs_target_selection = true
+	if not target_abs.is_empty():
+		# Spell requires a chosen target. Per the rules, targets are locked in at
+		# play time (before the reaction window), not on resolution.
+		var first_ab: Dictionary = target_abs[0]
+		var params: Dictionary = first_ab.get("effect_params", {})
+		var valid = TargetResolverScript.filter_with_params(
+			params.get("target", ""), params, card, gs, {"player_index": player_index}
+		)
+		if not target_id.is_empty():
+			var target = gs.find_instance_anywhere(target_id)
+			if target == null or not target in valid:
+				_log("[ERROR] '%s' is not a valid target for %s." % [target_id, card.definition.name])
+				ps.move_to_trash(card)
+				return
+			item.targets = [target]
+			if target_abs.size() > 1:
+				if _queue_spell_target_prompt(item, card, player_index, target_abs, 1):
+					return
+		else:
+			if valid.is_empty():
+				# No legal targets exist. Fall back to deferred resolution so
+				# effects that can legally do nothing (e.g. a Hidden card with no
+				# units to affect) still resolve as a no-op rather than erroring.
 				item.needs_target = true
-				item.target_prompt = _build_target_prompt(card, ab, player_index, gs)
-				item.target_filter = ab.get("effect_params", {}).get("target", "")
-				var valid = TargetResolverScript.filter_with_params(
-					item.target_filter, ab.get("effect_params", {}), card, gs,
-					{"player_index": player_index}
-				)
+				item.target_filter = params.get("target", "")
+				item.target_prompt = _build_target_prompt(card, first_ab, player_index, gs)
+				item.target_params = params
 				item.valid_targets = valid
-				break
+				_finalize_spell_to_chain(item, card)
+				return
+			# No inline target supplied — prompt for it now, before the spell is
+			# placed on the Chain and before opponents may respond.
+			if _queue_spell_target_prompt(item, card, player_index, target_abs, 0):
+				return
+	else:
+		var target: CardInstance = null
+		if not target_id.is_empty():
+			target = gs.find_instance_anywhere(target_id)
+			if target == null:
+				_log("[ERROR] Target '%s' not found." % target_id)
+				ps.move_to_trash(card)
+				return
+		item.targets = [target] if target != null else []
 
+	_finalize_spell_to_chain(item, card)
+
+
+# Push a finalized spell/ability Chain item and open the reaction window.
+func _finalize_spell_to_chain(item: ChainItem, card: CardInstance) -> void:
 	gs.push_to_chain(item)
 	_log("> %s added to Chain" % card.definition.name)
-
 	var chain_lines = ChainProcessor.on_card_added_to_chain(gs)
 	for l in chain_lines:
 		_log(l)
+
+
+# Returns the resolution-timing ability that requires the player to choose a
+# single target, or {} if the card has no such ability.
+func _choose_one_target_ability(card: CardInstance) -> Dictionary:
+	var all = _choose_one_target_abilities(card)
+	return all[0] if not all.is_empty() else {}
+
+
+func _choose_one_target_abilities(card: CardInstance) -> Array:
+	var out: Array = []
+	for ab in card.definition.abilities:
+		if ab.get("timing", "") == "resolution" and \
+		   ab.get("effect_params", {}).get("targeting", "") == "choose_one":
+			out.append(ab)
+	return out
+
+
+func _queue_spell_target_prompt(item: ChainItem, card: CardInstance, player_index: int, target_abs: Array, target_step: int) -> bool:
+	if target_step < 0 or target_step >= target_abs.size():
+		return false
+	var ab: Dictionary = target_abs[target_step]
+	var params: Dictionary = ab.get("effect_params", {})
+	var valid = TargetResolverScript.filter_with_params(
+		params.get("target", ""), params, card, gs, {"player_index": player_index}
+	)
+	for chosen in item.targets:
+		if chosen is CardInstance:
+			valid.erase(chosen)
+	if valid.is_empty():
+		if item.targets.size() <= target_step:
+			item.targets.append(null)
+		else:
+			item.targets[target_step] = null
+		if target_step + 1 < target_abs.size():
+			return _queue_spell_target_prompt(item, card, player_index, target_abs, target_step + 1)
+		return false
+
+	item.needs_target = true
+	item.target_filter = params.get("target", "")
+	item.target_prompt = _build_target_prompt(card, ab, player_index, gs)
+	item.target_params = params
+	item.valid_targets = valid
+	gs.pending_prompt = {
+		"player_index": player_index,
+		"type": "choose_target",
+		"chain_item": item,
+		"prompt": item.target_prompt,
+		"valid_choices": valid,
+		"target_params": params,
+		"pre_chain": true,
+		"target_step": target_step,
+		"target_abilities": target_abs,
+	}
+	_log("[PROMPT] %s" % item.target_prompt)
+	return true
 
 
 func _find_optional_discard_discount_ability(card: CardInstance) -> Dictionary:
@@ -1026,8 +1104,20 @@ func _cmd_react(player_index: int, args: Array) -> void:
 		_log("[ERROR] %s is not a Reaction card." % card.definition.name)
 		return
 
-	if not _validate_explicit_target_for_card(card, target_id, player_index):
-		return
+	# Validate any inline target before paying costs (legality is checked at play
+	# time, so an illegal target — e.g. a unit above a Might threshold — is
+	# rejected up front rather than slipping through to resolution).
+	var target: CardInstance = null
+	var target_ab = _choose_one_target_ability(card)
+	if not target_ab.is_empty() and not target_id.is_empty():
+		var params: Dictionary = target_ab.get("effect_params", {})
+		var valid = TargetResolverScript.filter_with_params(
+			params.get("target", ""), params, card, gs, {"player_index": player_index}
+		)
+		target = gs.find_instance_anywhere(target_id)
+		if target == null or not target in valid:
+			_log("[ERROR] '%s' is not a valid target for %s." % [target_id, card.definition.name])
+			return
 
 	var cost = CostCalculator.compute_play_cost(card, player_index, gs)
 	if not try_pay_cost(player_index, cost):
@@ -1039,8 +1129,7 @@ func _cmd_react(player_index: int, args: Array) -> void:
 	ps.hand.erase(card)
 	ps.cards_played_this_turn += 1
 
-	var target: CardInstance = null
-	if not target_id.is_empty():
+	if target == null and not target_id.is_empty():
 		target = gs.find_instance_anywhere(target_id)
 
 	var item = ChainItem.from_card(card)
@@ -1249,6 +1338,10 @@ func _handle_choose_target(player_index: int, choice: String) -> void:
 	if item == null:
 		gs.pending_prompt.clear()
 		return
+	var target_step: int = int(gs.pending_prompt.get("target_step", -1))
+	var pre_chain: bool = gs.pending_prompt.get("pre_chain", false)
+	var target_abilities: Array = gs.pending_prompt.get("target_abilities", [])
+	var prompt_target_params: Dictionary = gs.pending_prompt.get("target_params", {})
 	var valid: Array = gs.pending_prompt.get("valid_choices", [])
 	var target: CardInstance = null
 	if not valid.is_empty():
@@ -1269,18 +1362,34 @@ func _handle_choose_target(player_index: int, choice: String) -> void:
 	if target == null:
 		_log("[ERROR] Target '%s' not found." % choice)
 		return
-	var ab_params = {}
-	for ab in item.source_card.definition.abilities:
-		if ab.get("timing", "") == "resolution":
-			ab_params = ab.get("effect_params", {})
-			break
+	var ab_params = prompt_target_params
+	if ab_params.is_empty():
+		for ab in item.source_card.definition.abilities:
+			if ab.get("timing", "") == "resolution":
+				ab_params = ab.get("effect_params", {})
+				break
 	if not ab_params.is_empty() and not ConditionEvaluatorScript.evaluate_target_filter(ab_params, target, item.source_card, gs):
 		_log("[ERROR] Invalid target '%s'." % choice)
 		return
-	item.targets = [target]
+	if target_step >= 0:
+		if item.targets.size() <= target_step:
+			item.targets.append(target)
+		else:
+			item.targets[target_step] = target
+	else:
+		item.targets = [target]
 	item.needs_target = false
 	gs.pending_prompt.clear()
 	_log("> P%d chose %s as target" % [player_index + 1, target.display_name()])
+	if pre_chain:
+		var next_step = target_step + 1
+		if not target_abilities.is_empty() and next_step < target_abilities.size():
+			if _queue_spell_target_prompt(item, item.source_card, player_index, target_abilities, next_step):
+				return
+		# Target was chosen at play time: finalize the spell onto the Chain and
+		# open the reaction window. Resolution happens later once players pass.
+		_finalize_spell_to_chain(item, item.source_card)
+		return
 	var resolve_lines = ChainProcessor.resolve_chain_item(item, gs, ability_resolver, self)
 	for l in resolve_lines:
 		_log(l)
@@ -1617,22 +1726,19 @@ func _validate_explicit_target_for_card(card: CardInstance, target_id: String, p
 	if target == null:
 		_log("[ERROR] Target '%s' not found." % target_id)
 		return false
-	for ab in card.definition.abilities:
-		if ab.get("timing", "") != "resolution":
-			continue
-		var params: Dictionary = ab.get("effect_params", {})
-		if params.get("targeting", "") != "choose_one":
-			continue
-		var target_filter: String = params.get("target", "")
-		var valid = TargetResolverScript.filter_with_params(
-			target_filter, params, card, gs, {"player_index": player_index}
-		)
-		for valid_target in valid:
-			if valid_target == target:
-				return true
-		_log("[ERROR] Invalid target '%s'." % target_id)
-		return false
-	return true
+	var ab = _choose_one_target_ability(card)
+	if ab.is_empty():
+		return true
+	var params: Dictionary = ab.get("effect_params", {})
+	var target_filter: String = params.get("target", "")
+	var valid = TargetResolverScript.filter_with_params(
+		target_filter, params, card, gs, {"player_index": player_index}
+	)
+	for valid_target in valid:
+		if valid_target == target:
+			return true
+	_log("[ERROR] Invalid target '%s'." % target_id)
+	return false
 
 
 # ─── Auto-pay ────────────────────────────────────────────────────────────────

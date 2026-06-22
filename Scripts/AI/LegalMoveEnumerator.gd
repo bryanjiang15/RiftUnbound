@@ -137,11 +137,14 @@ static func _add_playable_cards(gs: GameState, ps: PlayerState, player_index: in
 				if perm.definition.card_type == "unit":
 					moves.append("equip %s to %s" % [card.instance_id, perm.instance_id])
 		elif card.definition.card_type == "spell":
-			if card.definition.is_action:
-				# action spells can be played in main phase
+			var tab = _choose_one_target_ability(card)
+			if tab.is_empty():
 				moves.append("play %s" % card.instance_id)
 			else:
-				moves.append("play %s" % card.instance_id)
+				# Targeted spell — enumerate one play per legal target so the
+				# target is locked at play time (before the reaction window).
+				for tid in _valid_target_ids(card, tab, gs, player_index):
+					moves.append("play %s target %s" % [card.instance_id, tid])
 
 
 static func _add_unit_moves_from_base(gs: GameState, ps: PlayerState, player_index: int, moves: Array) -> void:
@@ -253,9 +256,16 @@ static func _add_action_plays(gs: GameState, player_index: int, moves: Array) ->
 		var cost = CostCalculator.compute_play_cost(card, player_index, gs)
 		if not CostCalculator.can_afford_with_autopay(player_index, cost, gs):
 			continue
-		var cmd := "play %s" % card.instance_id
-		if not cmd in moves:
-			moves.append(cmd)
+		var tab = _choose_one_target_ability(card)
+		if tab.is_empty():
+			var cmd := "play %s" % card.instance_id
+			if not cmd in moves:
+				moves.append(cmd)
+		else:
+			for tid in _valid_target_ids(card, tab, gs, player_index):
+				var cmd := "play %s target %s" % [card.instance_id, tid]
+				if not cmd in moves:
+					moves.append(cmd)
 
 
 static func _add_reaction_plays(gs: GameState, player_index: int, moves: Array) -> void:
@@ -264,9 +274,37 @@ static func _add_reaction_plays(gs: GameState, player_index: int, moves: Array) 
 		if not card.definition.is_reaction:
 			continue
 		var cost = CostCalculator.compute_play_cost(card, player_index, gs)
-		if CostCalculator.can_afford_with_autopay(player_index, cost, gs):
+		if not CostCalculator.can_afford_with_autopay(player_index, cost, gs):
+			continue
+		var tab = _choose_one_target_ability(card)
+		if tab.is_empty():
 			moves.append("react %s" % card.instance_id)
+		else:
+			for tid in _valid_target_ids(card, tab, gs, player_index):
+				moves.append("react %s target %s" % [card.instance_id, tid])
 	_add_play_from_hidden(gs, player_index, moves)
+
+
+# Returns the resolution-timing ability that requires the player to choose a
+# single target, or {} if the card has no such ability.
+static func _choose_one_target_ability(card: CardInstance) -> Dictionary:
+	for ab in card.definition.abilities:
+		if ab.get("timing", "") == "resolution" and \
+		   ab.get("effect_params", {}).get("targeting", "") == "choose_one":
+			return ab
+	return {}
+
+
+# Instance ids of every currently legal target for a choose_one ability.
+static func _valid_target_ids(card: CardInstance, ab: Dictionary, gs: GameState, player_index: int) -> Array:
+	var params: Dictionary = ab.get("effect_params", {})
+	var valid = TargetResolver.filter_with_params(
+		params.get("target", ""), params, card, gs, {"player_index": player_index}
+	)
+	var ids: Array = []
+	for t in valid:
+		ids.append(t.instance_id)
+	return ids
 
 
 static func _enumerate_combat_assignments(gs: GameState) -> Array:

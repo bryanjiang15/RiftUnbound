@@ -15,6 +15,7 @@ var is_resolved: bool = false
 var needs_target: bool = false
 var target_prompt: String = ""
 var target_filter: String = ""
+var target_params: Dictionary = {}
 
 # Damage assignment state (for combat)
 var damage_assignments: Dictionary = {}

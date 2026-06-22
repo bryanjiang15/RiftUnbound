@@ -15,6 +15,7 @@ static func run(assertions) -> void:
 	_test_rhasa_cost_reduction(assertions)
 	_test_gust_might_filter(assertions)
 	_test_fight_or_flight_move_base(assertions)
+	_test_gentlemens_duel_applies_buffed_fight_damage(assertions)
 	_test_brazen_buccaneer_discount(assertions)
 	_test_cemetery_attendant(assertions)
 	_test_get_excited(assertions)
@@ -32,6 +33,8 @@ static func run(assertions) -> void:
 	_test_flame_chompers_not_on_other_discard(assertions)
 	_test_scrapheap_on_discard_effect(assertions)
 	_test_p2_can_act_after_chemtech_scrapheap_turn(assertions)
+	_test_gust_rejects_target_above_might(assertions)
+	_test_play_targeted_spell_enumerates_targets(assertions)
 
 
 static func _test_magma_wurm_aura(assertions) -> void:
@@ -198,6 +201,27 @@ static func _test_fight_or_flight_move_base(assertions) -> void:
 	})
 	h.cmd_with_choices(0, "play fight-or-flight", ["vi-destructive"])
 	assertions.assert_log_contains(h.controller, "moved to base", "fight or flight returns unit to base")
+
+
+static func _test_gentlemens_duel_applies_buffed_fight_damage(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "SHOWDOWN_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 6, "power": {"body": 1}}, "hand": ["gentlemens-duel"],
+			 "battlefield-a": [{"id": "zephyr-sage", "owner": 0}], "deck_size": 5, "rune_deck_size": 12},
+			{"battlefield-a": [{"id": "chemtech-enforcer", "owner": 1}], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.gs().focus_player_index = 0
+	h.cmd_with_choices(0, "play gentlemens-duel", ["zephyr-sage", "chemtech-enforcer"])
+	var friendly = h.find_unit("zephyr-sage")
+	assertions.assert_true(friendly != null and friendly.damage == 2,
+		"gentlemens duel friendly takes enemy might as reciprocal damage")
+	assertions.assert_true(h.gs().board.find_unit_on_board("chemtech-enforcer") == null and
+			h.gs().players[1].find_instance("chemtech-enforcer") != null,
+		"gentlemens duel uses buffed might to kill chosen enemy")
 
 
 static func _test_brazen_buccaneer_discount(assertions) -> void:
@@ -455,6 +479,49 @@ static func _test_p2_can_act_after_chemtech_scrapheap_turn(assertions) -> void:
 	assertions.assert_true(h.gs().pending_prompt.is_empty(), "no stale prompt after p1 end turn")
 	assertions.assert_eq(h.gs().turn_player_index, 1, "turn passes to p2")
 	assertions.assert_true(h.gs().can_player_act(1), "p2 can act at turn 2 start for ai trigger")
+
+
+# BUG-008: an inline target above the spell's Might threshold must be rejected
+# at play time, before the spell is paid for or placed on the Chain.
+static func _test_gust_rejects_target_above_might(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "SHOWDOWN_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"hand": ["gust"], "pool": {"energy": 1}, "deck_size": 5, "rune_deck_size": 12},
+			{"battlefield-a": [{"id": "magma-wurm", "owner": 1}], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.gs().focus_player_index = 0
+	h.gs().board.active_showdown_bf = 0
+	h.controller.submit_command(0, "react gust target magma-wurm")
+	assertions.assert_true(h.controller.last_command_error,
+		"gust cannot target a unit with Might above 3")
+	assertions.assert_eq(h.gs().players[0].hand.size(), 1,
+		"gust stays in hand after rejected target")
+
+
+# Targeted spells expose one explicit target per legal target (locked at play
+# time) and no bare untargeted play.
+static func _test_play_targeted_spell_enumerates_targets(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 5, "power": {"fury": 1}}, "hand": ["void-seeker"],
+			 "runes": [{"id": "fury-rune", "exhausted": false}],
+			 "battlefield-a": [{"id": "blazing-scorcher", "owner": 1}],
+			 "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	var moves: Array = LegalMoveEnumerator.enumerate(h.gs(), 0)
+	assertions.assert_true("play void-seeker target blazing-scorcher" in moves,
+		"targeted spell enumerates an explicit target option")
+	assertions.assert_true(not ("play void-seeker" in moves),
+		"targeted spell does not offer an untargeted play")
 
 
 static func _harness_with_play(base_ally: Dictionary, extra_hand: Array, play_id: String = "", energy: int = 10, runes: Array = []) -> TcgTestHarness:

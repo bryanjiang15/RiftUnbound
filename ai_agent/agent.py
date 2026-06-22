@@ -558,39 +558,94 @@ async def decide(
 
 # ── Brief state formatting ────────────────────────────────────────────────────
 
-# Legal moves the model should prioritize — play/accelerate variants live here.
-_LEGAL_MOVE_PRIORITY_PREFIXES = (
-    "play ", "move ", "choose ", "mulligan", "react ", "use ",
-    "assign ", "hide ", "equip ",
-)
-_LEGAL_MOVE_PRIORITY_EXACT = frozenset({"end turn", "pass", "assign done"})
+def _head_label(verb: str, head: tuple[str, ...]) -> str:
+    if not head:
+        return verb
+    return f"{verb} {' '.join(head)}"
 
 
-def _is_priority_legal_move(move: str) -> bool:
-    if move in _LEGAL_MOVE_PRIORITY_EXACT:
-        return True
-    return any(move.startswith(prefix) for prefix in _LEGAL_MOVE_PRIORITY_PREFIXES)
+def _ordered_values(values: set[str]) -> list[str]:
+    ordered = sorted(values)
+    if "base" in values:
+        ordered = ["base"] + [v for v in ordered if v != "base"]
+    return ordered
+
+
+# Moves that take no parameters and act as turn/priority terminators; shown
+# last so the action options read first.
+_TERMINAL_MOVES = frozenset({"end turn", "pass", "assign done", "choose none", "mulligan keep"})
+
+
+def _build_legal_move_option_lines(legal: list[str]) -> list[str]:
+    """Collapse the enumerated legal moves into one line per move identity.
+
+    All enumerated strings that share the same verb + head (card/unit ids) are
+    merged into a single line whose parameter slots list every legal value, e.g.
+    ``play noxus-hopeful [to: base|battlefield-a|battlefield-b; flags: accelerate]``.
+    This replaces the previous flat expansion where each destination/target was
+    its own line.
+    """
+    destination_verbs = {"play", "move"}
+    grouped: dict[tuple[str, tuple[str, ...]], dict[str, set[str]]] = {}
+    order: list[tuple[str, tuple[str, ...]]] = []
+    raw_moves: list[str] = []
+
+    for move in legal:
+        parsed = _parse_command(move)
+        if parsed is None:
+            raw_moves.append(move)
+            continue
+
+        key = (parsed["verb"], parsed["head"])
+        if key not in grouped:
+            grouped[key] = {"to": set(), "target": set(), "at": set(), "flags": set()}
+            order.append(key)
+        entry = grouped[key]
+        if parsed["to"] is not None:
+            entry["to"].add(parsed["to"])
+        elif parsed["verb"] in destination_verbs:
+            entry["to"].add("base")
+        if parsed["target"] is not None:
+            entry["target"].add(parsed["target"])
+        if parsed["at"] is not None:
+            entry["at"].add(parsed["at"])
+        for flag in parsed["flags"]:
+            entry["flags"].add(flag)
+
+    def _line_for(key: tuple[str, tuple[str, ...]]) -> str:
+        verb, head = key
+        params = grouped[key]
+        parts: list[str] = []
+        if params["to"]:
+            parts.append("to: " + "|".join(_ordered_values(params["to"])))
+        if params["at"]:
+            parts.append("at: " + "|".join(_ordered_values(params["at"])))
+        if params["target"]:
+            parts.append("target: " + "|".join(_ordered_values(params["target"])))
+        if params["flags"]:
+            parts.append("flags: " + "|".join(sorted(params["flags"])))
+        suffix = f" [{'; '.join(parts)}]" if parts else ""
+        return f"{_head_label(verb, head)}{suffix}"
+
+    # Action moves first (in enumeration order), terminal moves last.
+    action_keys = [k for k in order if _head_label(*k) not in _TERMINAL_MOVES]
+    terminal_keys = [k for k in order if _head_label(*k) in _TERMINAL_MOVES]
+
+    lines = [f"    {_line_for(k)}" for k in action_keys]
+    lines.extend(f"    {move}" for move in raw_moves if move not in _TERMINAL_MOVES)
+    lines.extend(f"    {_line_for(k)}" for k in terminal_keys)
+    lines.extend(f"    {move}" for move in raw_moves if move in _TERMINAL_MOVES)
+    return lines
 
 
 def _append_legal_moves(lines: list[str], legal: list) -> None:
-    """Show all play/move/choose lines; list remaining moves separately."""
-    priority = [mv for mv in legal if _is_priority_legal_move(mv)]
-    other = [mv for mv in legal if not _is_priority_legal_move(mv)]
-
-    lines.append(f"Legal moves ({len(legal)} total):")
-    if priority:
-        lines.append(f"  Play/move options ({len(priority)}):")
-        for mv in priority:
-            lines.append(f"    {mv}")
-    if other:
-        lines.append(f"  Other ({len(other)}):")
-        shown_other = other[:15]
-        for mv in shown_other:
-            lines.append(f"    {mv}")
-        if len(other) > len(shown_other):
-            lines.append(f"    ... and {len(other) - len(shown_other)} more")
-    if not priority and not other:
-        lines.append("  (none)")
+    """Render legal moves as one line per move with parameter choices inline."""
+    lines.append(f"Legal moves ({len(legal)} total) — pick ONE value per [slot]:")
+    option_lines = _build_legal_move_option_lines(legal)
+    if option_lines:
+        lines.extend(option_lines)
+    else:
+        lines.append("    (none)")
     lines.append("  Use list_legal_moves for a fresh full list if needed.")
 
 
