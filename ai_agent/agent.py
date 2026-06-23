@@ -963,6 +963,15 @@ def _format_acting_context(bs: dict) -> str:
     return f"Acting context: Focus={focus_str} | Priority={priority_str}{chain_note}"
 
 
+def _unit_role_tag(u: dict) -> str:
+    """Return ' ATK'/' DEF' when a unit is designated in an active showdown."""
+    if u.get("is_attacker"):
+        return " ATK"
+    if u.get("is_defender"):
+        return " DEF"
+    return ""
+
+
 def _format_brief_state(bs: dict) -> str:
     """Render the brief state as a readable text summary for the model."""
     lines: list[str] = []
@@ -1071,17 +1080,23 @@ def _format_brief_state(bs: dict) -> str:
         ctrl = bf.get("controller_index", -1)
         ctrl_str = "uncontrolled" if ctrl == -1 else f"P{ctrl + 1}"
         contested = " CONTESTED" if bf.get("is_contested") else ""
-        lines.append(f"[{bf['battlefield_id']}] {bf['display_name']} — {ctrl_str}{contested}")
+        all_bf_units = (bf.get("my_units") or []) + (bf.get("opponent_units") or [])
+        showdown = " SHOWDOWN" if any(
+            u.get("is_attacker") or u.get("is_defender") for u in all_bf_units
+        ) else ""
+        lines.append(f"[{bf['battlefield_id']}] {bf['display_name']} — {ctrl_str}{contested}{showdown}")
         bf_effect = bf.get("effect_text", "")
         if bf_effect:
             lines.append(f"  Effect: {skill_module.format_effect_text(bf_effect)}")
         if bf.get("my_units"):
             lines.append("  My units: " + ", ".join(
-                f"{u['instance_id']}({u['current_might']}MHT)" for u in bf["my_units"]
+                f"{u['instance_id']}({u['current_might']}MHT{_unit_role_tag(u)})"
+                for u in bf["my_units"]
             ))
         if bf.get("opponent_units"):
             lines.append("  Opp units: " + ", ".join(
-                f"{u['instance_id']}({u['current_might']}MHT)" for u in bf["opponent_units"]
+                f"{u['instance_id']}({u['current_might']}MHT{_unit_role_tag(u)})"
+                for u in bf["opponent_units"]
             ))
         my_facedown = bf.get("my_facedown")
         if my_facedown:

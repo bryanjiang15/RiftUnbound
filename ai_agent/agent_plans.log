@@ -1,3 +1,466 @@
 Riftbound AI Agent — Plan Log
-Started: 2026-06-23 17:55:13 UTC
+Started: 2026-06-23 20:39:25 UTC
 ════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────
+Turn 2  Type: main_phase  Decision #: 1  Game: Master Yi (Calm/Body)-vs-Player 2-1782247175-18571c19  [2026-06-23T20:40:51Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "develop_board",
+  "plan_for_turn": "Establish board presence by deploying units to prepare for future battlefield control.",
+  "priority_order": [
+    "Deploy units to base",
+    "Prepare for battlefield engagement",
+    "Maintain resource balance"
+  ],
+  "focus_battlefields": [
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "anchor_cards": [],
+  "target_profile": {
+    "kind": "none",
+    "ids": []
+  },
+  "contingencies": [
+    {
+      "trigger": "opponent deploys additional units",
+      "adjustment": "consider defensive positioning"
+    }
+  ],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 3  Type: showdown_focus  Decision #: 3  Game: Master Yi (Calm/Body)-vs-Player 2-1782247175-18571c19  [2026-06-23T20:42:04Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "pressure_battlefield",
+  "plan_for_turn": "Apply pressure on battlefield-a to contest opponent's unit and gain control.",
+  "priority_order": [
+    "Move traveling-merchant-3 to battlefield-a",
+    "Play additional units if possible to support battlefield-a",
+    "Consider resource setup for future turns"
+  ],
+  "focus_battlefields": [
+    "battlefield-a"
+  ],
+  "anchor_cards": [
+    "traveling-merchant-3"
+  ],
+  "target_profile": {
+    "kind": "battlefield",
+    "ids": [
+      "battlefield-a"
+    ]
+  },
+  "contingencies": [
+    {
+      "trigger": "opponent reinforces battlefield-a",
+      "adjustment": "shift focus to battlefield-b if unable to contest effectively"
+    }
+  ],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 4  Type: main_phase  Decision #: 9  Game: Master Yi (Calm/Body)-vs-Player 2-1782247175-18571c19  [2026-06-23T20:43:17Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "develop_board",
+  "plan_for_turn": "Strengthen board presence by deploying units and preparing for future engagements.",
+  "priority_order": [
+    "Deploy traveling-merchant-3 to battlefield-b",
+    "Prepare resources for future unit deployment",
+    "Consider moving units to contest battlefield-a"
+  ],
+  "focus_battlefields": [
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "traveling-merchant-3"
+  ],
+  "target_profile": {
+    "kind": "battlefield",
+    "ids": [
+      "battlefield-b"
+    ]
+  },
+  "contingencies": [
+    {
+      "trigger": "opponent reinforces battlefield-a",
+      "adjustment": "Shift focus to contest battlefield-a with available units"
+    },
+    {
+      "trigger": "opponent plays a powerful card",
+      "adjustment": "Reassess resource allocation to counter"
+    }
+  ],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 4  Type: showdown_focus  Decision #: 11  Game: Master Yi (Calm/Body)-vs-Player 2-1782247175-18571c19  [2026-06-23T20:43:54Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "pressure_battlefield",
+  "plan_for_turn": "Apply pressure on battlefield-a to contest opponent's control while maintaining presence on battlefield-b.",
+  "priority_order": [
+    "contest_battlefield_a",
+    "reinforce_battlefield_b",
+    "manage_resources"
+  ],
+  "focus_battlefields": [
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "get-excited"
+  ],
+  "target_profile": {
+    "kind": "battlefield",
+    "ids": [
+      "battlefield-a"
+    ]
+  },
+  "contingencies": [
+    {
+      "trigger": "opponent reinforces battlefield-a",
+      "adjustment": "consider deploying additional units to battlefield-a"
+    },
+    {
+      "trigger": "opponent contests battlefield-b",
+      "adjustment": "prioritize defense and reinforcement of battlefield-b"
+    }
+  ],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 4  Type: showdown_focus  Decision #: 13  Game: Master Yi (Calm/Body)-vs-Player 2-1782247175-18571c19  [2026-06-23T20:47:01Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "develop_board",
+  "plan_for_turn": "Strengthen board presence and prepare for future engagements.",
+  "priority_order": [
+    "play_units",
+    "reinforce_battlefield_b",
+    "prepare_for_showdown"
+  ],
+  "focus_battlefields": [
+    "battlefield-b"
+  ],
+  "anchor_cards": [],
+  "target_profile": {
+    "kind": "none",
+    "ids": []
+  },
+  "contingencies": [
+    {
+      "trigger": "opponent_moves_to_battlefield-b",
+      "adjustment": "prioritize_defense"
+    },
+    {
+      "trigger": "opponent_plays_strong_card",
+      "adjustment": "consider_counterplay"
+    }
+  ],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 4  Type: main_phase  Decision #: 15  Game: Master Yi (Calm/Body)-vs-Player 2-1782247175-18571c19  [2026-06-23T20:47:32Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "pressure_battlefield",
+  "plan_for_turn": "Increase pressure on battlefield-a to contest control while maintaining presence on battlefield-b.",
+  "priority_order": [
+    "Deploy additional units to battlefield-a",
+    "Reinforce battlefield-b",
+    "Utilize cards to weaken opponent's units"
+  ],
+  "focus_battlefields": [
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "get-excited",
+    "void-seeker"
+  ],
+  "target_profile": {
+    "kind": "battlefield",
+    "ids": [
+      "battlefield-a"
+    ]
+  },
+  "contingencies": [
+    {
+      "trigger": "opponent reinforces battlefield-a",
+      "adjustment": "shift focus to deploying stronger units or using cards to neutralize threats"
+    },
+    {
+      "trigger": "opponent contests battlefield-b",
+      "adjustment": "reinforce battlefield-b with additional units or defensive cards"
+    }
+  ],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 6  Type: main_phase  Decision #: 19  Game: Master Yi (Calm/Body)-vs-Player 2-1782247175-18571c19  [2026-06-23T20:48:32Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "develop_board",
+  "plan_for_turn": "Strengthen board presence and prepare for future engagements.",
+  "priority_order": [
+    "play_units",
+    "reinforce_battlefield_b",
+    "prepare_for_showdown"
+  ],
+  "focus_battlefields": [
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "traveling-merchant-2"
+  ],
+  "target_profile": {
+    "kind": "none",
+    "ids": []
+  },
+  "contingencies": [
+    {
+      "trigger": "opponent_moves_to_battlefield_a",
+      "adjustment": "deploy_units_to_contest"
+    },
+    {
+      "trigger": "opponent_plays_strong_unit",
+      "adjustment": "consider_defensive_play"
+    }
+  ],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 6  Type: main_phase  Decision #: 20  Game: Master Yi (Calm/Body)-vs-Player 2-1782247175-18571c19  [2026-06-23T20:48:43Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "pressure_battlefield",
+  "plan_for_turn": "Increase pressure on battlefield A to contest control and maintain presence on battlefield B.",
+  "priority_order": [
+    "Deploy additional units to battlefield A",
+    "Reinforce battlefield B",
+    "Utilize available resources efficiently"
+  ],
+  "focus_battlefields": [
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "traveling-merchant-2",
+    "cemetery-attendant-2"
+  ],
+  "target_profile": {
+    "kind": "battlefield",
+    "ids": [
+      "battlefield-a"
+    ]
+  },
+  "contingencies": [
+    {
+      "trigger": "opponent reinforces battlefield B",
+      "adjustment": "shift focus to defending battlefield B"
+    },
+    {
+      "trigger": "opponent deploys strong unit to battlefield A",
+      "adjustment": "consider retreat or reinforce with stronger units"
+    }
+  ],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 6  Type: showdown_focus  Decision #: 22  Game: Master Yi (Calm/Body)-vs-Player 2-1782247175-18571c19  [2026-06-23T20:49:03Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "pressure_battlefield",
+  "plan_for_turn": "Increase pressure on contested battlefields to gain control and score points.",
+  "priority_order": [
+    "reinforce_battlefield_a",
+    "contest_battlefield_b",
+    "deploy_additional_units",
+    "manage_resources"
+  ],
+  "focus_battlefields": [
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "cemetery-attendant-2"
+  ],
+  "target_profile": {
+    "kind": "battlefield",
+    "ids": [
+      "battlefield-a",
+      "battlefield-b"
+    ]
+  },
+  "contingencies": [
+    {
+      "trigger": "opponent_reinforces_battlefield_a",
+      "adjustment": "deploy_additional_units_to_a"
+    },
+    {
+      "trigger": "opponent_contests_battlefield_b",
+      "adjustment": "reinforce_battlefield_b"
+    }
+  ],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 6  Type: main_phase  Decision #: 23  Game: Master Yi (Calm/Body)-vs-Player 2-1782247175-18571c19  [2026-06-23T20:49:18Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "protect_lead",
+  "plan_for_turn": "Consolidate control over current battlefields and prepare defenses against potential opponent advances.",
+  "priority_order": [
+    "reinforce_battlefields",
+    "maintain_resource_flow",
+    "prepare_for_opponent_moves"
+  ],
+  "focus_battlefields": [
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "cemetery-attendant-2"
+  ],
+  "target_profile": {
+    "kind": "none",
+    "ids": []
+  },
+  "contingencies": [
+    {
+      "trigger": "opponent_moves_to_battlefield",
+      "adjustment": "deploy_additional_units_to_contest"
+    },
+    {
+      "trigger": "resource_shortage",
+      "adjustment": "prioritize_energy_generation"
+    }
+  ],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 6  Type: main_phase  Decision #: 24  Game: Master Yi (Calm/Body)-vs-Player 2-1782247175-18571c19  [2026-06-23T20:49:31Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "pressure_battlefield",
+  "plan_for_turn": "Increase pressure on opponent by reinforcing presence on battlefields and preparing for potential showdowns.",
+  "priority_order": [
+    "reinforce_battlefield_a",
+    "reinforce_battlefield_b",
+    "prepare_for_showdown",
+    "manage_resources"
+  ],
+  "focus_battlefields": [
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "cemetery-attendant-2"
+  ],
+  "target_profile": {
+    "kind": "battlefield",
+    "ids": [
+      "battlefield-a",
+      "battlefield-b"
+    ]
+  },
+  "contingencies": [
+    {
+      "trigger": "opponent_reinforces_battlefield_a",
+      "adjustment": "deploy_additional_units_to_battlefield_a"
+    },
+    {
+      "trigger": "opponent_reinforces_battlefield_b",
+      "adjustment": "deploy_additional_units_to_battlefield_b"
+    }
+  ],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 8  Type: main_phase  Decision #: 28  Game: Master Yi (Calm/Body)-vs-Player 2-1782247175-18571c19  [2026-06-23T20:52:21Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "stabilize_board",
+  "plan_for_turn": "Reinforce battlefield presence and prepare for potential showdowns.",
+  "priority_order": [
+    "Deploy additional units to battlefield-a",
+    "Strengthen control over battlefield-b",
+    "Prepare for potential showdown at battlefield-a"
+  ],
+  "focus_battlefields": [
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "cemetery-attendant-2"
+  ],
+  "target_profile": {
+    "kind": "battlefield",
+    "ids": [
+      "battlefield-a",
+      "battlefield-b"
+    ]
+  },
+  "contingencies": [
+    {
+      "trigger": "opponent reinforces battlefield-a",
+      "adjustment": "consider playing defensive cards or units to counter"
+    },
+    {
+      "trigger": "opponent shifts focus to battlefield-b",
+      "adjustment": "deploy additional units to maintain control"
+    }
+  ],
+  "tactical_flexibility": "medium"
+}
+

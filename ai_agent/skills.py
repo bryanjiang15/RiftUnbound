@@ -351,6 +351,10 @@ def _format_units(units: list[dict]) -> str:
     parts = []
     for u in units:
         status = []
+        if u.get("is_attacker"):
+            status.append("ATK")
+        if u.get("is_defender"):
+            status.append("DEF")
         if u.get("is_exhausted"):
             status.append("EXH")
         if u.get("is_stunned"):
