@@ -33,6 +33,7 @@ from .system_prompt import build_system_prompt, build_system_prompt_from_modules
 logger = logging.getLogger(__name__)
 
 _INPUT_LOG_PATH = Path(__file__).resolve().parent / "agent_inputs.log"
+_PLAN_LOG_PATH = Path(__file__).resolve().parent / "agent_plans.log"
 _LOG_INPUTS: bool = os.environ.get("RIFTBOUND_LOG_INPUTS", "0").strip() not in ("0", "", "false", "no")
 
 # Maximum tool-call rounds before we give up and emit a decision
@@ -430,6 +431,44 @@ def _log_input(game_id: str, brief_state: dict, messages: list) -> None:
         logger.warning("Input log write failed: %s", exc)
 
 
+def _log_plan(
+    game_id: str,
+    brief_state: dict,
+    plan: "Plan",
+    *,
+    was_cached: bool,
+    decision_index: Optional[int] = None,
+) -> None:
+    """Write the turn plan used for this decision to agent_plans.log.
+
+    One entry per decision that consults a plan, annotated with the turn,
+    decision type, decision index, and whether the plan was freshly generated
+    or reused from the per-turn cache.
+    """
+    if not _LOG_INPUTS:
+        return
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sep = "─" * 72
+    origin = "CACHED (reused this turn)" if was_cached else "FRESH (new planner call)"
+    lines = [
+        "",
+        sep,
+        f"Turn {brief_state.get('turn_number', '?')}  "
+        f"Type: {brief_state.get('decision_type', '?')}  "
+        f"Decision #: {decision_index if decision_index is not None else '?'}  "
+        f"Game: {game_id}  [{ts}]",
+        f"Plan source: {origin}",
+        sep,
+        plan.model_dump_json(indent=2),
+        "",
+    ]
+    try:
+        with _PLAN_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError as exc:
+        logger.warning("Plan log write failed: %s", exc)
+
+
 # ── Main reasoning loop ───────────────────────────────────────────────────────
 
 
@@ -750,12 +789,20 @@ async def _decide_staged(
     plan: Plan | None = None
     timeline = memory.timeline_slice(game_id)
     if route.needs_plan:
-        plan = await _planner.plan(
+        plan, was_cached = await _planner.plan(
             client=get_client(),
             model=model,
             game_id=game_id,
             brief_state=brief_state,
             memory_summary=timeline,
+        )
+        decision_index = memory._decision_counters.get(game_id, 0)
+        _log_plan(
+            game_id,
+            brief_state,
+            plan,
+            was_cached=was_cached,
+            decision_index=decision_index,
         )
 
     system = build_system_prompt_from_modules(route.modules, brief_state=brief_state)
@@ -766,7 +813,13 @@ async def _decide_staged(
     brief_summary = _format_brief_state(brief_state)
     user_content = f"## Current Decision\n\n{brief_summary}"
     if plan is not None:
-        user_content += f"\n\n## Turn Plan\n{plan.model_dump_json(indent=2)}"
+        user_content += (
+            "\n\n## Turn Plan (guidance, not binding)\n"
+            "Use this as your default strategic direction for the turn, but you "
+            "may deviate when a clearly better legal move is available — explain "
+            "the deviation in your reasoning.\n"
+            f"{plan.model_dump_json(indent=2)}"
+        )
     user_content += _format_rejection_context(rejection_context)
     messages.append({"role": "user", "content": user_content})
     _log_input(game_id, brief_state, messages)

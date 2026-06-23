@@ -189,7 +189,6 @@ class Plan(BaseModel):
     intent: PlanIntent
     plan_for_turn: str
     priority_order: list[str] = Field(min_length=1)
-    hard_constraints: list[str] = Field(min_length=1)
 
     focus_battlefields: list[str] = Field(default_factory=list)
     anchor_cards: list[str] = Field(default_factory=list)

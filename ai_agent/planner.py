@@ -24,10 +24,12 @@ and advance score — do not stall.
 ## Your role (planner, NOT actor)
 - You produce ONE stable strategic plan for the WHOLE turn, not a single move.
 - A turn has many decisions (play, move, showdown focus, choices). Your plan is
-  the shared intent every later decision should stay consistent with.
+  shared guidance that keeps those decisions broadly coherent.
+- The plan is NOT binding. The Actor stage may deviate from it whenever a
+  clearly better legal move appears; you are setting default direction and
+  priorities, not hard rules.
 - You do NOT pick exact commands or guarantee legality — the Actor stage selects
-  a concrete legal move and the engine validates it. Set direction, priorities,
-  and guardrails only.
+  a concrete legal move and the engine validates it.
 
 ## Rules guardrails (enough to plan well)
 - Battlefields are the win engine: holding them scores points each turn.
@@ -97,12 +99,17 @@ class Planner:
         game_id: str,
         brief_state: dict[str, Any],
         memory_summary: str,
-    ) -> Plan:
+    ) -> tuple[Plan, bool]:
+        """Return (plan, was_cached) for this (game_id, turn).
+
+        was_cached is True when an existing per-turn plan is reused, False when
+        a fresh planner LLM call produced the plan.
+        """
         turn = int(brief_state.get("turn_number", 0))
         strategic_hash = strategic_state_hash(brief_state)
         cached = self._cached(game_id, turn, strategic_hash)
         if cached is not None:
-            return cached
+            return cached, True
 
         plan = await _request_plan(
             client=client,
@@ -118,7 +125,7 @@ class Planner:
             plan=plan,
         )
         self._last_intent[game_id] = plan.intent
-        return plan
+        return plan, False
 
 
 def _strip_fences(content: str) -> str:
@@ -174,13 +181,14 @@ async def _request_plan(
 ) -> Plan:
     system = PLANNER_SYSTEM_PROMPT
     user = (
-        "Create a plan for this turn with stable strategy and constraints.\n\n"
+        "Create a plan for this turn with a stable strategy and priorities. "
+        "The plan is guidance, not a binding contract — the Actor may deviate "
+        "when a clearly better legal move arises.\n\n"
         "Required keys:\n"
         "- schema_version (string, always '2.0')\n"
         "- intent (develop_board|pressure_battlefield|stabilize_board|protect_lead|set_up_showdown|resource_setup|flexible_response)\n"
         "- plan_for_turn (short sentence)\n"
-        "- priority_order (non-empty list[str])\n"
-        "- hard_constraints (non-empty list[str])\n\n"
+        "- priority_order (non-empty list[str])\n\n"
         "Optional keys:\n"
         "- focus_battlefields (list[str])\n"
         "- anchor_cards (list[str])\n"
@@ -220,6 +228,5 @@ async def _request_plan(
         intent="flexible_response",
         plan_for_turn="Take a legal low-risk line while preserving options.",
         priority_order=["legality", "tempo"],
-        hard_constraints=["must_be_legal"],
         tactical_flexibility="high",
     )

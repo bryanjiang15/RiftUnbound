@@ -36,6 +36,7 @@ from .agent import (
     PIPELINE_STAGED,
     decide,
     _INPUT_LOG_PATH,
+    _PLAN_LOG_PATH,
     _LOG_INPUTS,
 )
 from .memory import DecisionLogger, Memory
@@ -72,9 +73,16 @@ async def _lifespan(app: FastAPI):
             + "═" * 72 + "\n",
             encoding="utf-8",
         )
+        _PLAN_LOG_PATH.write_text(
+            f"Riftbound AI Agent — Plan Log\nStarted: "
+            f"{__import__('datetime').datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
+            + "═" * 72 + "\n",
+            encoding="utf-8",
+        )
     logger.info("Riftbound AI agent service started.")
     logger.info("OpenAI API key: %s", "set" if os.environ.get("OPENAI_API_KEY") else "NOT SET")
     logger.info("Input logging: %s", "ENABLED → agent_inputs.log" if _LOG_INPUTS else "disabled")
+    logger.info("Plan logging: %s", "ENABLED → agent_plans.log" if _LOG_INPUTS else "disabled")
     logger.info("Pipeline mode: %s", _pipeline_mode)
     yield
     logger.info("Riftbound AI agent service shutting down.")

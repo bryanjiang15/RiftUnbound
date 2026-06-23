@@ -9,7 +9,6 @@ def test_plan_consistency_rejects_wrong_battlefield_focus():
         intent="pressure_battlefield",
         plan_for_turn="Pressure battlefield-a.",
         priority_order=["battlefield_pressure"],
-        hard_constraints=["must_be_legal"],
         focus_battlefields=["battlefield-a"],
         target_profile=TargetProfile(kind="battlefield", ids=["battlefield-a"]),
         tactical_flexibility="low",
@@ -31,7 +30,6 @@ def test_plan_consistency_allows_high_flexibility():
         intent="flexible_response",
         plan_for_turn="Keep options open.",
         priority_order=["legality"],
-        hard_constraints=["must_be_legal"],
         focus_battlefields=["battlefield-a"],
         tactical_flexibility="high",
     )
