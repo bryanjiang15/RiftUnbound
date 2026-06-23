@@ -81,13 +81,14 @@ static func _test_combat_kills_pre_damaged_unit_with_boosted_might(assertions) -
 	var poro = h.find_unit("stalwart-poro")
 	poro.is_defender = true
 	poro.temp_keywords.append({"id": "shield", "value": 2, "duration": "combat"})
-	assertions.assert_eq(poro.get_current_might(), 7, "defender has boosted might before damage step")
 	h.gs().combat_bf_index = 0
 	h.gs().attacker_player_index = 1
+	h.controller.trigger_dispatcher.emit_passive_auras(h.gs())
+	assertions.assert_eq(poro.get_current_might(), 7, "defender has boosted might before damage step")
 	var trash_before = h.gs().players[0].trash.size()
 	CombatProcessor.proceed_to_damage(h.gs(), h.controller)
 	assertions.assert_true(
 		h.gs().players[0].trash.size() > trash_before,
 		"pre-damaged defender with boosted might dies when attackers have lethal"
 	)
-	assertions.assert_true(h.find_unit("stalwart-poro") == null, "stalwart poro leaves the battlefield")
+	assertions.assert_false(poro.is_at_battlefield(), "stalwart poro leaves the battlefield")
