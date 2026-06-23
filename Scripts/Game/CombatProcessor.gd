@@ -175,7 +175,7 @@ static func _auto_assign_damage(might: int, targets: Array, _attacker_assigning:
 	for target in sorted_targets:
 		if remaining <= 0:
 			break
-		var lethal = target.get_base_might() - target.damage
+		var lethal = target.get_current_might() - target.damage
 		var to_deal = mini(remaining, maxi(lethal, 1))
 		assignments[target.instance_id] = to_deal
 		remaining -= to_deal
