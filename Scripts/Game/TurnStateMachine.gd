@@ -43,7 +43,8 @@ static func can_play_card(card: CardInstance, state: int, player_index: int, gam
 			return state == State.NEUTRAL_OPEN and player_index == game_state.turn_player_index
 		"spell":
 			if card.definition.is_reaction:
-				return state == State.NEUTRAL_CLOSED or state == State.SHOWDOWN_OPEN or \
+				return (state == State.NEUTRAL_OPEN and player_index == game_state.turn_player_index) or \
+					state == State.NEUTRAL_CLOSED or state == State.SHOWDOWN_OPEN or \
 					state == State.SHOWDOWN_CLOSED
 			if card.definition.is_action:
 				return state == State.NEUTRAL_OPEN or state == State.SHOWDOWN_OPEN
