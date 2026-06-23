@@ -160,7 +160,13 @@ class BriefState(BaseModel):
 
 # ── Planner / router support ───────────────────────────────────────────────────
 
-PlanIntent = Literal[
+# Intent is a free-form short label the planner chooses to describe the turn's
+# strategic thrust. It is intentionally NOT a fixed enum: a closed vocabulary
+# pushed the planner toward generic, boilerplate intents. Suggested values
+# (develop_board, pressure_battlefield, stabilize_board, protect_lead,
+# set_up_showdown, resource_setup, flexible_response) are offered as guidance in
+# the planner prompt, but any concise descriptor is valid.
+SUGGESTED_PLAN_INTENTS = (
     "develop_board",
     "pressure_battlefield",
     "stabilize_board",
@@ -168,7 +174,7 @@ PlanIntent = Literal[
     "set_up_showdown",
     "resource_setup",
     "flexible_response",
-]
+)
 
 TargetKind = Literal["none", "battlefield", "unit", "card", "player"]
 TacticalFlexibility = Literal["low", "medium", "high"]
@@ -186,7 +192,7 @@ class PlanContingency(BaseModel):
 
 class Plan(BaseModel):
     schema_version: str = "2.0"
-    intent: PlanIntent
+    intent: str
     plan_for_turn: str
     priority_order: list[str] = Field(min_length=1)
 

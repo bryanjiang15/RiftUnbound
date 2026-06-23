@@ -12,6 +12,7 @@ The loop is intentionally kept explicit and debuggable — no framework magic.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -20,7 +21,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from openai import AsyncOpenAI
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    AsyncOpenAI,
+    InternalServerError,
+    RateLimitError,
+)
 from openai.types.chat import ChatCompletionMessageParam
 
 from . import planner as planner_module
@@ -32,8 +39,25 @@ from .system_prompt import build_system_prompt, build_system_prompt_from_modules
 
 logger = logging.getLogger(__name__)
 
+# Transient API failures worth retrying in-loop with backoff (rather than
+# instantly falling back to pass). A 429 rate limit is the common one; timeouts,
+# connection drops, and 5xx are also recoverable.
+TRANSIENT_API_ERRORS = (
+    RateLimitError,
+    APITimeoutError,
+    APIConnectionError,
+    InternalServerError,
+)
+
+# How many times to retry a single transient-failing API call before giving up.
+# Bounded so we never blow past Godot's client-side decision timeout.
+MAX_TRANSIENT_RETRIES = int(os.environ.get("RIFTBOUND_TRANSIENT_RETRIES", "3"))
+# Base seconds for exponential backoff between transient retries.
+TRANSIENT_BACKOFF_BASE_S = float(os.environ.get("RIFTBOUND_TRANSIENT_BACKOFF_S", "1.0"))
+
 _INPUT_LOG_PATH = Path(__file__).resolve().parent / "agent_inputs.log"
 _PLAN_LOG_PATH = Path(__file__).resolve().parent / "agent_plans.log"
+_TOOLS_LOG_PATH = Path(__file__).resolve().parent / "agent_tools.log"
 _LOG_INPUTS: bool = os.environ.get("RIFTBOUND_LOG_INPUTS", "0").strip() not in ("0", "", "false", "no")
 
 # Maximum tool-call rounds before we give up and emit a decision
@@ -54,12 +78,56 @@ def get_client() -> AsyncOpenAI:
         # Explicit timeout + bounded retries so a slow/unreachable API fails
         # fast instead of hanging on the SDK default (600s), which would block
         # the decision long after Godot has already timed out client-side.
+        # The SDK retries transient failures (429/5xx/timeout) with backoff that
+        # respects Retry-After; we also retry in-loop (see _chat_create) so a
+        # brief rate limit does not collapse the whole decision into a pass.
         _client = AsyncOpenAI(
             api_key=os.environ.get("OPENAI_API_KEY"),
             timeout=30.0,
-            max_retries=1,
+            max_retries=int(os.environ.get("RIFTBOUND_CLIENT_MAX_RETRIES", "2")),
         )
     return _client
+
+
+async def _chat_create(client: AsyncOpenAI, *, metrics: Optional[dict] = None, **kwargs):
+    """Call chat.completions.create, retrying transient failures with backoff.
+
+    The OpenAI SDK already retries internally up to ``max_retries``; this adds a
+    second, in-process layer so a sustained-but-brief rate limit (429) is waited
+    out rather than instantly degrading the decision to a fallback ``pass``. Only
+    transient errors are retried; everything else propagates to the caller.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(MAX_TRANSIENT_RETRIES + 1):
+        try:
+            return await client.chat.completions.create(**kwargs)
+        except TRANSIENT_API_ERRORS as exc:
+            last_exc = exc
+            if metrics is not None:
+                metrics["transient_retries"] = metrics.get("transient_retries", 0) + 1
+            if attempt >= MAX_TRANSIENT_RETRIES:
+                break
+            delay = _transient_retry_delay(exc, attempt)
+            logger.warning(
+                "Transient API error (%s); retry %d/%d after %.1fs",
+                type(exc).__name__, attempt + 1, MAX_TRANSIENT_RETRIES, delay,
+            )
+            await asyncio.sleep(delay)
+    assert last_exc is not None
+    raise last_exc
+
+
+def _transient_retry_delay(exc: Exception, attempt: int) -> float:
+    """Backoff seconds for a transient retry, honoring Retry-After when present."""
+    retry_after = getattr(getattr(exc, "response", None), "headers", None)
+    if retry_after:
+        value = retry_after.get("retry-after")
+        if value:
+            try:
+                return min(float(value), 10.0)
+            except (TypeError, ValueError):
+                pass
+    return TRANSIENT_BACKOFF_BASE_S * (2 ** attempt)
 
 
 # ── Tool definitions (OpenAI tool-call format) ────────────────────────────────
@@ -469,6 +537,55 @@ def _log_plan(
         logger.warning("Plan log write failed: %s", exc)
 
 
+def _log_tools(
+    game_id: str,
+    brief_state: dict,
+    *,
+    tool_trace: list[dict],
+    outcome: str,
+    stage: str = "actor",
+) -> None:
+    """Write the tool calls made while resolving one decision to agent_tools.log.
+
+    One entry per decision, keyed by turn / decision_type / current_state, listing
+    every tool the model called (round, name, args) and the terminal outcome
+    (the action chosen, or why it fell back to pass). This makes it possible to
+    see whether a fallback was caused by tool churn or by validator rejection.
+    """
+    if not _LOG_INPUTS:
+        return
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sep = "─" * 72
+    lines = [
+        "",
+        sep,
+        f"Turn {brief_state.get('turn_number', '?')}  "
+        f"Type: {brief_state.get('decision_type', '?')}  "
+        f"State: {brief_state.get('current_state', '?')}  "
+        f"Stage: {stage}  "
+        f"Game: {game_id}  [{ts}]",
+        sep,
+        f"Tool calls: {len(tool_trace)}",
+    ]
+    if tool_trace:
+        for entry in tool_trace:
+            args = entry.get("args", {})
+            args_str = json.dumps(args, default=str) if args else "{}"
+            lines.append(
+                f"  round {entry.get('round', '?')}: "
+                f"{entry.get('name', '?')}({args_str})"
+            )
+    else:
+        lines.append("  (none — model answered without consulting any tool)")
+    lines.append(f"Outcome: {outcome}")
+    lines.append("")
+    try:
+        with _TOOLS_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError as exc:
+        logger.warning("Tools log write failed: %s", exc)
+
+
 # ── Main reasoning loop ───────────────────────────────────────────────────────
 
 
@@ -487,6 +604,7 @@ async def decide(
         "tool_rounds": 0,
         "parse_retries": 0,
         "legality_retries": 0,
+        "transient_retries": 0,
         "fell_back_to_pass": False,
         "latency_ms": 0,
     })
@@ -669,20 +787,43 @@ async def _run_actor_loop(
     max_validator_retries: int = MAX_TOOL_ROUNDS,
 ) -> Decision:
     validator_retries = 0
+    tool_trace: list[dict] = []
+
+    def _finish(decision: Decision, outcome: str) -> Decision:
+        _log_tools(
+            game_id,
+            brief_state,
+            tool_trace=tool_trace,
+            outcome=outcome,
+        )
+        return decision
+
     for round_num in range(MAX_TOOL_ROUNDS):
+        # Force at least one grounding tool call on the first round so the model
+        # consults state/rules before committing. The "only JSON" output contract
+        # otherwise biases it to answer immediately without ever calling a tool.
+        tool_choice = "required" if round_num == 0 else "auto"
         try:
-            response = await get_client().chat.completions.create(
+            response = await _chat_create(
+                get_client(),
+                metrics=metrics,
                 model=model,
                 messages=messages,
                 tools=TOOLS,  # type: ignore[arg-type]
-                tool_choice="auto",
+                tool_choice=tool_choice,  # type: ignore[arg-type]
                 temperature=0.3,
                 response_format={"type": "text"},
             )
             metrics["model_calls"] += 1
+        except TRANSIENT_API_ERRORS as exc:
+            logger.error("OpenAI API rate-limited/unavailable after retries: %s", exc)
+            return _finish(
+                _PASS_DECISION,
+                f"pass (transient API failure after retries: {type(exc).__name__})",
+            )
         except Exception as exc:
             logger.error("OpenAI API error: %s", exc)
-            return _PASS_DECISION
+            return _finish(_PASS_DECISION, f"pass (OpenAI API error: {exc})")
 
         msg = response.choices[0].message
         if msg.tool_calls:
@@ -693,6 +834,9 @@ async def _run_actor_loop(
                     args = json.loads(tc.function.arguments or "{}")
                 except json.JSONDecodeError:
                     args = {}
+                tool_trace.append(
+                    {"round": round_num, "name": tc.function.name, "args": args}
+                )
                 result = _dispatch_tool(tc.function.name, args)
                 result_text = json.dumps(result) if not isinstance(result, str) else result
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
@@ -724,7 +868,10 @@ async def _run_actor_loop(
         if reason is not None:
             metrics["legality_retries"] += 1
             if validator_retries >= max_validator_retries:
-                return _PASS_DECISION
+                return _finish(
+                    _PASS_DECISION,
+                    f"pass (validator budget exhausted; last reason: {reason})",
+                )
             validator_retries += 1
             messages.append({"role": "assistant", "content": content})
             messages.append({"role": "user", "content": reason})
@@ -736,9 +883,12 @@ async def _run_actor_loop(
             decision.move.action,
             decision.reasoning,
         )
-        return decision
+        return _finish(
+            decision,
+            f"{decision.move.action} (after {len(tool_trace)} tool call(s))",
+        )
 
-    return _PASS_DECISION
+    return _finish(_PASS_DECISION, "pass (exhausted MAX_TOOL_ROUNDS without a decision)")
 
 
 async def _decide_legacy(
@@ -789,12 +939,14 @@ async def _decide_staged(
     plan: Plan | None = None
     timeline = memory.timeline_slice(game_id)
     if route.needs_plan:
+        opponent_action_count = memory.count_opponent_material_actions(game_id)
         plan, was_cached = await _planner.plan(
             client=get_client(),
             model=model,
             game_id=game_id,
             brief_state=brief_state,
             memory_summary=timeline,
+            opponent_action_count=opponent_action_count,
         )
         decision_index = memory._decision_counters.get(game_id, 0)
         _log_plan(

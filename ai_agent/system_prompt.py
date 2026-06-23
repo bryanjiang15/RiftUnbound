@@ -77,32 +77,19 @@ CORE_RULES = """
 5. Main Phase — your primary action window (Neutral Open state).
 6. Ending Phase — heal all units; expire "this turn" effects; Rune Pool empties.
 
-### Resources & Rune Payment (IMPORTANT)
-- Cards have an Energy Cost (number) and optional Power Cost (domain symbols).
-- **play_card auto-pays its full cost** by tapping and/or recycling your runes as
-  needed.  You never manually tap or recycle runes — go straight to play_card.
-- **Energy and Power are paid differently:** Energy (the number) is paid by **tapping
-  untapped runes** (+1E each); exhausted runes cannot pay Energy. Power (domain symbols)
-  is paid by **recycling a rune of that domain** — this can use an **exhausted OR untapped**
-  rune, but recycling sends that rune to the bottom of your Rune Deck (a real cost). So
-  having only exhausted runes still lets you pay Power costs.
-- The brief state shows one resource line: `Resources: XE playable  [N untapped ...]`.
-  **XE playable** and the domain power totals (FUR, MIN, etc.) count only **untapped**
-  runes. The `[... | M exhausted ...]` note lists exhausted runes you can ALSO recycle to
-  pay Power (at the cost of recycling them), so do not assume a Power cost is unpayable
-  just because the listed totals look short.
-- **Card costs in hand are for strategic planning only** — printed base cost
-  (e.g. 3E+1FUR). They do NOT tell you whether a play is legal, and do NOT include
+### Resources (essentials — full mechanics via lookup_rule)
+- **play_card auto-pays its full cost** — you never manually tap or recycle runes.
+- **Legality comes from `legal_moves` only.** Do not guess whether you can afford a
+  play or whether a Power cost is payable — the engine auto-pays. Only propose moves
+  that appear in `legal_moves` (or call `list_legal_moves` for a fresh list). Printed
+  hand costs (e.g. 3E+1FUR) are for strategic planning, not legality, and exclude
   optional costs like Accelerate.
-- **Legality comes from `legal_moves` only.** Only propose moves that appear there
-  (or call `list_legal_moves` for a fresh list). Do not guess whether you "have
-  enough runes" — the engine auto-pays.
 - For `play_card` with Accelerate: set `accelerate: true` **only** if `legal_moves`
-  contains `"play <card_id> accelerate"`. If only `"play <card_id>"` appears, play
-  without accelerate.
-- Runes are channeled each turn (2 per turn, 3 for the second player on their first
-  turn). "Floating" energy/power from effects (not runes) is called out explicitly
-  when present; otherwise the pool is empty and runes are the resource.
+  contains `"play <card_id> accelerate"`; otherwise play without it.
+- For HOW runes pay cost (Energy by tapping vs Power by recycling, including
+  recycling exhausted runes), rune channeling, and floating pool energy, call
+  `lookup_rule('paying costs')` — you rarely need it, since legal_moves already
+  reflects what you can afford.
 
 ### Units
 - Permanents — stay on board after play.  Units are ALWAYS played to base; use
@@ -174,7 +161,7 @@ COMBAT_RULES_DETAILED = """
 - Compare what you KILL against what you LOSE to return damage. A "lethal" attack
   that trades your better units for the opponent's worse ones is often bad.
 - Account for Stun (removes Might), Tank (forces damage ordering), Assault/Shield
-  (Might swings while attacking/defending) before deciding the trade is favorable.
+  (Might swings while attacking/defending), before deciding the trade is favorable.
 """
 
 PRIORITY_FOCUS_RULES = """
@@ -262,14 +249,27 @@ battlefields.  Protect your own.  Play to win; do not stall.
   opponent reacted), not as two separate logs.
 - Be decisive.  Uncertainty about the best play is not a reason to pass;
   prefer a plausible advancing move over a pass.
-- When uncertain about a rules interaction, call lookup_rule (or get_keyword for a
-  single keyword) rather than guess.
-- Call list_legal_moves when you want a concrete option set to reason over;
-  the brief state already includes one, but list_legal_moves is always fresh.
 - Keep reasoning concise — two to four sentences focused on why this move,
   not a full game recap.
 - Prioritize board presence and score advancement over hand hoarding.
 - State assumptions explicitly in reasoning so errors are reviewable.
+
+## Use tools instead of guessing — explicit triggers
+Detail lives behind tools, not in this prompt. Call the tool whenever its
+trigger fires rather than assuming:
+- BEFORE playing or moving a card whose effect_text or keyword you are not
+  certain of, call `get_card_detail` (or `get_keyword` for one keyword).
+- If a keyword on a relevant unit is not in the "Keywords in play" block, call
+  `get_keyword` before relying on it.
+- When a rules interaction decides the move (combat trade math, scoring lines,
+  Priority/Focus timing, a keyword ruling), call `lookup_rule` instead of
+  approximating.
+- Before committing to a combat move or a contested play, call `simulate_move`
+  to check the one-ply result, and/or `evaluate_position` to confirm it helps.
+- When the opponent's likely response matters, call `get_opponent_history`.
+- Call `list_legal_moves` when you want a concrete, fresh option set to choose
+  over; the brief state already includes one, but this is always current.
+Prefer one or two targeted tool calls over a confident guess.
 """
 
 

@@ -43,3 +43,64 @@ def test_log_plan_disabled_writes_nothing(tmp_path, monkeypatch):
     agent_module._log_plan("game-1", {"turn_number": 1}, plan, was_cached=True)
 
     assert not log_path.exists()
+
+
+def test_log_tools_writes_trace_and_outcome(tmp_path, monkeypatch):
+    log_path = tmp_path / "agent_tools.log"
+    monkeypatch.setattr(agent_module, "_TOOLS_LOG_PATH", log_path)
+    monkeypatch.setattr(agent_module, "_LOG_INPUTS", True)
+
+    brief_state = {
+        "turn_number": 4,
+        "decision_type": "main_phase",
+        "current_state": "neutral_open",
+    }
+    agent_module._log_tools(
+        "game-1",
+        brief_state,
+        tool_trace=[
+            {"round": 0, "name": "evaluate_position", "args": {}},
+            {"round": 1, "name": "get_card_detail", "args": {"card_id": "x-1"}},
+        ],
+        outcome="pass (validator budget exhausted; last reason: not legal)",
+    )
+
+    content = log_path.read_text(encoding="utf-8")
+    assert "Turn 4" in content
+    assert "State: neutral_open" in content
+    assert "Tool calls: 2" in content
+    assert "evaluate_position({})" in content
+    assert "get_card_detail" in content
+    assert "validator budget exhausted" in content
+
+
+def test_log_tools_notes_when_no_tools_called(tmp_path, monkeypatch):
+    log_path = tmp_path / "agent_tools.log"
+    monkeypatch.setattr(agent_module, "_TOOLS_LOG_PATH", log_path)
+    monkeypatch.setattr(agent_module, "_LOG_INPUTS", True)
+
+    agent_module._log_tools(
+        "game-1",
+        {"turn_number": 1, "decision_type": "main_phase", "current_state": "x"},
+        tool_trace=[],
+        outcome="play_card (after 0 tool call(s))",
+    )
+
+    content = log_path.read_text(encoding="utf-8")
+    assert "Tool calls: 0" in content
+    assert "model answered without consulting any tool" in content
+
+
+def test_log_tools_disabled_writes_nothing(tmp_path, monkeypatch):
+    log_path = tmp_path / "agent_tools.log"
+    monkeypatch.setattr(agent_module, "_TOOLS_LOG_PATH", log_path)
+    monkeypatch.setattr(agent_module, "_LOG_INPUTS", False)
+
+    agent_module._log_tools(
+        "game-1",
+        {"turn_number": 1},
+        tool_trace=[{"round": 0, "name": "evaluate_position", "args": {}}],
+        outcome="pass",
+    )
+
+    assert not log_path.exists()

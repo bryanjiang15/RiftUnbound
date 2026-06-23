@@ -291,6 +291,24 @@ class Memory:
             return ""
         return "\n".join(f"  Turn {row['turn']}: {row['action']}" for row in reversed(rows))
 
+    def count_opponent_material_actions(self, game_id: str) -> int:
+        """Count visible opponent actions that play a card or use an ability.
+
+        Used by the Planner to decide when to invalidate the per-turn plan cache:
+        the plan is regenerated when the opponent plays a card (incl. a reaction)
+        or uses an ability, but NOT when they merely pass, move, choose, or end the
+        turn. Action strings are produced by AIPlayer.gd's _parse_opponent_command
+        ("played ...", "played reaction ...", "used ability ...").
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM opponent_actions WHERE game_id=? "
+                "AND (action LIKE 'played %' OR action LIKE 'played reaction %' "
+                "OR action LIKE 'used ability %')",
+                (game_id,),
+            ).fetchone()
+        return int(row["n"]) if row else 0
+
     def timeline_slice(self, game_id: str, n: int = TIMELINE_SLICE_SIZE) -> str:
         """Return the last n game events — own decisions and opponent actions
         merged into one chronologically ordered context string, oldest first.
