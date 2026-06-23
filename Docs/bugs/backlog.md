@@ -22,4 +22,4 @@
 | [BUG-023](entries/BUG-009-combat-damage-to-already-damaged-unit-does-not-kill.md) | open | high | engine | Combat damage to already damaged unit does not kill | 2026-06-22 | #48 |
 | [BUG-024](entries/BUG-010-can-t-play-reaction-card-in-open-state.md) | open | high | engine | Can't play reaction card in open state | 2026-06-22 | #47 |
 
-**Counts:** 5 open · 0 investigating · 0 confirmed · 2 fixed · 0 wontfix
+**Counts:** 1 open · 0 investigating · 0 confirmed · 3 fixed · 0 wontfix

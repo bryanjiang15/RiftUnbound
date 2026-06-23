@@ -131,7 +131,7 @@ func _deal_damage(params: Dictionary, source: CardInstance, target: CardInstance
 	target.add_damage(amount)
 	var src_name = source.display_name() if source else "Effect"
 	return ["> %s dealt %d damage to %s (total: %d/%d)" % [
-		src_name, amount, target.display_name(), target.damage, target.get_base_might()
+		src_name, amount, target.display_name(), target.damage, target.get_current_might()
 	]]
 
 
@@ -343,7 +343,7 @@ func _deal_damage_all_enemies_in_combat(params: Dictionary, source: CardInstance
 	for u in Array(bf.units[enemy_pi]):
 		u.add_damage(amount)
 		log_lines.append("> Cannon Barrage dealt %d to %s (total: %d/%d)" % [
-			amount, u.display_name(), u.damage, u.get_base_might()
+			amount, u.display_name(), u.damage, u.get_current_might()
 		])
 	if log_lines.is_empty():
 		log_lines.append("> Cannon Barrage: no enemy units in combat")
