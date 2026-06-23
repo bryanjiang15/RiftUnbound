@@ -31,7 +31,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from . import skills as skill_module
-from .agent import decide, _INPUT_LOG_PATH, _LOG_INPUTS
+from .agent import (
+    PIPELINE_LEGACY,
+    PIPELINE_STAGED,
+    decide,
+    _INPUT_LOG_PATH,
+    _PLAN_LOG_PATH,
+    _LOG_INPUTS,
+)
 from .memory import DecisionLogger, Memory
 from .schemas import Decision, DecisionRequest, Move
 
@@ -44,14 +51,21 @@ logger = logging.getLogger(__name__)
 # Global singletons created at startup
 _memory: Memory | None = None
 _decision_logger: DecisionLogger | None = None
+_pipeline_mode: str = PIPELINE_LEGACY
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    global _memory, _decision_logger
+    global _memory, _decision_logger, _pipeline_mode
     _memory = Memory()
     _decision_logger = DecisionLogger()
     _decision_logger.clear()          # fresh log on every server start
+    requested_pipeline = os.environ.get("RIFTBOUND_PIPELINE", PIPELINE_LEGACY).strip().lower()
+    _pipeline_mode = (
+        requested_pipeline
+        if requested_pipeline in (PIPELINE_LEGACY, PIPELINE_STAGED)
+        else PIPELINE_LEGACY
+    )
     if _LOG_INPUTS:
         _INPUT_LOG_PATH.write_text(
             f"Riftbound AI Agent — Input Log\nStarted: "
@@ -59,9 +73,17 @@ async def _lifespan(app: FastAPI):
             + "═" * 72 + "\n",
             encoding="utf-8",
         )
+        _PLAN_LOG_PATH.write_text(
+            f"Riftbound AI Agent — Plan Log\nStarted: "
+            f"{__import__('datetime').datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
+            + "═" * 72 + "\n",
+            encoding="utf-8",
+        )
     logger.info("Riftbound AI agent service started.")
     logger.info("OpenAI API key: %s", "set" if os.environ.get("OPENAI_API_KEY") else "NOT SET")
     logger.info("Input logging: %s", "ENABLED → agent_inputs.log" if _LOG_INPUTS else "disabled")
+    logger.info("Plan logging: %s", "ENABLED → agent_plans.log" if _LOG_INPUTS else "disabled")
+    logger.info("Pipeline mode: %s", _pipeline_mode)
     yield
     logger.info("Riftbound AI agent service shutting down.")
 
@@ -114,6 +136,7 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
         memory=_memory,
         rejection_context=rejection_ctx,
         eval_metrics=eval_metrics,
+        pipeline_mode=_pipeline_mode,
     )
 
     # Record in episodic memory (accepted status unknown until Godot responds)

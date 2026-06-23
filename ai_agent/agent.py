@@ -23,14 +23,17 @@ from typing import Any, Optional
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
+from . import planner as planner_module
+from . import router as router_module
 from . import skills as skill_module
 from .memory import Memory
-from .schemas import Decision, Move
-from .system_prompt import build_system_prompt
+from .schemas import Decision, LegalActionOption, Move, Plan
+from .system_prompt import build_system_prompt, build_system_prompt_from_modules
 
 logger = logging.getLogger(__name__)
 
 _INPUT_LOG_PATH = Path(__file__).resolve().parent / "agent_inputs.log"
+_PLAN_LOG_PATH = Path(__file__).resolve().parent / "agent_plans.log"
 _LOG_INPUTS: bool = os.environ.get("RIFTBOUND_LOG_INPUTS", "0").strip() not in ("0", "", "false", "no")
 
 # Maximum tool-call rounds before we give up and emit a decision
@@ -39,6 +42,10 @@ MAX_TOOL_ROUNDS = 6
 DEFAULT_MODEL = "gpt-4o"
 
 _client: Optional[AsyncOpenAI] = None
+_planner = planner_module.Planner()
+
+PIPELINE_LEGACY = "legacy"
+PIPELINE_STAGED = "staged"
 
 
 def get_client() -> AsyncOpenAI:
@@ -424,6 +431,44 @@ def _log_input(game_id: str, brief_state: dict, messages: list) -> None:
         logger.warning("Input log write failed: %s", exc)
 
 
+def _log_plan(
+    game_id: str,
+    brief_state: dict,
+    plan: "Plan",
+    *,
+    was_cached: bool,
+    decision_index: Optional[int] = None,
+) -> None:
+    """Write the turn plan used for this decision to agent_plans.log.
+
+    One entry per decision that consults a plan, annotated with the turn,
+    decision type, decision index, and whether the plan was freshly generated
+    or reused from the per-turn cache.
+    """
+    if not _LOG_INPUTS:
+        return
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sep = "─" * 72
+    origin = "CACHED (reused this turn)" if was_cached else "FRESH (new planner call)"
+    lines = [
+        "",
+        sep,
+        f"Turn {brief_state.get('turn_number', '?')}  "
+        f"Type: {brief_state.get('decision_type', '?')}  "
+        f"Decision #: {decision_index if decision_index is not None else '?'}  "
+        f"Game: {game_id}  [{ts}]",
+        f"Plan source: {origin}",
+        sep,
+        plan.model_dump_json(indent=2),
+        "",
+    ]
+    try:
+        with _PLAN_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError as exc:
+        logger.warning("Plan log write failed: %s", exc)
+
+
 # ── Main reasoning loop ───────────────────────────────────────────────────────
 
 
@@ -433,15 +478,8 @@ async def decide(
     memory: Memory,
     rejection_context: Optional[dict] = None,
     eval_metrics: Optional[dict] = None,
+    pipeline_mode: Optional[str] = None,
 ) -> Decision:
-    """
-    Given a BriefState dict, run the agent loop and return a Decision.
-    rejection_context is non-None on a retry after a Godot rejection.
-
-    eval_metrics, when supplied, is populated in-place with reliability counters
-    (model_calls, tool_rounds, parse_retries, legality_retries, latency_ms,
-    fell_back_to_pass) so the caller can persist them alongside the decision.
-    """
     _start_ts = time.monotonic()
     metrics = eval_metrics if eval_metrics is not None else {}
     metrics.update({
@@ -458,37 +496,179 @@ async def decide(
         metrics["latency_ms"] = int((time.monotonic() - _start_ts) * 1000)
         return decision
 
-    model = os.environ.get("RIFTBOUND_AI_MODEL", DEFAULT_MODEL)
-    system = build_system_prompt(brief_state)
-    skill_module.set_history_context(memory, game_id)
+    requested_pipeline = (pipeline_mode or os.environ.get("RIFTBOUND_PIPELINE", PIPELINE_LEGACY)).strip().lower()
+    selected_pipeline = requested_pipeline if requested_pipeline in (PIPELINE_LEGACY, PIPELINE_STAGED) else PIPELINE_LEGACY
 
-    # Assemble initial messages
-    messages: list[ChatCompletionMessageParam] = [
-        {"role": "system", "content": system},
-    ]
-
-    # Inject merged chronological game history (own decisions + opponent actions)
-    timeline = memory.timeline_slice(game_id)
-    if timeline:
-        messages.append({"role": "user", "content": timeline})
-
-    # Brief state as the main user message
-    brief_summary = _format_brief_state(brief_state)
-    user_content = f"## Current Decision\n\n{brief_summary}"
-    if rejection_context:
-        user_content += (
-            f"\n\n## Previous Move Was Rejected\n"
-            f"Rejected move: {json.dumps(rejection_context.get('rejected_move', {}))}\n"
-            f"Reason: {rejection_context.get('rejection_reason', 'unknown')}\n"
-            f"In one sentence, state what you misunderstood or assumed incorrectly. "
-            f"Then produce a corrected move."
+    if selected_pipeline == PIPELINE_STAGED:
+        decision = await _decide_staged(
+            brief_state=brief_state,
+            game_id=game_id,
+            memory=memory,
+            rejection_context=rejection_context,
+            metrics=metrics,
         )
-    messages.append({"role": "user", "content": user_content})
+    else:
+        decision = await _decide_legacy(
+            brief_state=brief_state,
+            game_id=game_id,
+            memory=memory,
+            rejection_context=rejection_context,
+            metrics=metrics,
+        )
+    return _finalize(decision, fell_back=(decision == _PASS_DECISION))
 
-    # Optionally record full input for debugging (set RIFTBOUND_LOG_INPUTS=1)
-    _log_input(game_id, brief_state, messages)
 
-    # Tool-use loop
+def _format_rejection_context(rejection_context: Optional[dict]) -> str:
+    if not rejection_context:
+        return ""
+    return (
+        f"\n\n## Previous Move Was Rejected\n"
+        f"Rejected move: {json.dumps(rejection_context.get('rejected_move', {}))}\n"
+        f"Reason: {rejection_context.get('rejection_reason', 'unknown')}\n"
+        f"In one sentence, state what you misunderstood or assumed incorrectly. "
+        f"Then produce a corrected move."
+    )
+
+
+def _legality_failure_reason(decision: Decision, brief_state: dict) -> str | None:
+    cmd = decision.move.to_command()
+    legal = brief_state.get("legal_moves", [])
+    if legal and not _command_in_legal_moves(cmd, legal, brief_state):
+        return (
+            f"Your move translates to '{cmd}', which is NOT in the current legal_moves list. "
+            f"You must pick exactly one command that appears in legal_moves "
+            f"(omit destination for units played to base — use play_card without destination, not 'to base'). "
+            f"For hiding a Hidden card from hand, use hide_card — not play_card with from_hidden. "
+            f"Respond with corrected JSON."
+        )
+    return None
+
+
+def _plan_consistency_failure_reason(
+    *,
+    decision: Decision,
+    brief_state: dict,
+    plan: Plan | None,
+    strict_plan_check: bool,
+) -> str | None:
+    if not strict_plan_check or plan is None:
+        return None
+    if plan.tactical_flexibility == "high":
+        return None
+
+    cmd = decision.move.to_command()
+    parsed = _parse_command(cmd)
+    if parsed is None:
+        return None
+
+    battlefield_targets = set(plan.focus_battlefields)
+    if plan.target_profile.kind == "battlefield":
+        battlefield_targets.update(plan.target_profile.ids)
+
+    move_location = parsed.get("to") or parsed.get("at")
+    if battlefield_targets and move_location and move_location.startswith("battlefield-"):
+        if move_location not in battlefield_targets:
+            return (
+                f"Plan intent is '{plan.intent}' and focuses on {sorted(battlefield_targets)}, "
+                f"but your move commits to '{move_location}'. Choose a move aligned with the plan."
+            )
+
+    explicit_targets = set(plan.target_profile.ids)
+    if plan.target_profile.kind in ("unit", "card", "player") and explicit_targets:
+        chosen_target = parsed.get("target")
+        if chosen_target and chosen_target not in explicit_targets:
+            return (
+                f"Plan target profile expects one of {sorted(explicit_targets)}, but move targets "
+                f"'{chosen_target}'. Choose a move aligned with the plan."
+            )
+
+    if decision.confidence is not None and str(decision.confidence).strip().lower() == "low":
+        return "Confidence is too low for this strategic decision. Choose a clearer plan-aligned move."
+
+    return None
+
+
+def _move_from_command(cmd: str) -> Move | None:
+    parsed = _parse_command(cmd)
+    if parsed is None:
+        return None
+    head = list(parsed["head"])
+    target = parsed["target"] or ""
+    to = parsed["to"] or ""
+    at = parsed["at"] or ""
+    flags = parsed["flags"]
+    verb = parsed["verb"]
+
+    if cmd == "end turn":
+        return Move(action="end_turn")
+    if cmd == "pass":
+        return Move(action="pass")
+    if cmd == "assign done":
+        return Move(action="assign_done")
+    if cmd == "choose none":
+        return Move(action="choose_none")
+    if verb == "mulligan":
+        if head and head[0] == "keep":
+            return Move(action="mulligan_keep")
+        return Move(action="mulligan", parameters={"card_ids": head})
+    if verb == "play" and head:
+        params: dict[str, Any] = {"card_id": head[0]}
+        if to:
+            params["destination"] = to
+        if target:
+            params["target_id"] = target
+        params["from_champion"] = "from champion" in flags
+        params["from_hidden"] = "from hidden" in flags
+        params["accelerate"] = "accelerate" in flags
+        return Move(action="play_card", parameters=params)
+    if verb == "hide" and head and at:
+        return Move(action="hide_card", parameters={"card_id": head[0], "battlefield_id": at})
+    if verb == "move" and head and to:
+        return Move(action="move_unit", parameters={"unit_ids": head, "destination": to})
+    if verb == "use" and head:
+        params = {"card_id": head[0]}
+        if target:
+            params["target_id"] = target
+        return Move(action="use_ability", parameters=params)
+    if verb == "react" and head:
+        params = {"card_id": head[0]}
+        if target:
+            params["target_id"] = target
+        return Move(action="react", parameters=params)
+    if verb == "assign" and len(head) == 1 and target:
+        try:
+            amount = int(head[0])
+        except ValueError:
+            return None
+        return Move(action="assign_damage", parameters={"amount": amount, "target_id": target})
+    if verb == "choose" and head:
+        return Move(action="choose", parameters={"target_id": head[0]})
+    return None
+
+
+def _forced_decision(cmd: str) -> Decision | None:
+    move = _move_from_command(cmd)
+    if move is None:
+        return None
+    return Decision(
+        reasoning="Forced decision: only one legal move was available.",
+        move=move,
+        confidence="high",
+    )
+
+
+async def _run_actor_loop(
+    *,
+    model: str,
+    brief_state: dict,
+    game_id: str,
+    messages: list[ChatCompletionMessageParam],
+    metrics: dict,
+    strict_plan_check: bool = False,
+    plan: Plan | None = None,
+    max_validator_retries: int = MAX_TOOL_ROUNDS,
+) -> Decision:
+    validator_retries = 0
     for round_num in range(MAX_TOOL_ROUNDS):
         try:
             response = await get_client().chat.completions.create(
@@ -502,12 +682,9 @@ async def decide(
             metrics["model_calls"] += 1
         except Exception as exc:
             logger.error("OpenAI API error: %s", exc)
-            return _finalize(_PASS_DECISION, fell_back=True)
+            return _PASS_DECISION
 
-        choice = response.choices[0]
-        msg = choice.message
-
-        # Tool calls — dispatch and loop
+        msg = response.choices[0].message
         if msg.tool_calls:
             metrics["tool_rounds"] += 1
             messages.append(msg)  # type: ignore[arg-type]
@@ -518,64 +695,145 @@ async def decide(
                     args = {}
                 result = _dispatch_tool(tc.function.name, args)
                 result_text = json.dumps(result) if not isinstance(result, str) else result
-                logger.debug("Tool %s → %s", tc.function.name, result_text[:200])
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": result_text,
-                })
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
             continue
 
-        # No tool calls — attempt to parse as Decision
         content = msg.content or ""
         decision = _parse_decision(content)
-        if decision is not None:
-            cmd = decision.move.to_command()
-            legal = brief_state.get("legal_moves", [])
-            if legal and not _command_in_legal_moves(cmd, legal, brief_state):
-                metrics["legality_retries"] += 1
-                logger.warning(
-                    "Decision command not in legal_moves: %s (have %d moves)",
-                    cmd,
-                    len(legal),
-                )
-                messages.append({"role": "assistant", "content": content})
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        f"Your move translates to '{cmd}', which is NOT in the "
-                        f"current legal_moves list. You must pick exactly one "
-                        f"command that appears in legal_moves (omit destination "
-                        f"for units played to base — use play_card without "
-                        f"destination, not 'to base'). "
-                        f"For hiding a Hidden card from hand, use hide_card — "
-                        f"not play_card with from_hidden. Respond with corrected JSON."
-                    ),
-                })
-                continue
-            logger.info(
-                "Decision [round=%d]: action=%s reasoning=%.120s",
-                round_num,
-                decision.move.action,
-                decision.reasoning,
+        if decision is None:
+            metrics["parse_retries"] += 1
+            messages.append({"role": "assistant", "content": content})
+            messages.append({
+                "role": "user",
+                "content": (
+                    "Your response was not valid JSON matching the required schema. "
+                    "Please respond with only the JSON Decision object. "
+                    "No markdown, no explanation text — raw JSON only."
+                ),
+            })
+            continue
+
+        reason = _legality_failure_reason(decision, brief_state)
+        if reason is None:
+            reason = _plan_consistency_failure_reason(
+                decision=decision,
+                brief_state=brief_state,
+                plan=plan,
+                strict_plan_check=strict_plan_check,
             )
-            return _finalize(decision, fell_back=False)
+        if reason is not None:
+            metrics["legality_retries"] += 1
+            if validator_retries >= max_validator_retries:
+                return _PASS_DECISION
+            validator_retries += 1
+            messages.append({"role": "assistant", "content": content})
+            messages.append({"role": "user", "content": reason})
+            continue
 
-        # Model responded with text but not valid JSON — prompt it to fix
-        metrics["parse_retries"] += 1
-        logger.warning("Round %d: model response not valid JSON, prompting fix.", round_num)
-        messages.append({"role": "assistant", "content": content})
-        messages.append({
-            "role": "user",
-            "content": (
-                "Your response was not valid JSON matching the required schema. "
-                "Please respond with only the JSON Decision object. "
-                "No markdown, no explanation text — raw JSON only."
-            ),
-        })
+        logger.info(
+            "Decision [round=%d]: action=%s reasoning=%.120s",
+            round_num,
+            decision.move.action,
+            decision.reasoning,
+        )
+        return decision
 
-    logger.warning("Exhausted %d rounds without a valid decision — returning pass.", MAX_TOOL_ROUNDS)
-    return _finalize(_PASS_DECISION, fell_back=True)
+    return _PASS_DECISION
+
+
+async def _decide_legacy(
+    *,
+    brief_state: dict,
+    game_id: str,
+    memory: Memory,
+    rejection_context: Optional[dict],
+    metrics: dict,
+) -> Decision:
+    model = os.environ.get("RIFTBOUND_AI_MODEL", DEFAULT_MODEL)
+    skill_module.set_history_context(memory, game_id)
+    messages: list[ChatCompletionMessageParam] = [
+        {"role": "system", "content": build_system_prompt(brief_state)},
+    ]
+    timeline = memory.timeline_slice(game_id)
+    if timeline:
+        messages.append({"role": "user", "content": timeline})
+    user_content = f"## Current Decision\n\n{_format_brief_state(brief_state)}"
+    user_content += _format_rejection_context(rejection_context)
+    messages.append({"role": "user", "content": user_content})
+    _log_input(game_id, brief_state, messages)
+    return await _run_actor_loop(
+        model=model,
+        brief_state=brief_state,
+        game_id=game_id,
+        messages=messages,
+        metrics=metrics,
+    )
+
+
+async def _decide_staged(
+    *,
+    brief_state: dict,
+    game_id: str,
+    memory: Memory,
+    rejection_context: Optional[dict],
+    metrics: dict,
+) -> Decision:
+    model = os.environ.get("RIFTBOUND_AI_MODEL", DEFAULT_MODEL)
+    skill_module.set_history_context(memory, game_id)
+    route = router_module.route(brief_state)
+    if route.forced_command:
+        forced = _forced_decision(route.forced_command)
+        if forced is not None:
+            return forced
+
+    plan: Plan | None = None
+    timeline = memory.timeline_slice(game_id)
+    if route.needs_plan:
+        plan, was_cached = await _planner.plan(
+            client=get_client(),
+            model=model,
+            game_id=game_id,
+            brief_state=brief_state,
+            memory_summary=timeline,
+        )
+        decision_index = memory._decision_counters.get(game_id, 0)
+        _log_plan(
+            game_id,
+            brief_state,
+            plan,
+            was_cached=was_cached,
+            decision_index=decision_index,
+        )
+
+    system = build_system_prompt_from_modules(route.modules, brief_state=brief_state)
+    messages: list[ChatCompletionMessageParam] = [{"role": "system", "content": system}]
+    if timeline:
+        messages.append({"role": "user", "content": timeline})
+
+    brief_summary = _format_brief_state(brief_state)
+    user_content = f"## Current Decision\n\n{brief_summary}"
+    if plan is not None:
+        user_content += (
+            "\n\n## Turn Plan (guidance, not binding)\n"
+            "Use this as your default strategic direction for the turn, but you "
+            "may deviate when a clearly better legal move is available — explain "
+            "the deviation in your reasoning.\n"
+            f"{plan.model_dump_json(indent=2)}"
+        )
+    user_content += _format_rejection_context(rejection_context)
+    messages.append({"role": "user", "content": user_content})
+    _log_input(game_id, brief_state, messages)
+
+    return await _run_actor_loop(
+        model=model,
+        brief_state=brief_state,
+        game_id=game_id,
+        messages=messages,
+        metrics=metrics,
+        strict_plan_check=route.strict_plan_check,
+        plan=plan,
+        max_validator_retries=1,
+    )
 
 
 # ── Brief state formatting ────────────────────────────────────────────────────
@@ -668,7 +926,30 @@ def _append_legal_moves(lines: list[str], legal: list) -> None:
         lines.extend(option_lines)
     else:
         lines.append("    (none)")
+    typed = _typed_legal_actions(legal)
+    if typed:
+        lines.append("  Typed legal actions:")
+        lines.append("```json")
+        lines.append(json.dumps([a.model_dump() for a in typed], indent=2))
+        lines.append("```")
     lines.append("  Use list_legal_moves for a fresh full list if needed.")
+
+
+def _typed_legal_actions(legal_moves: list[str]) -> list[LegalActionOption]:
+    typed: list[LegalActionOption] = []
+    for cmd in legal_moves:
+        move = _move_from_command(cmd)
+        if move is None:
+            continue
+        typed.append(
+            LegalActionOption(
+                action=move.action,
+                params=move.parameters,
+                label=cmd,
+                raw_command=cmd,
+            )
+        )
+    return typed
 
 
 def _format_acting_context(bs: dict) -> str:

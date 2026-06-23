@@ -158,6 +158,45 @@ class BriefState(BaseModel):
     full_state_text: Optional[str] = None
 
 
+# ── Planner / router support ───────────────────────────────────────────────────
+
+PlanIntent = Literal[
+    "develop_board",
+    "pressure_battlefield",
+    "stabilize_board",
+    "protect_lead",
+    "set_up_showdown",
+    "resource_setup",
+    "flexible_response",
+]
+
+TargetKind = Literal["none", "battlefield", "unit", "card", "player"]
+TacticalFlexibility = Literal["low", "medium", "high"]
+
+
+class TargetProfile(BaseModel):
+    kind: TargetKind = "none"
+    ids: list[str] = Field(default_factory=list)
+
+
+class PlanContingency(BaseModel):
+    trigger: str
+    adjustment: str
+
+
+class Plan(BaseModel):
+    schema_version: str = "2.0"
+    intent: PlanIntent
+    plan_for_turn: str
+    priority_order: list[str] = Field(min_length=1)
+
+    focus_battlefields: list[str] = Field(default_factory=list)
+    anchor_cards: list[str] = Field(default_factory=list)
+    target_profile: TargetProfile = Field(default_factory=TargetProfile)
+    contingencies: list[PlanContingency] = Field(default_factory=list)
+    tactical_flexibility: TacticalFlexibility = "medium"
+
+
 # ── Move ─────────────────────────────────────────────────────────────────────
 
 ActionType = Literal[
@@ -175,6 +214,13 @@ ActionType = Literal[
     "choose",
     "choose_none",
 ]
+
+
+class LegalActionOption(BaseModel):
+    action: ActionType
+    params: dict[str, Any] = Field(default_factory=dict)
+    label: str
+    raw_command: str
 
 
 class Move(BaseModel):

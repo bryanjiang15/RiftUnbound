@@ -142,8 +142,8 @@ func _setup_move_feedback_box() -> void:
 	_move_feedback_box.anchor_bottom = 1.0
 	_move_feedback_box.offset_left = -226
 	_move_feedback_box.offset_right = -16
-	_move_feedback_box.offset_top = -(CONSOLE_HEIGHT + 206)
-	_move_feedback_box.offset_bottom = -(CONSOLE_HEIGHT + 16)
+	_move_feedback_box.offset_top = -(206)
+	_move_feedback_box.offset_bottom = -(16)
 	_ai.ai_move_completed.connect(_move_feedback_box.on_ai_move)
 
 

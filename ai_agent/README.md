@@ -23,10 +23,31 @@ uvicorn ai_agent.main:app --port 8765 --reload
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|---|---|---|
-| `OPENAI_API_KEY` | (required) | Your OpenAI secret key |
-| `RIFTBOUND_AI_MODEL` | `gpt-4o` | OpenAI model to use (e.g. `o1-mini`, `gpt-4o-mini`) |
+| Variable | Default | Required | Description |
+|---|---|---|---|
+| `OPENAI_API_KEY` | (none) | Yes | Your OpenAI secret key. The service starts without it but every `/decision` call falls back to a safe `pass`. |
+| `RIFTBOUND_AI_MODEL` | `gpt-4o` | No | OpenAI model used by both the Planner and Actor stages (e.g. `gpt-4o-mini`, `o1-mini`). |
+| `RIFTBOUND_PIPELINE` | `legacy` | No | Decision pipeline mode. `legacy` = single monolithic decision loop. `staged` = Router → Planner → Actor → Validator pipeline. Any other value falls back to `legacy`. |
+| `RIFTBOUND_LOG_INPUTS` | `0` | No | When set to a truthy value (anything other than `0`, ``, `false`, `no`), writes debug logs on each decision: full model input to `agent_inputs.log` and the turn plan to `agent_plans.log` (staged pipeline only). |
+
+Notes:
+- `RIFTBOUND_LOG_INPUTS` is the single switch for both the input log and the
+  plan log. The plan log only produces entries in `staged` mode, since the
+  Planner stage does not run under `legacy`.
+- The HTTP port is **not** an environment variable. The service is started with
+  `uvicorn ... --port 8765`, and the Godot client hardcodes `AGENT_PORT := 8765`
+  (`Scripts/AI/AIPlayer.gd`). Change both together if you need a different port.
+
+### Example
+
+```bash
+# Staged pipeline with debug logging on a cheaper model
+export OPENAI_API_KEY=sk-...
+export RIFTBOUND_AI_MODEL=gpt-4o-mini
+export RIFTBOUND_PIPELINE=staged
+export RIFTBOUND_LOG_INPUTS=1
+uvicorn ai_agent.main:app --port 8765 --reload
+```
 
 ## Endpoints
 
