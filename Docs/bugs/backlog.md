@@ -7,6 +7,19 @@
 | [BUG-004](entries/BUG-004-recycle-runes-for-power-does-not-generate-energy.md) | fixed | high | ui | Recycle runes for power does not generate energy | 2026-06-12 | #7 |
 | [BUG-005](entries/BUG-005-console-text-input-drops-after-a-command-is-sent.md) | fixed | medium | ui | Console text input drops after a command is sent | 2026-06-13 | #8 |
 | [BUG-006](entries/BUG-006-extra-pending-choice-on-traveling-merchant-conquer.md) | open | low | ai | extra pending choice on traveling merchant conquer | 2026-06-13 | #9 |
-| [BUG-009](entries/BUG-009-combat-damage-to-already-damaged-unit-does-not-kill.md) | fixed | high | engine | Combat damage to already damaged unit does not kill | 2026-06-23 | #48 |
+| [BUG-008](entries/BUG-008-gust-target-unit-with-unit-that-has-modified-might-more-than.md) | fixed | high | engine | gust target unit with unit that has modified might more than 3 | 2026-06-21 | #41 |
+| [BUG-010](entries/BUG-010-can-t-play-reaction-card-in-open-state.md) | fixed | high | engine | Can't play reaction card in open state | 2026-06-23 | #47 |
+| [BUG-013](entries/BUG-013-combat-damage-does-not-kill-unit.md) | open | critical | engine | combat damage does not kill unit | 2026-06-15 | #26 |
+| [BUG-014](entries/BUG-014-vzoid-seeker-damage-the-wrong-target-with-same-unit-name.md) | fixed | high | engine | VZoid Seeker damage the wrong target with same unit name | 2026-06-16 | #27 |
+| [BUG-015](entries/BUG-015-duplicate-instance-ids-on-battlefield-cannot-be-disambiguate.md) | fixed | high | engine | Duplicate instance IDs on battlefield cannot be disambiguated for targeting | 2026-06-16 | #29 |
+| [BUG-016](entries/BUG-016-conquering-targon-s-peak-does-not-ready-2-rune.md) | open | high | engine | conquering targon;s peak does not ready 2 rune | 2026-06-17 | #31 |
+| [BUG-017](entries/BUG-017-playing-unit-to-controlled-battlefield-is-not-allowed.md) | fixed | high | engine | PLaying unit to controlled battlefield is not allowed | 2026-06-17 | #32 |
+| [BUG-018](entries/BUG-018-reaction-card-not-allowed-to-play-in-showdown-open-state.md) | fixed | high | engine | Reaction card not allowed to play in showdown open state | 2026-06-17 | #33 |
+| [BUG-019](entries/BUG-019-unit-with-increased-might-does-not-deal-correct-damage.md) | open | high | engine | Unit with increased might does not deal correct damage | 2026-06-21 | #40 |
+| [BUG-020](entries/BUG-020-vi-destructive-ability-does-not-recycle-card-as-cost.md) | open | high | engine | vi destructive ability does not recycle card as cost | 2026-06-21 | #45 |
+| [BUG-021](entries/BUG-007-cards-returning-back-to-hand-from-field-is-still-not-ready.md) | open | medium | ui | Cards returning back to hand from field is still not ready | 2026-06-21 | #42 |
+| [BUG-022](entries/BUG-008-gust-target-unit-with-unit-that-has-modified-might-more-than.md) | open | high | engine | gust target unit with unit that has modified might more than 3 | 2026-06-21 | #41 |
+| [BUG-023](entries/BUG-009-combat-damage-to-already-damaged-unit-does-not-kill.md) | open | high | engine | Combat damage to already damaged unit does not kill | 2026-06-22 | #48 |
+| [BUG-024](entries/BUG-010-can-t-play-reaction-card-in-open-state.md) | open | high | engine | Can't play reaction card in open state | 2026-06-22 | #47 |
 
 **Counts:** 1 open · 0 investigating · 0 confirmed · 3 fixed · 0 wontfix

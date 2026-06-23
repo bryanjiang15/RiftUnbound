@@ -19,6 +19,7 @@ static func run(assertions) -> void:
 	_test_brazen_buccaneer_discount(assertions)
 	_test_cemetery_attendant(assertions)
 	_test_get_excited(assertions)
+	_test_reaction_spell_playable_in_neutral_open(assertions)
 	_test_jinx_demolitionist_discard(assertions)
 	_test_vi_recycle_cost(assertions)
 	_test_raging_soul_keywords(assertions)
@@ -259,6 +260,25 @@ static func _test_get_excited(assertions) -> void:
 	})
 	h.cmd_with_choices(0, "play get-excited", ["blazing-scorcher", "void-seeker"])
 	assertions.assert_log_contains(h.controller, "damage", "get excited deals damage")
+
+
+# BUG-010 / GitHub #47: Reaction spells add extra timing windows but remain
+# playable during the turn player's normal open main-phase window.
+static func _test_reaction_spell_playable_in_neutral_open(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 1, "power": {}}, "hand": ["gust"],
+			 "battlefield-a": [{"id": "flame-chompers", "owner": 1}], "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd_with_choices(0, "play gust", ["flame-chompers"])
+	assertions.assert_no_error(h.controller, "reaction spell plays during neutral open")
+	assertions.assert_eq(h.gs().board.find_unit_on_board("flame-chompers"), null,
+		"gust resolves after being played in neutral open")
 
 
 static func _test_jinx_demolitionist_discard(assertions) -> void:
