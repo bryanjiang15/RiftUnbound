@@ -312,6 +312,33 @@ def _keyword_glossary_block(brief_state: dict) -> str:
     return "\n".join(lines)
 
 
+PROMPT_MODULES: dict[str, str] = {
+    "goal_and_role": GOAL_AND_ROLE,
+    "core_rules": CORE_RULES,
+    "output_contract": OUTPUT_CONTRACT,
+    "combat_rules_detailed": COMBAT_RULES_DETAILED,
+    "priority_focus_rules": PRIORITY_FOCUS_RULES,
+    "mulligan_guidance": MULLIGAN_GUIDANCE,
+}
+
+
+def build_system_prompt_from_modules(
+    modules: list[str],
+    brief_state: dict | None = None,
+) -> str:
+    brief_state = brief_state or {}
+    parts: list[str] = []
+    for module in modules:
+        block = PROMPT_MODULES.get(module, "")
+        if block:
+            parts.append(block)
+    if "keywords_in_play" in modules:
+        glossary = _keyword_glossary_block(brief_state)
+        if glossary:
+            parts.append(glossary)
+    return "\n\n".join(p.strip() for p in parts if p.strip()).strip()
+
+
 def build_system_prompt(brief_state: dict | None = None) -> str:
     """
     Assemble the system prompt for this decision.
@@ -324,10 +351,6 @@ def build_system_prompt(brief_state: dict | None = None) -> str:
     decision_type = str(brief_state.get("decision_type", "")).lower()
     current_state = str(brief_state.get("current_state", "")).lower()
 
-    # Stable core (constant prefix).
-    parts: list[str] = [GOAL_AND_ROLE, CORE_RULES, OUTPUT_CONTRACT]
-
-    # Conditional modules (appended after the core).
     in_showdown = "showdown" in current_state or decision_type in (
         "combat_assignment",
         "showdown_focus",
@@ -338,15 +361,27 @@ def build_system_prompt(brief_state: dict | None = None) -> str:
         or decision_type in ("chain_reaction", "showdown_focus", "combat_assignment")
     )
 
-    if in_showdown:
-        parts.append(COMBAT_RULES_DETAILED)
-    if in_closed_or_chain:
-        parts.append(PRIORITY_FOCUS_RULES)
-    if decision_type == "mulligan":
-        parts.append(MULLIGAN_GUIDANCE)
-
-    glossary = _keyword_glossary_block(brief_state)
-    if glossary:
-        parts.append(glossary)
-
-    return "\n\n".join(p.strip() for p in parts if p.strip()).strip()
+    return build_system_prompt_from_modules(
+        modules=[
+            "goal_and_role",
+            "core_rules",
+            "output_contract",
+            *(
+                ["combat_rules_detailed"]
+                if in_showdown
+                else []
+            ),
+            *(
+                ["priority_focus_rules"]
+                if in_closed_or_chain
+                else []
+            ),
+            *(
+                ["mulligan_guidance"]
+                if decision_type == "mulligan"
+                else []
+            ),
+            "keywords_in_play",
+        ],
+        brief_state=brief_state,
+    )

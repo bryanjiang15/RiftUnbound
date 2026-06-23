@@ -18,7 +18,7 @@ var player_index: int = 1
 
 const AGENT_PORT := 8765
 const THINK_DELAY := 0.5       # seconds before each decision
-const HTTP_TIMEOUT := 10.0     # seconds before falling back to heuristic
+const HTTP_TIMEOUT := 30.0     # seconds before falling back to heuristic
 							   # (the agent may make several sequential LLM
 							   # calls per decision; 8s was far too short)
 const MAX_RETRIES := 3         # max rejection retry attempts
