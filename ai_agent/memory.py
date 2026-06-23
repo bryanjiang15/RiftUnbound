@@ -63,6 +63,85 @@ CREATE TABLE IF NOT EXISTS games (
     turns_played INTEGER,
     timestamp    TEXT NOT NULL
 );
+
+-- Server-side reliability metrics: one row per produced decision.
+CREATE TABLE IF NOT EXISTS decision_eval_metrics (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id          TEXT    NOT NULL,
+    turn             INTEGER NOT NULL,
+    decision_index   INTEGER NOT NULL,
+    decision_type    TEXT    NOT NULL,
+    model_calls      INTEGER NOT NULL DEFAULT 0,
+    tool_rounds      INTEGER NOT NULL DEFAULT 0,
+    parse_retries    INTEGER NOT NULL DEFAULT 0,
+    legality_retries INTEGER NOT NULL DEFAULT 0,
+    fell_back_to_pass INTEGER NOT NULL DEFAULT 0,  -- 1 = returned the safety pass
+    latency_ms       INTEGER NOT NULL DEFAULT 0,
+    timestamp        TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_eval_game ON decision_eval_metrics (game_id, turn, decision_index);
+
+-- Engine-observed metrics reported by Godot (latency as the game sees it, plus
+-- rejection retries and whether the AIPlayer fell back to its built-in heuristic).
+CREATE TABLE IF NOT EXISTS client_decision_metrics (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id           TEXT    NOT NULL,
+    turn              INTEGER NOT NULL,
+    decision_type     TEXT,
+    latency_ms        INTEGER NOT NULL DEFAULT 0,
+    rejection_retries INTEGER NOT NULL DEFAULT 0,
+    heuristic_fallback INTEGER NOT NULL DEFAULT 0,
+    accepted          INTEGER,                       -- 1 = engine accepted final move
+    timestamp         TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_client_eval_game ON client_decision_metrics (game_id, turn);
+
+-- One reliability scorecard per finished game (aggregated on /game_over).
+CREATE TABLE IF NOT EXISTS game_eval_summary (
+    game_id            TEXT PRIMARY KEY,
+    decisions          INTEGER NOT NULL DEFAULT 0,
+    model_calls_total  INTEGER NOT NULL DEFAULT 0,
+    avg_latency_ms     REAL    NOT NULL DEFAULT 0,
+    p95_latency_ms     INTEGER NOT NULL DEFAULT 0,
+    parse_retry_total  INTEGER NOT NULL DEFAULT 0,
+    legality_retry_total INTEGER NOT NULL DEFAULT 0,
+    fallback_count     INTEGER NOT NULL DEFAULT 0,
+    timestamp          TEXT    NOT NULL
+);
+
+-- Human evaluation feedback (rubric scores + tags + free-text note).
+CREATE TABLE IF NOT EXISTS human_feedback (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id       TEXT    NOT NULL,
+    reviewer      TEXT,
+    scope         TEXT    NOT NULL DEFAULT 'game',  -- 'game' | 'decision'
+    turn          INTEGER,
+    decision_index INTEGER,
+    strategic     INTEGER,
+    tactical      INTEGER,
+    resource      INTEGER,
+    rules         INTEGER,
+    overall       INTEGER,
+    tags          TEXT,                              -- JSON array
+    note          TEXT,
+    timestamp     TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_game ON human_feedback (game_id);
+
+-- Lightweight per-move sentiment (thumbs up/down/neutral) collected live during
+-- play. An ignored move simply has no row, which is how "ignored" is told apart
+-- from an explicit "neutral" rating.
+CREATE TABLE IF NOT EXISTS move_feedback (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id     TEXT    NOT NULL,
+    turn        INTEGER,
+    move_seq    INTEGER,                 -- client-side index of the AI move
+    sentiment   TEXT    NOT NULL,        -- 'like' | 'neutral' | 'dislike'
+    move_desc   TEXT,
+    reviewer    TEXT,
+    timestamp   TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_move_feedback_game ON move_feedback (game_id, turn);
 """
 
 # Maximum number of recent events (own decisions + opponent actions, merged) to inject into context
@@ -203,7 +282,6 @@ class Memory:
     # ── Reading ───────────────────────────────────────────────────────────────
 
     def opponent_actions_text(self, game_id: str, n: int = 8) -> str:
-        """Return the last n opponent actions for this game as bullet lines (no header)."""
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT turn, action FROM opponent_actions WHERE game_id=? ORDER BY id DESC LIMIT ?",
@@ -259,6 +337,255 @@ class Memory:
             lines.append(line)
         return "\n".join(lines)
 
+    # ── Eval: reliability + human feedback ────────────────────────────────────
+
+    def record_decision_metrics(
+        self,
+        *,
+        game_id: str,
+        turn: int,
+        decision_index: int,
+        decision_type: str,
+        metrics: dict,
+    ) -> None:
+        """Append one server-side reliability row for a produced decision."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO decision_eval_metrics
+                  (game_id, turn, decision_index, decision_type, model_calls,
+                   tool_rounds, parse_retries, legality_retries, fell_back_to_pass,
+                   latency_ms, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    game_id,
+                    turn,
+                    decision_index,
+                    decision_type,
+                    int(metrics.get("model_calls", 0)),
+                    int(metrics.get("tool_rounds", 0)),
+                    int(metrics.get("parse_retries", 0)),
+                    int(metrics.get("legality_retries", 0)),
+                    1 if metrics.get("fell_back_to_pass") else 0,
+                    int(metrics.get("latency_ms", 0)),
+                    now,
+                ),
+            )
+
+    def record_client_decision_metrics(
+        self,
+        *,
+        game_id: str,
+        turn: int,
+        decision_type: Optional[str],
+        latency_ms: int,
+        rejection_retries: int,
+        heuristic_fallback: bool,
+        accepted: Optional[bool],
+    ) -> None:
+        """Append one engine-observed metrics row (reported by Godot's AIPlayer)."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO client_decision_metrics
+                  (game_id, turn, decision_type, latency_ms, rejection_retries,
+                   heuristic_fallback, accepted, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    game_id,
+                    turn,
+                    decision_type,
+                    int(latency_ms),
+                    int(rejection_retries),
+                    1 if heuristic_fallback else 0,
+                    (1 if accepted else 0) if accepted is not None else None,
+                    now,
+                ),
+            )
+
+    def summarize_game_eval(self, game_id: str) -> dict:
+        """Aggregate server-side decision metrics for a game and upsert a scorecard."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT model_calls, parse_retries, legality_retries, "
+                "fell_back_to_pass, latency_ms FROM decision_eval_metrics "
+                "WHERE game_id=? ORDER BY id",
+                (game_id,),
+            ).fetchall()
+
+        summary = {
+            "game_id": game_id,
+            "decisions": len(rows),
+            "model_calls_total": sum(r["model_calls"] for r in rows),
+            "avg_latency_ms": 0.0,
+            "p95_latency_ms": 0,
+            "parse_retry_total": sum(r["parse_retries"] for r in rows),
+            "legality_retry_total": sum(r["legality_retries"] for r in rows),
+            "fallback_count": sum(r["fell_back_to_pass"] for r in rows),
+        }
+        if rows:
+            latencies = sorted(r["latency_ms"] for r in rows)
+            summary["avg_latency_ms"] = round(sum(latencies) / len(latencies), 1)
+            summary["p95_latency_ms"] = _percentile(latencies, 95)
+
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO game_eval_summary
+                  (game_id, decisions, model_calls_total, avg_latency_ms,
+                   p95_latency_ms, parse_retry_total, legality_retry_total,
+                   fallback_count, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(game_id) DO UPDATE SET
+                    decisions=excluded.decisions,
+                    model_calls_total=excluded.model_calls_total,
+                    avg_latency_ms=excluded.avg_latency_ms,
+                    p95_latency_ms=excluded.p95_latency_ms,
+                    parse_retry_total=excluded.parse_retry_total,
+                    legality_retry_total=excluded.legality_retry_total,
+                    fallback_count=excluded.fallback_count,
+                    timestamp=excluded.timestamp
+                """,
+                (
+                    game_id,
+                    summary["decisions"],
+                    summary["model_calls_total"],
+                    summary["avg_latency_ms"],
+                    summary["p95_latency_ms"],
+                    summary["parse_retry_total"],
+                    summary["legality_retry_total"],
+                    summary["fallback_count"],
+                    now,
+                ),
+            )
+        return summary
+
+    def record_human_feedback(self, *, game_id: str, feedback: dict) -> int:
+        """Persist one human-feedback submission. Returns the row id."""
+        now = datetime.now(timezone.utc).isoformat()
+        tags = feedback.get("tags")
+        tags_json = json.dumps(tags) if tags is not None else None
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO human_feedback
+                  (game_id, reviewer, scope, turn, decision_index, strategic,
+                   tactical, resource, rules, overall, tags, note, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    game_id,
+                    feedback.get("reviewer"),
+                    feedback.get("scope", "game"),
+                    feedback.get("turn"),
+                    feedback.get("decision_index"),
+                    feedback.get("strategic"),
+                    feedback.get("tactical"),
+                    feedback.get("resource"),
+                    feedback.get("rules"),
+                    feedback.get("overall"),
+                    tags_json,
+                    feedback.get("note"),
+                    now,
+                ),
+            )
+            return cur.lastrowid  # type: ignore[return-value]
+
+    def record_move_feedback(self, *, game_id: str, sentiment: str, turn: int | None = None,
+                             move_seq: int | None = None, move_desc: str | None = None,
+                             reviewer: str | None = None) -> int:
+        """Persist one per-move sentiment (like/neutral/dislike). Returns row id."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO move_feedback
+                  (game_id, turn, move_seq, sentiment, move_desc, reviewer, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (game_id, turn, move_seq, sentiment, move_desc, reviewer, now),
+            )
+            return cur.lastrowid  # type: ignore[return-value]
+
+    def eval_report(self) -> dict:
+        """Return an aggregate reliability + human-feedback scorecard across games."""
+        with self._connect() as conn:
+            dm = conn.execute(
+                "SELECT COUNT(*) AS n, "
+                "COALESCE(SUM(model_calls),0) AS calls, "
+                "COALESCE(AVG(latency_ms),0) AS avg_lat, "
+                "COALESCE(SUM(parse_retries),0) AS parse_r, "
+                "COALESCE(SUM(legality_retries),0) AS legal_r, "
+                "COALESCE(SUM(fell_back_to_pass),0) AS fallbacks "
+                "FROM decision_eval_metrics"
+            ).fetchone()
+            cm = conn.execute(
+                "SELECT COUNT(*) AS n, "
+                "COALESCE(AVG(latency_ms),0) AS avg_lat, "
+                "COALESCE(SUM(rejection_retries),0) AS rej, "
+                "COALESCE(SUM(heuristic_fallback),0) AS heur, "
+                "COALESCE(SUM(CASE WHEN accepted=1 THEN 1 ELSE 0 END),0) AS accepted, "
+                "COALESCE(SUM(CASE WHEN accepted IS NOT NULL THEN 1 ELSE 0 END),0) AS resolved "
+                "FROM client_decision_metrics"
+            ).fetchone()
+            latencies = [r["latency_ms"] for r in conn.execute(
+                "SELECT latency_ms FROM decision_eval_metrics"
+            ).fetchall()]
+            hf = conn.execute(
+                "SELECT COUNT(*) AS n, AVG(strategic) AS strategic, "
+                "AVG(tactical) AS tactical, AVG(resource) AS resource, "
+                "AVG(rules) AS rules, AVG(overall) AS overall FROM human_feedback"
+            ).fetchone()
+            mf = conn.execute(
+                "SELECT COUNT(*) AS n, "
+                "COALESCE(SUM(CASE WHEN sentiment='like' THEN 1 ELSE 0 END),0) AS likes, "
+                "COALESCE(SUM(CASE WHEN sentiment='neutral' THEN 1 ELSE 0 END),0) AS neutrals, "
+                "COALESCE(SUM(CASE WHEN sentiment='dislike' THEN 1 ELSE 0 END),0) AS dislikes "
+                "FROM move_feedback"
+            ).fetchone()
+
+        server_decisions = dm["n"]
+        resolved = cm["resolved"]
+        return {
+            "server_side": {
+                "decisions": server_decisions,
+                "model_calls": dm["calls"],
+                "avg_model_calls": round(dm["calls"] / server_decisions, 2) if server_decisions else 0,
+                "avg_latency_ms": round(dm["avg_lat"], 1),
+                "p95_latency_ms": _percentile(sorted(latencies), 95) if latencies else 0,
+                "parse_retries": dm["parse_r"],
+                "legality_retries": dm["legal_r"],
+                "fallback_passes": dm["fallbacks"],
+            },
+            "engine_observed": {
+                "decisions": cm["n"],
+                "avg_latency_ms": round(cm["avg_lat"], 1),
+                "rejection_retries": cm["rej"],
+                "heuristic_fallbacks": cm["heur"],
+                "acceptance_rate": round(cm["accepted"] / resolved, 3) if resolved else None,
+            },
+            "human_feedback": {
+                "submissions": hf["n"],
+                "avg_strategic": round(hf["strategic"], 2) if hf["strategic"] is not None else None,
+                "avg_tactical": round(hf["tactical"], 2) if hf["tactical"] is not None else None,
+                "avg_resource": round(hf["resource"], 2) if hf["resource"] is not None else None,
+                "avg_rules": round(hf["rules"], 2) if hf["rules"] is not None else None,
+                "avg_overall": round(hf["overall"], 2) if hf["overall"] is not None else None,
+            },
+            "move_feedback": {
+                "submissions": mf["n"],
+                "likes": mf["likes"],
+                "neutrals": mf["neutrals"],
+                "dislikes": mf["dislikes"],
+                "like_rate": round(mf["likes"] / mf["n"], 3) if mf["n"] else None,
+            },
+        }
+
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _next_decision_index(self, game_id: str) -> int:
@@ -270,6 +597,14 @@ class Memory:
 def _hash_dict(d: dict) -> str:
     serialised = json.dumps(d, sort_keys=True, default=str)
     return hashlib.sha256(serialised.encode()).hexdigest()[:16]
+
+
+def _percentile(sorted_values: list[int], pct: int) -> int:
+    """Nearest-rank percentile of an already-sorted list. Returns 0 when empty."""
+    if not sorted_values:
+        return 0
+    k = max(0, min(len(sorted_values) - 1, int(round((pct / 100.0) * len(sorted_values) + 0.5)) - 1))
+    return int(sorted_values[k])
 
 
 def _params_summary(move: dict) -> str:

@@ -16,7 +16,10 @@ static func run(assertions) -> void:
 	_test_hidden_hide_requires_any_power(assertions)
 	_test_hidden_hide_auto_recycles_rune(assertions)
 	_test_hidden_hide_only_at_controlled_empty_facedown(assertions)
+	_test_hidden_hide_from_champion_zone(assertions)
+	_test_hidden_lost_control_trashes_facedown(assertions)
 	_test_play_from_hidden_facedown_card(assertions)
+	_test_play_from_hidden_target_restricted_to_hidden_battlefield(assertions)
 
 
 static func _test_tap_adds_energy(assertions) -> void:
@@ -232,6 +235,7 @@ static func _test_hidden_unaffordable_play_not_legal(assertions) -> void:
 				"pool": {"energy": 0, "power": {}},
 				"hand": ["fight-or-flight"],
 				"runes": [{"id": "chaos-rune", "exhausted": false}],
+				"battlefield-a": ["chemtech-enforcer"],
 				"deck_size": 10, "rune_deck_size": 12,
 			},
 			{"deck_size": 10, "rune_deck_size": 12}
@@ -286,6 +290,7 @@ static func _test_hidden_hide_auto_recycles_rune(assertions) -> void:
 				"pool": {"energy": 0, "power": {}},
 				"hand": ["fight-or-flight"],
 				"runes": [{"id": "chaos-rune", "exhausted": false}],
+				"battlefield-a": ["chemtech-enforcer"],
 				"deck_size": 10, "rune_deck_size": 12,
 			},
 			{"deck_size": 10, "rune_deck_size": 12}
@@ -335,7 +340,37 @@ static func _test_hidden_hide_only_at_controlled_empty_facedown(assertions) -> v
 	)
 
 
-static func _test_play_from_hidden_facedown_card(assertions) -> void:
+static func _test_hidden_hide_from_champion_zone(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"battlefield_control": [0, -1],
+		"players": [
+			{
+				"pool": {"energy": 0, "power": {}},
+				"hand": [],
+				"runes": [{"id": "chaos-rune", "exhausted": false}],
+				"battlefield-a": ["chemtech-enforcer"],
+				"deck_size": 10, "rune_deck_size": 12,
+			},
+			{"deck_size": 10, "rune_deck_size": 12}
+		]
+	})
+	var ps = h.gs().players[0]
+	var hidden_def = CardLoader.get_card("fight-or-flight")
+	ps.champion_zone = CardInstance.new(hidden_def, "fight-or-flight", 0)
+	ps.champion_zone.location = "champion_zone"
+	h.cmd(0, "hide fight-or-flight at battlefield-a")
+	assertions.assert_no_error(h.controller, "hide from champion zone succeeds")
+	assertions.assert_true(ps.champion_zone == null, "champion zone card moved when hidden")
+	assertions.assert_true(
+		h.gs().board.battlefields[0].facedown_card != null,
+		"hidden card from champion zone placed facedown",
+	)
+
+
+static func _test_hidden_lost_control_trashes_facedown(assertions) -> void:
 	var h = TcgTestHarness.new()
 	h.load_fixture_dict({
 		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
@@ -346,6 +381,7 @@ static func _test_play_from_hidden_facedown_card(assertions) -> void:
 				"pool": {"energy": 0, "power": {}},
 				"hand": [],
 				"runes": [],
+				"battlefield-a": ["chemtech-enforcer"],
 				"deck_size": 10, "rune_deck_size": 12,
 			},
 			{"deck_size": 10, "rune_deck_size": 12}
@@ -355,10 +391,82 @@ static func _test_play_from_hidden_facedown_card(assertions) -> void:
 	var hidden_def = CardLoader.get_card("fight-or-flight")
 	bf.facedown_card = CardInstance.new(hidden_def, "fight-or-flight", 0)
 	bf.facedown_card.is_face_down = true
+	bf.facedown_card.hidden_turn_number = 1
+	bf.controller_index = 1
+	h.controller._run_cleanup()
+	assertions.assert_true(bf.facedown_card == null, "lost-control cleanup removes hidden card")
+	var in_trash := false
+	for c in h.gs().players[0].trash:
+		if c.instance_id == "fight-or-flight":
+			in_trash = true
+	assertions.assert_true(in_trash, "lost-control hidden card moved to owner trash")
+
+
+static func _test_play_from_hidden_facedown_card(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "turn_number": 1, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"battlefield_control": [0, -1],
+		"players": [
+			{
+				"pool": {"energy": 0, "power": {}},
+				"hand": [],
+				"runes": [],
+				"battlefield-a": ["chemtech-enforcer"],
+				"deck_size": 10, "rune_deck_size": 12,
+			},
+			{"deck_size": 10, "rune_deck_size": 12}
+		]
+	})
+	var bf = h.gs().board.battlefields[0]
+	var hidden_def = CardLoader.get_card("fight-or-flight")
+	bf.facedown_card = CardInstance.new(hidden_def, "fight-or-flight", 0)
+	bf.facedown_card.is_face_down = true
+	bf.facedown_card.hidden_turn_number = 1
 	var moves: Array = LegalMoveEnumerator.enumerate(h.gs(), 0)
 	assertions.assert_true(
+		not ("play fight-or-flight from hidden" in moves),
+		"facedown hidden card is not legal the same turn it was hidden",
+	)
+	h.gs().turn_number = 2
+	h.gs().current_state = TurnStateMachine.State.NEUTRAL_CLOSED
+	h.gs().priority_player_index = 0
+	moves = LegalMoveEnumerator.enumerate(h.gs(), 0)
+	assertions.assert_true(
 		"play fight-or-flight from hidden" in moves,
-		"facedown hidden card legal with zero resources",
+		"facedown hidden card legal in later reaction window",
 	)
 	h.cmd(0, "play fight-or-flight from hidden")
-	assertions.assert_no_error(h.controller, "play from hidden costs zero resources")
+	assertions.assert_no_error(h.controller, "play from hidden succeeds in reaction window")
+
+
+static func _test_play_from_hidden_target_restricted_to_hidden_battlefield(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "turn_number": 2, "phase": "MAIN", "state": "NEUTRAL_CLOSED",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"battlefield_control": [0, -1],
+		"players": [
+			{
+				"pool": {"energy": 0, "power": {}},
+				"hand": [],
+				"runes": [],
+				"battlefield-a": ["chemtech-enforcer"],
+				"deck_size": 10, "rune_deck_size": 12,
+			},
+			{
+				"battlefield-b": ["flame-chompers"],
+				"deck_size": 10, "rune_deck_size": 12
+			}
+		]
+	})
+	h.gs().priority_player_index = 0
+	var bf = h.gs().board.battlefields[0]
+	var hidden_def = CardLoader.get_card("fight-or-flight")
+	bf.facedown_card = CardInstance.new(hidden_def, "fight-or-flight", 0)
+	bf.facedown_card.is_face_down = true
+	bf.facedown_card.hidden_turn_number = 1
+	h.cmd(0, "play fight-or-flight from hidden target flame-chompers")
+	assertions.assert_true(h.controller.last_command_error, "hidden spell rejects off-battlefield target")
+	assertions.assert_log_contains(h.controller, "Invalid target", "hidden spell target rejection logged")

@@ -33,6 +33,8 @@ var passive_might_bonus: int = 0
 # Tracking
 var played_this_turn: bool = false
 var is_face_down: bool = false
+var hidden_turn_number: int = -1
+var hidden_battlefield_id: String = ""
 
 
 func _init(def: CardDefinition, inst_id: String, owner_idx: int) -> void:

@@ -184,6 +184,7 @@ func _resolve_trigger_target(ab: Dictionary, source: Variant, ctx: Dictionary, g
 	if source is CardInstance:
 		tctx["player_index"] = source.owner_index
 	var targets = TargetResolverScript.filter_with_params(filter, params, source if source is CardInstance else null, gs, tctx)
+	targets = TargetResolverScript.restrict_to_hidden_battlefield(targets, int(ctx.get("hidden_bf_idx", -1)))
 	return targets[0] if not targets.is_empty() else null
 
 

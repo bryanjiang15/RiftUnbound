@@ -38,6 +38,7 @@ static func run(gs: GameState, ability_resolver: AbilityResolver, controller: Ga
 
 	# Step 5: Recall unattached Gear at Battlefields to Base
 	_recall_unattached_gear(gs, log_lines)
+	_remove_hidden_cards_from_lost_control_battlefields(gs, log_lines)
 
 	# Step 6 & 7: Mark Contested battlefields as Staged Showdowns or Combats
 	_mark_staged(gs, log_lines)
@@ -48,6 +49,10 @@ static func run(gs: GameState, ability_resolver: AbilityResolver, controller: Ga
 			log_lines.append_array(_prompt_staged(gs, controller))
 
 	return log_lines
+
+
+static func check_win(gs: GameState) -> int:
+	return _check_win(gs)
 
 
 static func _check_win(gs: GameState) -> int:
@@ -139,6 +144,24 @@ static func _recall_unattached_gear(gs: GameState, log_lines: Array) -> void:
 				gs.board.remove_unit_from_battlefield(gear)
 				gear.location = "base"
 				log_lines.append("> %s recalled to P%d base" % [gear.display_name(), pi + 1])
+
+
+static func _remove_hidden_cards_from_lost_control_battlefields(gs: GameState, log_lines: Array) -> void:
+	for bf in gs.board.battlefields:
+		if bf.facedown_card == null:
+			continue
+		var hidden: CardInstance = bf.facedown_card
+		if bf.controller_index == hidden.owner_index:
+			continue
+		bf.facedown_card = null
+		hidden.is_face_down = false
+		hidden.hidden_turn_number = -1
+		hidden.hidden_battlefield_id = ""
+		log_lines.append("> Hidden card at %s revealed: %s" % [bf.display_name, hidden.definition.name])
+		gs.players[hidden.owner_index].move_to_trash(hidden)
+		log_lines.append("> %s moved to P%d trash (lost control of %s)" % [
+			hidden.definition.name, hidden.owner_index + 1, bf.display_name
+		])
 
 
 static func _mark_staged(gs: GameState, log_lines: Array) -> void:

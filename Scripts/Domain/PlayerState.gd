@@ -127,6 +127,9 @@ func move_to_trash(inst: CardInstance) -> void:
 	inst.is_attacker = false
 	inst.is_defender = false
 	inst.is_stunned = false
+	inst.is_face_down = false
+	inst.hidden_turn_number = -1
+	inst.hidden_battlefield_id = ""
 	trash.append(inst)
 
 

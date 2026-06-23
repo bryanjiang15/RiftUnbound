@@ -50,6 +50,21 @@ static func filter_with_params(filter: String, params: Dictionary, source: CardI
 	return out
 
 
+static func restrict_to_hidden_battlefield(valid: Array, hidden_bf_index: int) -> Array:
+	if hidden_bf_index < 0:
+		return valid
+	var at_hidden_bf: Array = []
+	for t in valid:
+		if not t is CardInstance:
+			continue
+		var c: CardInstance = t
+		if c.is_at_battlefield() and c.battlefield_index == hidden_bf_index:
+			at_hidden_bf.append(c)
+	# Hidden targeting restriction: if any targets exist at the hidden battlefield,
+	# choices are constrained there; otherwise keep original options.
+	return at_hidden_bf if not at_hidden_bf.is_empty() else valid
+
+
 static func _friendly_units(owner: int, gs: GameState) -> Array:
 	var r: Array = []
 	r.append_array(gs.players[owner].get_units_at_base())

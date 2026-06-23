@@ -223,14 +223,24 @@ static func _add_hide_moves(gs: GameState, ps: PlayerState, player_index: int, m
 
 
 static func _add_play_from_hidden(gs: GameState, player_index: int, moves: Array) -> void:
-	for bf in gs.board.battlefields:
+	for i in range(gs.board.battlefields.size()):
+		var bf = gs.board.battlefields[i]
 		if bf.controller_index != player_index:
 			continue
 		if bf.facedown_card == null:
 			continue
 		var card: CardInstance = bf.facedown_card
-		if not TurnStateMachine.can_play_card(card, gs.current_state, player_index, gs):
+		if not TurnStateMachine.can_play_from_hidden(card, gs.current_state, player_index, gs):
 			continue
+		var tab = _choose_one_target_ability(card)
+		if not tab.is_empty():
+			var params: Dictionary = tab.get("effect_params", {})
+			var valid = TargetResolver.filter_with_params(
+				params.get("target", ""), params, card, gs, {"player_index": player_index}
+			)
+			valid = TargetResolver.restrict_to_hidden_battlefield(valid, i)
+			if valid.is_empty():
+				continue
 		var cost = CostCalculator.compute_play_from_hidden_cost()
 		if not CostCalculator.can_afford_with_autopay(player_index, cost, gs):
 			continue

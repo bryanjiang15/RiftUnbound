@@ -17,5 +17,9 @@
 | [BUG-018](entries/BUG-018-reaction-card-not-allowed-to-play-in-showdown-open-state.md) | fixed | high | engine | Reaction card not allowed to play in showdown open state | 2026-06-17 | #33 |
 | [BUG-019](entries/BUG-019-unit-with-increased-might-does-not-deal-correct-damage.md) | open | high | engine | Unit with increased might does not deal correct damage | 2026-06-21 | #40 |
 | [BUG-020](entries/BUG-020-vi-destructive-ability-does-not-recycle-card-as-cost.md) | open | high | engine | vi destructive ability does not recycle card as cost | 2026-06-21 | #45 |
+| [BUG-021](entries/BUG-007-cards-returning-back-to-hand-from-field-is-still-not-ready.md) | open | medium | ui | Cards returning back to hand from field is still not ready | 2026-06-21 | #42 |
+| [BUG-022](entries/BUG-008-gust-target-unit-with-unit-that-has-modified-might-more-than.md) | open | high | engine | gust target unit with unit that has modified might more than 3 | 2026-06-21 | #41 |
+| [BUG-023](entries/BUG-009-combat-damage-to-already-damaged-unit-does-not-kill.md) | open | high | engine | Combat damage to already damaged unit does not kill | 2026-06-22 | #48 |
+| [BUG-024](entries/BUG-010-can-t-play-reaction-card-in-open-state.md) | open | high | engine | Can't play reaction card in open state | 2026-06-22 | #47 |
 
-**Counts:** 5 open · 0 investigating · 0 confirmed · 8 fixed · 0 wontfix
+**Counts:** 5 open · 0 investigating · 0 confirmed · 2 fixed · 0 wontfix

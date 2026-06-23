@@ -10,7 +10,15 @@ const POPUP_OFFSET: Vector2 = Vector2(16.0, -POPUP_H - 8.0)
 var _controller: GameController
 var _board_view: BoardView
 var _console: CommandConsole
+const AIFeedbackPanelScript = preload("res://Scripts/UI/AIFeedbackPanel.gd")
+const MoveFeedbackBoxScript = preload("res://Scripts/UI/MoveFeedbackBox.gd")
+
 var _ai: AIPlayer
+
+# Human-evaluation feedback flow (set from Main Menu toggle).
+var _human_eval_enabled: bool = false
+var _feedback_shown: bool = false
+var _move_feedback_box = null
 
 # Floating card art popup (lives outside the layout, draws on top)
 var _popup: PanelContainer
@@ -25,6 +33,7 @@ var _game_mode: String = "pvai"
 
 func _ready() -> void:
 	_game_mode = Engine.get_meta("game_mode", "pvai")
+	_human_eval_enabled = bool(Engine.get_meta("human_eval_enabled", false))
 	_setup_layout()
 	_setup_popup()
 	_setup_controller()
@@ -114,6 +123,34 @@ func _setup_ai() -> void:
 	_ai.name = "AIPlayer"
 	_controller.add_child(_ai)
 	_ai.setup(_controller, 1)
+	if _human_eval_enabled:
+		_setup_move_feedback_box()
+
+
+func _setup_move_feedback_box() -> void:
+	# Floating live per-move feedback widget, pinned to the top-right corner so it
+	# sits over empty board space without disturbing the main layout.
+	_move_feedback_box = MoveFeedbackBoxScript.new()
+	_move_feedback_box.name = "MoveFeedbackBox"
+	_move_feedback_box.configure(Callable(self, "_current_game_id"))
+	add_child(_move_feedback_box)
+	# Pin near the bottom-right corner, sitting just above the command console
+	# (which occupies the bottom CONSOLE_HEIGHT px) so it overlays empty space.
+	_move_feedback_box.anchor_left = 1.0
+	_move_feedback_box.anchor_right = 1.0
+	_move_feedback_box.anchor_top = 1.0
+	_move_feedback_box.anchor_bottom = 1.0
+	_move_feedback_box.offset_left = -226
+	_move_feedback_box.offset_right = -16
+	_move_feedback_box.offset_top = -(CONSOLE_HEIGHT + 206)
+	_move_feedback_box.offset_bottom = -(CONSOLE_HEIGHT + 16)
+	_ai.ai_move_completed.connect(_move_feedback_box.on_ai_move)
+
+
+func _current_game_id() -> String:
+	if _controller and _controller.gs and not _controller.gs.game_session_id.is_empty():
+		return _controller.gs.game_session_id
+	return "game"
 
 
 func _wire_signals() -> void:
@@ -139,6 +176,25 @@ func _on_board_updated() -> void:
 	var gs := _controller.gs
 	_board_view.refresh(gs)
 	_update_console_prompt(gs)
+	if gs.game_over:
+		_maybe_show_feedback(gs)
+
+
+func _maybe_show_feedback(gs: GameState) -> void:
+	if _feedback_shown:
+		return
+	if not _human_eval_enabled or _game_mode != "pvai":
+		return
+	if gs.winner_index < 0:
+		return
+	_feedback_shown = true
+	if _move_feedback_box != null:
+		_move_feedback_box.visible = false
+	var panel = AIFeedbackPanelScript.new()
+	panel.name = "AIFeedbackPanel"
+	add_child(panel)
+	var game_id := gs.game_session_id if not gs.game_session_id.is_empty() else "game"
+	panel.show_for_game(game_id)
 
 
 func _update_console_prompt(gs: GameState) -> void:

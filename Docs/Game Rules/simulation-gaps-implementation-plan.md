@@ -1,7 +1,7 @@
 # Riftbound Simulation — Gaps & Implementation Plan
 
 > Analysis of the Godot TCG simulation (`Scripts/Game/`) against card data in `Data/Cards/` and the rules distilled in `riftbound-implementation-rules.md` and `riftbound-card-data-schema.md`.  
-> Generated: 2026-05-26. Updated: 2026-06-15.
+> Generated: 2026-05-26. Updated: 2026-06-22.
 
 ---
 
@@ -65,6 +65,7 @@ These effects are still unhandled by `AbilityResolver.gd` and should be treated 
 | `gain_xp` | No handler |
 | `prevent_damage` | No handler |
 | `custom` | No script-loading path for bespoke card behavior |
+| `death_replacement_recall` | No replacement-effect layer; Highlander logs `[INFO] Unhandled effect type` |
 
 Other content-facing gaps:
 
@@ -247,7 +248,7 @@ the Main Menu ("Master Yi Deck (vs AI)").
 | Confront (OGN-129) | `spells.json` | ✅ `units_enter_ready_this_turn` + draw |
 | Cannon Barrage (OGN-127) | `spells.json` | ✅ `deal_damage_all_enemies_in_combat` |
 | Meditation (OGN-048) | `spells.json` | ⚠️ Partial — see gaps |
-| Gentlemen's Duel (OGS-008) | `spells.json` | ⚠️ Partial — see gaps |
+| Gentlemen's Duel (OGS-008) | `spells.json` | ✅ Multi-target buff + fight resolution |
 | Highlander (OGS-020) | `spells.json` | ❌ Not implemented — see gaps |
 
 ### Engine features added for this deck
@@ -258,9 +259,12 @@ the Main Menu ("Master Yi Deck (vs AI)").
 - `ConditionEvaluator`: `rune_count_gte`, `while_combat_alone`, `while_defending_alone`.
 - `AbilityResolver`: `channel_rune` now honors `exhausted`; new `channel_rune_or_draw`,
   `give_might_with_alone_bonus`, `units_enter_ready_this_turn`,
-  `deal_damage_all_enemies_in_combat`.
+  `deal_damage_all_enemies_in_combat`, and `fight_chosen_units`.
 - `PlayerState.channel_rune(enter_exhausted)`, `PlayerState.units_enter_ready_this_turn`,
   and `_place_unit` honoring that flag.
+- `GameController._queue_spell_target_prompt` queues each `targeting: choose_one`
+  resolution ability before putting a spell onto the Chain, so spells such as
+  Gentlemen's Duel can carry multiple chosen targets through resolution.
 
 ### Remaining gaps (require further engine work)
 
@@ -274,15 +278,7 @@ the Main Menu ("Master Yi Deck (vs AI)").
    you do, draw 2, otherwise draw 1." Costs that prompt the player to choose-and-exhaust a
    unit, with a branching effect, are not supported. Current behavior: draws 1 (the floor);
    the exhaust-for-+1-draw upside is unimplemented (ability `cost.custom = may_exhaust_friendly_unit`).
-3. **Multi-target / "fight" effects (Gentlemen's Duel, OGS-008).** The +3 Might half resolves
-   (`give_might`), but the second clause — choose an enemy unit, then have the buffed unit and
-   that enemy deal damage equal to their Mights to each other — needs (a) carrying a second
-   chosen target through resolution and (b) a mutual-damage ("fight") effect. The
-   `fight_chosen_units` ability currently logs `[INFO]`.
-4. **Two-target resolution generally.** `_play_spell` only sets up one `choose_one` target
-   prompt per spell. Cards needing two distinct chosen targets (e.g. Gentlemen's Duel) need a
-   target queue on the chain item.
-5. **Triggered-ability target selection.** Triggered abilities (e.g. Fortified Position's
+3. **Triggered-ability target selection.** Triggered abilities (e.g. Fortified Position's
    `on_defend`, Reaver's Row) auto-pick the *first* valid target via
    `TriggerDispatcher._resolve_trigger_target`; they cannot yet prompt the controller to
    choose among several valid targets. `targeting: choose_one` is therefore only honored for
@@ -340,6 +336,13 @@ so `targons-peak` and `reavers-row` were added to round out the deck's `battlefi
 [x] gain_keywords       [x] ready_runes
 [x] other_friendly_units_enter_ready
 [x] deal_damage_equal_to_discarded_energy_cost
+[x] channel_rune_or_draw
+[x] units_enter_ready_this_turn
+[x] give_might_with_alone_bonus
+[x] deal_damage_all_enemies_in_combat
+[x] fight_chosen_units
+[x] conditional_might   [x] aura_might
+[ ] death_replacement_recall
 
 [x] implemented   [~] partial/stub   [ ] missing
 ```
