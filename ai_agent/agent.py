@@ -58,6 +58,7 @@ TRANSIENT_BACKOFF_BASE_S = float(os.environ.get("RIFTBOUND_TRANSIENT_BACKOFF_S",
 _INPUT_LOG_PATH = Path(__file__).resolve().parent / "agent_inputs.log"
 _PLAN_LOG_PATH = Path(__file__).resolve().parent / "agent_plans.log"
 _TOOLS_LOG_PATH = Path(__file__).resolve().parent / "agent_tools.log"
+_GAME_STATE_LOG_PATH = Path(__file__).resolve().parent / "agent_game_state.log"
 _LOG_INPUTS: bool = os.environ.get("RIFTBOUND_LOG_INPUTS", "0").strip() not in ("0", "", "false", "no")
 
 # Maximum tool-call rounds before we give up and emit a decision
@@ -584,6 +585,46 @@ def _log_tools(
             f.write("\n".join(lines) + "\n")
     except OSError as exc:
         logger.warning("Tools log write failed: %s", exc)
+
+
+def _log_game_state_event(
+    *,
+    game_id: str,
+    turn: int,
+    event_type: str,
+    description: str,
+    actor: Optional[str] = None,
+    command: Optional[str] = None,
+    decision_type: Optional[str] = None,
+    state: Optional[dict] = None,
+) -> None:
+    """Write a game timeline event and optional post-event state snapshot."""
+    if not _LOG_INPUTS:
+        return
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sep = "-" * 72
+    actor_part = f"  Actor: {actor}" if actor else ""
+    lines = [
+        "",
+        sep,
+        f"Turn {turn}  Event: {event_type}{actor_part}  Game: {game_id}  [{ts}]",
+        sep,
+        f"Description: {description}",
+    ]
+    if decision_type:
+        lines.append(f"Decision type: {decision_type}")
+    if command:
+        lines.append(f"Command: {command}")
+    if state:
+        lines.append("")
+        lines.append("State after event:")
+        lines.append(_format_brief_state(state))
+    lines.append("")
+    try:
+        with _GAME_STATE_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError as exc:
+        logger.warning("Game state log write failed: %s", exc)
 
 
 # ── Main reasoning loop ───────────────────────────────────────────────────────

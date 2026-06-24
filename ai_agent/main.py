@@ -24,6 +24,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
@@ -32,12 +33,14 @@ from pydantic import BaseModel
 
 from . import skills as skill_module
 from .agent import (
+    _GAME_STATE_LOG_PATH,
     PIPELINE_LEGACY,
     PIPELINE_STAGED,
     decide,
     _INPUT_LOG_PATH,
     _PLAN_LOG_PATH,
     _LOG_INPUTS,
+    _log_game_state_event,
 )
 from .memory import DecisionLogger, Memory
 from .schemas import Decision, DecisionRequest, Move
@@ -79,10 +82,17 @@ async def _lifespan(app: FastAPI):
             + "═" * 72 + "\n",
             encoding="utf-8",
         )
+        _GAME_STATE_LOG_PATH.write_text(
+            f"Riftbound AI Agent — Game State Log\nStarted: "
+            f"{__import__('datetime').datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
+            + "=" * 72 + "\n",
+            encoding="utf-8",
+        )
     logger.info("Riftbound AI agent service started.")
     logger.info("OpenAI API key: %s", "set" if os.environ.get("OPENAI_API_KEY") else "NOT SET")
     logger.info("Input logging: %s", "ENABLED → agent_inputs.log" if _LOG_INPUTS else "disabled")
     logger.info("Plan logging: %s", "ENABLED → agent_plans.log" if _LOG_INPUTS else "disabled")
+    logger.info("Game state logging: %s", "ENABLED → agent_game_state.log" if _LOG_INPUTS else "disabled")
     logger.info("Pipeline mode: %s", _pipeline_mode)
     yield
     logger.info("Riftbound AI agent service shutting down.")
@@ -208,6 +218,17 @@ class OpponentActionRequest(BaseModel):
     game_id: str
     turn: int
     action: str
+
+
+class GameStateEventRequest(BaseModel):
+    game_id: str
+    turn: int = 0
+    event_type: str
+    description: str
+    actor: str | None = None
+    command: str | None = None
+    decision_type: str | None = None
+    state: dict[str, Any] | None = None
 
 
 @app.post("/outcome")
@@ -394,6 +415,31 @@ async def opponent_action_endpoint(body: OpponentActionRequest) -> dict:
     except Exception as exc:
         logger.warning("Opponent action record failed: %s", exc)
     logger.debug("Opponent action: game=%s turn=%d action=%s", body.game_id, body.turn, body.action)
+    return {"status": "ok"}
+
+
+@app.post("/game_state_event")
+async def game_state_event_endpoint(body: GameStateEventRequest) -> dict:
+    """
+    Godot posts debug timeline events here. Meaningful AI decisions and engine
+    resolution milestones include a post-event BriefState; opponent actions are
+    logged as one-line events without state snapshots.
+    """
+    if not _LOG_INPUTS:
+        return {"status": "disabled"}
+    try:
+        _log_game_state_event(
+            game_id=body.game_id,
+            turn=body.turn,
+            event_type=body.event_type,
+            description=body.description,
+            actor=body.actor,
+            command=body.command,
+            decision_type=body.decision_type,
+            state=body.state,
+        )
+    except Exception as exc:
+        logger.warning("Game state event log failed: %s", exc)
     return {"status": "ok"}
 
 

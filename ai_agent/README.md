@@ -28,15 +28,19 @@ uvicorn ai_agent.main:app --port 8765 --reload
 | `OPENAI_API_KEY` | (none) | Yes | Your OpenAI secret key. The service starts without it but every `/decision` call falls back to a safe `pass`. |
 | `RIFTBOUND_AI_MODEL` | `gpt-4o` | No | OpenAI model used by both the Planner and Actor stages (e.g. `gpt-4o-mini`, `o1-mini`). |
 | `RIFTBOUND_PIPELINE` | `legacy` | No | Decision pipeline mode. `legacy` = single monolithic decision loop. `staged` = Router → Planner → Actor → Validator pipeline. Any other value falls back to `legacy`. |
-| `RIFTBOUND_LOG_INPUTS` | `0` | No | When set to a truthy value (anything other than `0`, ``, `false`, `no`), writes debug logs on each decision: full model input to `agent_inputs.log`, the turn plan to `agent_plans.log` (staged pipeline only), and the per-decision tool-call trace + outcome to `agent_tools.log`. |
+| `RIFTBOUND_LOG_INPUTS` | `0` | No | When set to a truthy value (anything other than `0`, ``, `false`, `no`), writes debug logs on each decision: full model input to `agent_inputs.log`, the turn plan to `agent_plans.log` (staged pipeline only), the per-decision tool-call trace + outcome to `agent_tools.log`, and post-event game snapshots to `agent_game_state.log`. |
 | `RIFTBOUND_CLIENT_MAX_RETRIES` | `2` | No | How many times the OpenAI SDK itself retries a failed request (with its own backoff that respects `Retry-After`). |
 | `RIFTBOUND_TRANSIENT_RETRIES` | `3` | No | Extra in-process retries layered on top of the SDK for transient failures (rate limits / 429, timeouts, connection drops, 5xx) before a decision degrades to a fallback `pass`. |
 | `RIFTBOUND_TRANSIENT_BACKOFF_S` | `1.0` | No | Base seconds for exponential backoff between in-process transient retries (used when the error carries no `Retry-After` header). |
 
 Notes:
 - `RIFTBOUND_LOG_INPUTS` is the single switch for the input log, the plan log,
-  and the tool log. The plan and tool logs only produce entries in `staged` mode,
-  since the Planner/Actor stages do not run under `legacy`.
+  the tool log, and the game state log. The plan and tool logs only produce
+  entries in `staged` mode, since the Planner/Actor stages do not run under
+  `legacy`.
+- `agent_game_state.log` records post-move state after meaningful accepted AI
+  decisions (non-forced and not `pass` / `end turn`), state snapshots at chain
+  and combat resolution points, and one-line opponent actions without state.
 - `agent_tools.log` records, per decision, every tool the model called (round,
   name, args) and the terminal `Outcome` — the chosen action, or the exact reason
   it fell back to `pass` (validator budget exhausted, transient API failure after

@@ -190,6 +190,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 	else:
 		_report_decision_metrics(false, true)
 		_report_outcome(true)
+		_report_accepted_ai_state_event(move_dict, cmd, gs)
 		_emit_move_completed(move_dict, gs)
 	# If the move was accepted the normal _maybe_trigger_ai() → take_turn() cycle
 	# (triggered inside submit_command) handles the next decision.  No extra work needed.
@@ -502,6 +503,49 @@ func _report_decision_metrics(heuristic_fallback: bool, accepted) -> void:
 	_fire_and_forget(AGENT_URL.replace("/decision", "/decision_metrics"), body)
 
 
+func _report_accepted_ai_state_event(move_dict: Dictionary, command: String, gs: GameState) -> void:
+	if not _should_log_ai_state_event(move_dict):
+		return
+	var game_id := _active_game_id(gs)
+	if game_id.is_empty():
+		return
+	var state := BriefStateSerializer.serialize(gs, player_index)
+	_fire_and_forget(AGENT_URL.replace("/decision", "/game_state_event"), {
+		"game_id": game_id,
+		"turn": gs.turn_number,
+		"event_type": "ai_decision",
+		"actor": "ai",
+		"description": _describe_move(move_dict),
+		"command": command,
+		"decision_type": _pending_brief_state.get("decision_type", ""),
+		"state": state,
+	})
+
+
+func _should_log_ai_state_event(move_dict: Dictionary) -> bool:
+	var legal_moves = _pending_brief_state.get("legal_moves", [])
+	if legal_moves is Array and legal_moves.size() <= 1:
+		return false
+	var action: String = move_dict.get("action", "")
+	return action not in ["pass", "end_turn"]
+
+
+func _report_game_state_event(event_type: String, description: String, include_state: bool) -> void:
+	var gs: GameState = controller.gs if controller else null
+	var game_id := _active_game_id(gs)
+	if game_id.is_empty():
+		return
+	var body := {
+		"game_id": game_id,
+		"turn": (gs.turn_number if gs != null else 0),
+		"event_type": event_type,
+		"description": description,
+	}
+	if include_state and gs != null:
+		body["state"] = BriefStateSerializer.serialize(gs, player_index)
+	_fire_and_forget(AGENT_URL.replace("/decision", "/game_state_event"), body)
+
+
 func _on_board_updated() -> void:
 	if _game_over_reported or controller == null or controller.gs == null:
 		return
@@ -525,20 +569,25 @@ func _on_game_log_message(text: String) -> void:
 	# Detect visible opponent commands in the format "[P{n}] > {command}"
 	var opp_index := 1 - player_index
 	var prefix := "[P%d] > " % (opp_index + 1)
-	if not text.begins_with(prefix):
+	if text.begins_with(prefix):
+		var cmd := text.substr(prefix.length()).strip_edges()
+		var description := _parse_opponent_command(cmd)
+		var gs: GameState = controller.gs if controller else null
+		var game_id := _active_game_id(gs)
+		if not description.is_empty() and not game_id.is_empty():
+			var turn: int = gs.turn_number if gs != null else 0
+			_fire_and_forget(AGENT_URL.replace("/decision", "/opponent_action"), {
+				"game_id": game_id,
+				"turn": turn,
+				"action": description,
+			})
+			_report_game_state_event("opponent_action", description, false)
 		return
-	var cmd := text.substr(prefix.length()).strip_edges()
-	var description := _parse_opponent_command(cmd)
-	var gs: GameState = controller.gs if controller else null
-	var game_id := _active_game_id(gs)
-	if description.is_empty() or game_id.is_empty():
-		return
-	var turn: int = gs.turn_number if gs != null else 0
-	_fire_and_forget(AGENT_URL.replace("/decision", "/opponent_action"), {
-		"game_id": game_id,
-		"turn": turn,
-		"action": description,
-	})
+
+	if text.begins_with("> Resolving:"):
+		_report_game_state_event("chain_resolved", text.trim_prefix("> ").strip_edges(), true)
+	elif text.begins_with("> Combat at ") and text.ends_with(" resolved"):
+		_report_game_state_event("combat_resolved", text.trim_prefix("> ").strip_edges(), true)
 
 
 func _parse_opponent_command(cmd: String) -> String:
