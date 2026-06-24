@@ -139,3 +139,18 @@ python ai_agent/report.py                    # console scorecard
 python ai_agent/report.py --json             # raw aggregate JSON
 python ai_agent/report.py --charts out/      # + PNG graphs
 python ai_agent/report.py --db path/to.db    # custom database
+
+### Token usage
+
+Each decision records OpenAI token usage (`prompt`, `completion`, `total`),
+split between the two agents so their cost can be compared independently:
+
+- **planner agent** — produces the per-turn strategic plan (staged pipeline;
+  usually cached once per turn).
+- **decision agent** (actor) — selects the concrete legal move each decision.
+
+Per-decision rows live in `decision_eval_metrics` (overall + `planner_*` /
+`actor_*` token + call columns); per-game totals roll up into
+`game_eval_summary`. The scorecard's "Token Usage (planner vs decision agent)"
+section and the `server_side.tokens` block of `--json` surface the breakdown.
+Rows recorded before this feature show zero tokens.

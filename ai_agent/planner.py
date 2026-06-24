@@ -80,6 +80,7 @@ class Planner:
         brief_state: dict[str, Any],
         memory_summary: str,
         opponent_action_count: int = 0,
+        metrics: dict[str, Any] | None = None,
     ) -> tuple[Plan, bool]:
         """Return (plan, was_cached) for this turn.
 
@@ -103,6 +104,7 @@ class Planner:
             brief_state=brief_state,
             memory_summary=memory_summary,
             last_intent=self._last_intent.get(game_id),
+            metrics=metrics,
         )
 
         self._cache[game_id] = _CachedPlan(
@@ -202,6 +204,7 @@ async def _request_plan(
     brief_state: dict[str, Any],
     memory_summary: str,
     last_intent: str | None,
+    metrics: dict[str, Any] | None = None,
 ) -> Plan:
     # Lazy import avoids a circular import at module load (agent imports planner).
     from . import agent as agent_module
@@ -244,6 +247,8 @@ async def _request_plan(
         try:
             response = await agent_module._chat_create(
                 client,
+                metrics=metrics,
+                stage="planner",
                 model=model,
                 messages=messages,  # type: ignore[arg-type]
                 tools=agent_module.TOOLS,  # type: ignore[arg-type]

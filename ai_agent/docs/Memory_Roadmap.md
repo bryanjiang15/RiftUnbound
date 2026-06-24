@@ -123,6 +123,14 @@ data-flow diagram, work items, and verification in
 
 ## Phase 2.5 — Engine-Truth Simulation
 
+> **Full design in `Phase2_5_Engine_Truth_Simulation.md`.** That doc supersedes
+> this sketch where they differ; two investigation findings reshaped it:
+> Godot is currently an HTTP *client only* (so "Actor → POST /simulate" needs a
+> continuation protocol, not a Godot server), and the headless test harness
+> already implements the clone-driver and auto-pass-to-quiescence loop. It also
+> adds the **assumption taxonomy** (what to assume vs. simulate vs. hedge) and
+> **multi-step line simulation** (e.g. enter combat → back it with a spell).
+
 **Goal:** stop the agent from *predicting* rules outcomes it could *observe*.
 Today `skills.simulate_move()` (`skills.py:198`) is a heuristic text guesser
 that returns hand-wavy strings ("you will gain control if unopposed",

@@ -239,3 +239,39 @@ func short_description() -> String:
 		s += " (%d/%d MHT)" % [get_current_might(), definition.might]
 	s += " — " + status_string()
 	return s
+
+
+# ── Cloning (Phase 2.5 engine-truth simulation) ──────────────────────────────
+# Deep-copy this instance through a shared identity map so cross-references
+# (attached_to / attached_gear, and references held by the board, chain and
+# combat state) all resolve to the same cloned object. `map` is keyed by the
+# original CardInstance; an entry is registered BEFORE recursing so attachment
+# cycles terminate. `definition` is shared, not cloned — card definitions are
+# immutable read-only data.
+func clone(map: Dictionary) -> CardInstance:
+	if map.has(self):
+		return map[self]
+	var c := CardInstance.new(definition, instance_id, owner_index)
+	map[self] = c
+	c.location = location
+	c.battlefield_index = battlefield_index
+	c.is_exhausted = is_exhausted
+	c.is_stunned = is_stunned
+	c.damage = damage
+	c.buff_counters = buff_counters
+	c.is_attacker = is_attacker
+	c.is_defender = is_defender
+	c.temp_might_bonus = temp_might_bonus
+	c.temp_keywords = temp_keywords.duplicate(true)
+	c.passive_keywords = passive_keywords.duplicate(true)
+	c.passive_might_bonus = passive_might_bonus
+	c.played_this_turn = played_this_turn
+	c.is_face_down = is_face_down
+	c.hidden_turn_number = hidden_turn_number
+	c.hidden_battlefield_id = hidden_battlefield_id
+	c.attached_to = attached_to.clone(map) if attached_to != null else null
+	var gear: Array = []
+	for g in attached_gear:
+		gear.append(g.clone(map))
+	c.attached_gear = gear
+	return c

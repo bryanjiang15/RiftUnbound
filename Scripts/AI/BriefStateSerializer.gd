@@ -9,10 +9,27 @@ class_name BriefStateSerializer
 
 const SCHEMA_VERSION := "1.0"
 
+const MoveSimulatorScript = preload("res://Scripts/Game/MoveSimulator.gd")
+
+# Pre-simulation (Phase 2.5, option C). When enabled, each single legal move is
+# run on a clone and the engine-truth result is inlined into the brief state so
+# the agent reads observed facts instead of guessing. Bounded so serialization
+# stays cheap. Disable to fall back to no inlined sims.
+const ENABLE_PRESIM := true
+const PRESIM_MAX_MOVES := 20
+const PRESIM_LINE_MAX := 8
+# Decision types worth pre-simulating (skip mulligan / pure pending choices).
+const PRESIM_DECISION_TYPES := ["main_phase", "showdown_focus", "chain_reaction", "combat_assignment"]
+
 
 static func serialize(gs: GameState, player_index: int) -> Dictionary:
 	var ps: PlayerState = gs.players[player_index]
 	var opp: PlayerState = gs.players[1 - player_index]
+
+	var legal_moves: Array = LegalMoveEnumerator.enumerate(gs, player_index)
+	var decision_type := _decision_type(gs, player_index)
+	var sims := _presimulate_moves(gs, player_index, legal_moves, decision_type)
+	var line_sims := _presimulate_lines(gs, player_index, legal_moves, decision_type)
 
 	return {
 		"schema_version": SCHEMA_VERSION,
@@ -22,7 +39,7 @@ static func serialize(gs: GameState, player_index: int) -> Dictionary:
 		"turn_player_index": gs.turn_player_index,
 		"current_phase": gs.get_phase_name(),
 		"current_state": gs.get_state_name(),
-		"decision_type": _decision_type(gs, player_index),
+		"decision_type": decision_type,
 
 		# Acting context (Focus vs Priority)
 		"focus_player_index": gs.focus_player_index,
@@ -52,8 +69,12 @@ static func serialize(gs: GameState, player_index: int) -> Dictionary:
 		"battlefields": _serialize_battlefields(gs, player_index),
 
 		# Legal moves enumerated by LegalMoveEnumerator
-		"legal_moves": LegalMoveEnumerator.enumerate(gs, player_index),
+		"legal_moves": legal_moves,
 		"legal_action_categories": _legal_categories(gs, player_index),
+
+		# Engine-truth pre-simulations (Phase 2.5, option C)
+		"move_simulations": sims,
+		"line_simulations": line_sims,
 
 		# Pending choice context
 		"pending_choice_options": _pending_choices(gs),
@@ -67,6 +88,87 @@ static func serialize(gs: GameState, player_index: int) -> Dictionary:
 		# Full board description for read skills
 		"full_state_text": gs.board_description(),
 	}
+
+
+# Run each single legal move on a clone and inline the SimResult keyed by the
+# exact command string. Bounded; only for combat/strategic decision types.
+static func _presimulate_moves(gs: GameState, player_index: int, legal_moves: Array, decision_type: String) -> Dictionary:
+	var out: Dictionary = {}
+	if not ENABLE_PRESIM or not decision_type in PRESIM_DECISION_TYPES:
+		return out
+	var count := 0
+	for cmd in legal_moves:
+		if count >= PRESIM_MAX_MOVES:
+			break
+		var cmd_str := str(cmd)
+		# Trivial moves carry no useful delta; skip to save work.
+		if cmd_str == "pass" or cmd_str == "end turn":
+			continue
+		var sim := MoveSimulatorScript.new()
+		out[cmd_str] = sim.simulate_move(gs, player_index, cmd_str)
+		count += 1
+	return out
+
+
+# Auto-detect "enter combat then back it with a trick" lines: for each move that
+# sends a unit into a contested battlefield, pair it with each no-target Action /
+# Reaction in hand and pre-simulate the two-step line. Bounded.
+static func _presimulate_lines(gs: GameState, player_index: int, legal_moves: Array, decision_type: String) -> Dictionary:
+	var out: Dictionary = {}
+	if not ENABLE_PRESIM or decision_type != "main_phase":
+		return out
+	var ps: PlayerState = gs.players[player_index]
+	var tricks: Array = _combat_trick_commands(ps)
+	if tricks.is_empty():
+		return out
+	var count := 0
+	for cmd in legal_moves:
+		if count >= PRESIM_LINE_MAX:
+			break
+		var cmd_str := str(cmd)
+		if not _move_enters_contested(gs, player_index, cmd_str):
+			continue
+		for trick in tricks:
+			if count >= PRESIM_LINE_MAX:
+				break
+			var trick_str := str(trick)
+			var line: Array = [cmd_str, trick_str]
+			var key: String = cmd_str + " ; " + trick_str
+			var sim := MoveSimulatorScript.new()
+			out[key] = sim.simulate_line(gs, player_index, line)
+			count += 1
+	return out
+
+
+# No-target-filtered Action/Reaction spells in hand the player can afford, as
+# play commands. If a trick needs a target the sim driver auto-resolves the
+# resulting prompt with the first valid choice, so a representative line still
+# resolves.
+static func _combat_trick_commands(ps: PlayerState) -> Array:
+	var cmds: Array = []
+	for c in ps.hand:
+		var def := c.definition
+		if def.card_type != "spell":
+			continue
+		if not (def.is_action or def.is_reaction):
+			continue
+		if not ps.rune_pool.can_pay(def.energy_cost, def.power_cost):
+			continue
+		cmds.append("play %s" % c.instance_id)
+	return cmds
+
+
+static func _move_enters_contested(gs: GameState, player_index: int, cmd: String) -> bool:
+	if not cmd.begins_with("move "):
+		return false
+	var to_idx := cmd.find(" to ")
+	if to_idx < 0:
+		return false
+	var dest := cmd.substr(to_idx + 4).strip_edges()
+	var bf = gs.board.get_battlefield_by_id(dest)
+	if bf == null:
+		return false
+	return not bf.units[1 - player_index].is_empty()
 
 
 # ── Decision type ─────────────────────────────────────────────────────────────

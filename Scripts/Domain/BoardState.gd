@@ -142,3 +142,32 @@ func battlefield_description(bf_index: int) -> String:
 	if bf.facedown_card:
 		lines.append("    [hidden card]")
 	return "\n".join(lines)
+
+
+# Deep-copy the board through the shared identity map (Phase 2.5 simulation).
+# Units and the face-down card resolve through `map` so they are the same
+# objects the player zones and chain reference. card_def is shared (immutable).
+func clone(map: Dictionary) -> BoardState:
+	var b := BoardState.new()
+	b.battlefields = []
+	for bf in battlefields:
+		var e := BattlefieldEntry.new()
+		e.card_def = bf.card_def
+		e.battlefield_id = bf.battlefield_id
+		e.display_name = bf.display_name
+		e.controller_index = bf.controller_index
+		e.units = [[], []]
+		for pi in range(bf.units.size()):
+			var cloned_units: Array = []
+			for u in bf.units[pi]:
+				cloned_units.append(u.clone(map))
+			e.units[pi] = cloned_units
+		e.is_contested = bf.is_contested
+		e.facedown_card = bf.facedown_card.clone(map) if bf.facedown_card != null else null
+		e.scored_by = bf.scored_by.duplicate()
+		b.battlefields.append(e)
+	b.active_showdown_bf = active_showdown_bf
+	b.active_combat_bf = active_combat_bf
+	b.staged_showdowns = staged_showdowns.duplicate()
+	b.staged_combats = staged_combats.duplicate()
+	return b

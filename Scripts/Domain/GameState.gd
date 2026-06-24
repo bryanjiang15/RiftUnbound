@@ -232,3 +232,74 @@ func board_description() -> String:
 			lines.append("  [%d] %s" % [i, chain[i].describe()])
 	lines.append("===================")
 	return "\n".join(lines)
+
+
+# ── Cloning (Phase 2.5 engine-truth simulation) ──────────────────────────────
+# Produce a deep copy of the entire game state for off-line "what-if" simulation.
+# A single shared identity map keyed by the original CardInstance guarantees that
+# every reference to a given card (player zones, board, chain, combat targets)
+# resolves to the SAME cloned object, so applying a move to the clone never
+# touches the live state. CardDefinitions are shared (immutable read-only data).
+func clone() -> GameState:
+	var g := GameState.new()
+	var map: Dictionary = {}
+
+	g.players = []
+	for ps in players:
+		g.players.append(ps.clone(map))
+	# Rewire each cloned player's id_registry to the cloned game.
+	for cp in g.players:
+		cp.id_registry = g
+
+	g.board = board.clone(map)
+
+	g.chain = []
+	for ci in chain:
+		g.chain.append(ci.clone(map))
+
+	g.turn_number = turn_number
+	g.turn_player_index = turn_player_index
+	g.current_phase = current_phase
+	g.current_state = current_state
+	g.priority_player_index = priority_player_index
+	g.focus_player_index = focus_player_index
+	g.passes_in_sequence = passes_in_sequence
+	g.game_over = game_over
+	g.winner_index = winner_index
+	g.victory_score = victory_score
+	g.game_session_id = game_session_id
+	g.pending_prompt = _clone_variant(pending_prompt, map)
+	g.mulligan_phase = mulligan_phase
+	g.mulligan_done = mulligan_done.duplicate()
+	g.combat_assignment_active = combat_assignment_active
+	g.combat_bf_index = combat_bf_index
+	g.attacker_player_index = attacker_player_index
+	g.remaining_attacker_might = remaining_attacker_might
+	g.damage_assignments = damage_assignments.duplicate(true)
+	var targets: Array[CardInstance] = []
+	for t in assigned_targets:
+		targets.append(t.clone(map))
+	g.assigned_targets = targets
+	g.first_channel_done = first_channel_done.duplicate()
+	g.second_player_index = second_player_index
+	g.auto_combat_damage = auto_combat_damage
+	g._instance_id_counters = _instance_id_counters.duplicate()
+	return g
+
+
+# Deep-copy an arbitrary Variant that may embed CardInstance references
+# (used for pending_prompt). CardInstances resolve through the shared map.
+static func _clone_variant(v: Variant, map: Dictionary) -> Variant:
+	if v is CardInstance:
+		return v.clone(map)
+	if v is Dictionary:
+		var d: Dictionary = {}
+		for k in v:
+			d[k] = _clone_variant(v[k], map)
+		return d
+	if v is Array:
+		var a: Array = []
+		for item in v:
+			a.append(_clone_variant(item, map))
+		return a
+	return v

@@ -1,235 +1,123 @@
 
 ────────────────────────────────────────────────────────────────────────
-Turn 1  Type: mulligan  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782254019-821e13e2  [2026-06-23T22:33:57Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 4
-  round 0: get_card_detail({"card_id": "fading-memories-2"})
-  round 0: get_card_detail({"card_id": "raging-soul-3"})
-  round 0: get_card_detail({"card_id": "brazen-buccaneer-2"})
-  round 0: get_card_detail({"card_id": "gust-3"})
-Outcome: mulligan (after 4 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 3  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782254019-821e13e2  [2026-06-23T22:34:34Z]
+Turn 1  Type: mulligan  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782317985-b1f8d842  [2026-06-24T16:20:04Z]
 ────────────────────────────────────────────────────────────────────────
 Tool calls: 1
-  round 0: get_card_detail({"card_id": "jinx-demolitionist"})
-Outcome: play_card (after 1 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 3  Type: pending_choice  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782254019-821e13e2  [2026-06-23T22:34:43Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: get_card_detail({"card_id": "brazen-buccaneer-3"})
-Outcome: choose (after 1 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 4  Type: showdown_focus  State: Showdown Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782254019-821e13e2  [2026-06-23T22:35:17Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: simulate_move({"move": {"action": "react", "parameters": {"card_id": "gust-3", "target_id": "wielder-of-water"}}})
-Outcome: pass (OpenAI API error: Error code: 429 - {'error': {'message': 'Rate limit reached for gpt-4o in organization org-kQqHmt7S7yYh65FHzESHaObA on tokens per min (TPM): Limit 30000, Used 26257, Requested 3971. Please try again in 456ms. Visit https://platform.openai.com/account/rate-limits to learn more.', 'type': 'tokens', 'param': None, 'code': 'rate_limit_exceeded'}})
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 1  Type: mulligan  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T22:55:40Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: lookup_rule({"query": "mulligan strategy"})
+  round 0: list_legal_moves({})
 Outcome: mulligan (after 1 tool call(s))
 
 
 ────────────────────────────────────────────────────────────────────────
-Turn 1  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T22:55:48Z]
+Turn 1  Type: main_phase  State: Neutral Open  Stage: planner  Game: Master Yi (Calm/Body)-vs-Player 2-1782317985-b1f8d842  [2026-06-24T16:20:10Z]
+────────────────────────────────────────────────────────────────────────
+Tool calls: 5
+  round 0: evaluate_position({})
+  round 1: get_card_detail({"card_id": "chemtech-enforcer-3"})
+  round 1: get_card_detail({"card_id": "scrapheap"})
+  round 1: get_card_detail({"card_id": "blazing-scorcher-2"})
+  round 1: get_opponent_history({})
+Outcome: plan intent='develop_board' (after 5 tool call(s))
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 1  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782317985-b1f8d842  [2026-06-24T16:20:21Z]
 ────────────────────────────────────────────────────────────────────────
 Tool calls: 1
-  round 0: get_card_detail({"card_id": "scrapheap-3"})
+  round 0: simulate_move({"move": {"action": "play_card", "parameters": {"card_id": "chemtech-enforcer-3", "from_champion": false, "from_hidden": false, "accelerate": false}}})
 Outcome: play_card (after 1 tool call(s))
 
 
 ────────────────────────────────────────────────────────────────────────
-Turn 3  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T22:57:40Z]
+Turn 1  Type: pending_choice  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782317985-b1f8d842  [2026-06-24T16:20:40Z]
 ────────────────────────────────────────────────────────────────────────
 Tool calls: 1
-  round 0: simulate_move({"move": {"action": "play_card", "parameters": {"card_id": "jinx-demolitionist-2", "from_champion": false, "from_hidden": false, "accelerate": true}}})
+  round 0: get_card_detail({"card_id": "chemtech-enforcer-3"})
+Outcome: choose (after 1 tool call(s))
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 3  Type: main_phase  State: Neutral Open  Stage: planner  Game: Master Yi (Calm/Body)-vs-Player 2-1782317985-b1f8d842  [2026-06-24T16:21:39Z]
+────────────────────────────────────────────────────────────────────────
+Tool calls: 5
+  round 0: evaluate_position({})
+  round 1: get_card_detail({"card_id": "blazing-scorcher-2"})
+  round 1: get_card_detail({"card_id": "cemetery-attendant"})
+  round 1: get_card_detail({"card_id": "flame-chompers-3"})
+  round 1: get_opponent_history({})
+Outcome: plan intent='develop_board' (after 5 tool call(s))
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 3  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782317985-b1f8d842  [2026-06-24T16:21:44Z]
+────────────────────────────────────────────────────────────────────────
+Tool calls: 1
+  round 0: simulate_move({"move": {"action": "play_card", "parameters": {"card_id": "cemetery-attendant", "from_champion": false, "from_hidden": false, "accelerate": false}}})
 Outcome: play_card (after 1 tool call(s))
 
 
 ────────────────────────────────────────────────────────────────────────
-Turn 3  Type: pending_choice  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T22:57:48Z]
+Turn 3  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782317985-b1f8d842  [2026-06-24T16:21:52Z]
 ────────────────────────────────────────────────────────────────────────
 Tool calls: 1
-  round 0: get_card_detail({"card_id": "scrapheap-3"})
-Outcome: choose (after 1 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 3  Type: pending_choice  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T22:57:58Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: get_card_detail({"card_id": "raging-soul"})
-Outcome: choose (after 1 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 3  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T22:58:49Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: simulate_move({"move": {"action": "move_unit", "parameters": {"unit_ids": ["jinx-demolitionist-2"], "destination": "battlefield-a"}}})
+  round 0: simulate_move({"move": {"action": "move_unit", "parameters": {"unit_ids": ["chemtech-enforcer-3"], "destination": "battlefield-a"}}})
 Outcome: move_unit (after 1 tool call(s))
 
 
 ────────────────────────────────────────────────────────────────────────
-Turn 3  Type: pending_choice  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T22:58:56Z]
+Turn 3  Type: showdown_focus  State: Showdown Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782317985-b1f8d842  [2026-06-24T16:21:57Z]
 ────────────────────────────────────────────────────────────────────────
 Tool calls: 1
-  round 0: get_card_detail({"card_id": "raging-soul"})
-Outcome: choose (after 1 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 3  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:00:02Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: simulate_move({"move": {"action": "move_unit", "parameters": {"unit_ids": ["jinx-demolitionist-2"], "destination": "battlefield-b"}}})
-Outcome: move_unit (after 1 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 3  Type: pending_choice  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:01:13Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: get_card_detail({"card_id": "raging-soul"})
-Outcome: choose (after 1 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 5  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:03:09Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: get_zone({"zone_id": "my_hand"})
-Outcome: play_card (after 1 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 6  Type: pending_choice  State: Showdown Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:08:15Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: get_keyword({"name": "Shield"})
-Outcome: choose (after 1 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 7  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:08:37Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: list_legal_moves({})
-Outcome: play_card (after 1 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 7  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:08:47Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: simulate_move({"move": {"action": "move_unit", "parameters": {"unit_ids": ["cemetery-attendant-2"], "destination": "battlefield-a"}}})
-Outcome: move_unit (after 1 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 9  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:12:23Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: simulate_move({"move": {"action": "play_card", "parameters": {"card_id": "blazing-scorcher", "from_champion": false, "from_hidden": false, "accelerate": true}}})
-Outcome: play_card (after 1 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 9  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:12:44Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: get_zone({"zone_id": "battlefield-b"})
-Outcome: move_unit (after 1 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 9  Type: showdown_focus  State: Showdown Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:13:25Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: simulate_move({"move": {"action": "react", "parameters": {"card_id": "gust", "target_id": "cemetery-attendant-2"}}})
+  round 0: simulate_move({"move": {"action": "react", "parameters": {"card_id": "gust-2", "target_id": "chemtech-enforcer-3"}}})
 Outcome: pass (after 1 tool call(s))
 
 
 ────────────────────────────────────────────────────────────────────────
-Turn 9  Type: pending_choice  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:15:33Z]
+Turn 4  Type: showdown_focus  State: Showdown Open  Stage: planner  Game: Master Yi (Calm/Body)-vs-Player 2-1782317985-b1f8d842  [2026-06-24T16:23:22Z]
+────────────────────────────────────────────────────────────────────────
+Tool calls: 6
+  round 0: evaluate_position({})
+  round 1: get_card_detail({"card_id": "gust-2"})
+  round 1: get_card_detail({"card_id": "blazing-scorcher-2"})
+  round 1: get_card_detail({"card_id": "scrapheap-3"})
+  round 1: get_card_detail({"card_id": "flame-chompers-3"})
+  round 1: get_opponent_history({})
+Outcome: plan intent='pressure_battlefield' (after 6 tool call(s))
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 4  Type: showdown_focus  State: Showdown Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782317985-b1f8d842  [2026-06-24T16:23:26Z]
 ────────────────────────────────────────────────────────────────────────
 Tool calls: 1
-  round 0: get_card_detail({"card_id": "raging-soul"})
-Outcome: choose (after 1 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 9  Type: pending_choice  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:15:40Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: get_card_detail({"card_id": "flame-chompers"})
-Outcome: choose (after 1 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 10  Type: chain_reaction  State: Neutral Closed  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:16:24Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: get_card_detail({"card_id": "gust"})
-Outcome: pass (after 1 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 10  Type: showdown_focus  State: Showdown Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:17:05Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: get_zone({"zone_id": "battlefield-b"})
-Outcome: pass (validator budget exhausted; last reason: Your move translates to 'react gust target master-yi-meditative', which is NOT in the current legal_moves list. You must pick exactly one command that appears in legal_moves (omit destination for units played to base — use play_card without destination, not 'to base'). For hiding a Hidden card from hand, use hide_card — not play_card with from_hidden. Respond with corrected JSON.)
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 10  Type: chain_reaction  State: Neutral Closed  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:17:40Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: get_card_detail({"card_id": "master-yi-meditative"})
-Outcome: pass (after 1 tool call(s))
-
-
-────────────────────────────────────────────────────────────────────────
-Turn 10  Type: showdown_focus  State: Showdown Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:19:00Z]
-────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: simulate_move({"move": {"action": "react", "parameters": {"card_id": "gust", "target_id": "stalwart-poro-3"}}})
+  round 0: simulate_move({"move": {"action": "react", "parameters": {"card_id": "gust-2", "target_id": "wielder-of-water-3"}}})
 Outcome: react (after 1 tool call(s))
 
 
 ────────────────────────────────────────────────────────────────────────
-Turn 11  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:19:27Z]
+Turn 5  Type: main_phase  State: Neutral Open  Stage: planner  Game: Master Yi (Calm/Body)-vs-Player 2-1782317985-b1f8d842  [2026-06-24T16:25:48Z]
 ────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: simulate_move({"move": {"action": "move_unit", "parameters": {"unit_ids": ["flame-chompers"], "destination": "battlefield-a"}}})
-Outcome: move_unit (after 1 tool call(s))
+Tool calls: 6
+  round 0: evaluate_position({})
+  round 1: get_card_detail({"card_id": "blazing-scorcher-2"})
+  round 1: get_card_detail({"card_id": "scrapheap-3"})
+  round 1: get_card_detail({"card_id": "flame-chompers-3"})
+  round 1: get_card_detail({"card_id": "traveling-merchant-2"})
+  round 1: get_opponent_history({})
+Outcome: plan intent='pressure_battlefield' (after 6 tool call(s))
 
 
 ────────────────────────────────────────────────────────────────────────
-Turn 11  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:19:51Z]
+Turn 5  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782317985-b1f8d842  [2026-06-24T16:26:02Z]
 ────────────────────────────────────────────────────────────────────────
 Tool calls: 1
-  round 0: simulate_move({"move": {"action": "play_card", "parameters": {"card_id": "raging-soul", "from_champion": false, "from_hidden": false, "accelerate": false}}})
+  round 0: simulate_move({"move": {"action": "play_card", "parameters": {"card_id": "blazing-scorcher-2", "destination": "base", "from_champion": false, "from_hidden": false, "accelerate": false}}})
 Outcome: play_card (after 1 tool call(s))
 
 
 ────────────────────────────────────────────────────────────────────────
-Turn 11  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782255323-77904959  [2026-06-23T23:20:36Z]
+Turn 5  Type: main_phase  State: Neutral Open  Stage: actor  Game: Master Yi (Calm/Body)-vs-Player 2-1782317985-b1f8d842  [2026-06-24T16:26:31Z]
 ────────────────────────────────────────────────────────────────────────
-Tool calls: 1
-  round 0: get_zone({"zone_id": "my_base_units"})
-Outcome: play_card (after 1 tool call(s))
+Tool calls: 2
+  round 0: simulate_move({"move": {"action": "move_unit", "parameters": {"unit_ids": ["cemetery-attendant"], "destination": "battlefield-b"}}})
+  round 3: simulate_move({"move": {"action": "move_unit", "parameters": {"unit_ids": ["cemetery-attendant"], "destination": "battlefield-b"}}})
+Outcome: move_unit (after 2 tool call(s))
 

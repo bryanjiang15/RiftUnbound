@@ -77,6 +77,19 @@ CREATE TABLE IF NOT EXISTS decision_eval_metrics (
     legality_retries INTEGER NOT NULL DEFAULT 0,
     fell_back_to_pass INTEGER NOT NULL DEFAULT 0,  -- 1 = returned the safety pass
     latency_ms       INTEGER NOT NULL DEFAULT 0,
+    -- Token usage (overall + planner/actor split). One decision may invoke the
+    -- planner agent (per-turn, often cached) and the actor/decision agent.
+    prompt_tokens             INTEGER NOT NULL DEFAULT 0,
+    completion_tokens         INTEGER NOT NULL DEFAULT 0,
+    total_tokens              INTEGER NOT NULL DEFAULT 0,
+    planner_model_calls       INTEGER NOT NULL DEFAULT 0,
+    planner_prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+    planner_completion_tokens INTEGER NOT NULL DEFAULT 0,
+    planner_total_tokens      INTEGER NOT NULL DEFAULT 0,
+    actor_model_calls         INTEGER NOT NULL DEFAULT 0,
+    actor_prompt_tokens       INTEGER NOT NULL DEFAULT 0,
+    actor_completion_tokens   INTEGER NOT NULL DEFAULT 0,
+    actor_total_tokens        INTEGER NOT NULL DEFAULT 0,
     timestamp        TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_eval_game ON decision_eval_metrics (game_id, turn, decision_index);
@@ -106,6 +119,11 @@ CREATE TABLE IF NOT EXISTS game_eval_summary (
     parse_retry_total  INTEGER NOT NULL DEFAULT 0,
     legality_retry_total INTEGER NOT NULL DEFAULT 0,
     fallback_count     INTEGER NOT NULL DEFAULT 0,
+    prompt_tokens_total       INTEGER NOT NULL DEFAULT 0,
+    completion_tokens_total   INTEGER NOT NULL DEFAULT 0,
+    total_tokens_total        INTEGER NOT NULL DEFAULT 0,
+    planner_total_tokens_total INTEGER NOT NULL DEFAULT 0,
+    actor_total_tokens_total   INTEGER NOT NULL DEFAULT 0,
     timestamp          TEXT    NOT NULL
 );
 
@@ -159,6 +177,46 @@ class Memory:
     def _init_db(self) -> None:
         with self._connect() as conn:
             conn.executescript(_DDL)
+            self._migrate(conn)
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """Add columns introduced after a DB was first created.
+
+        ``CREATE TABLE IF NOT EXISTS`` never alters an existing table, so token /
+        per-stage columns added later must be backfilled with ALTER TABLE on
+        databases created by an earlier version.
+        """
+        new_columns = {
+            "decision_eval_metrics": [
+                "prompt_tokens INTEGER NOT NULL DEFAULT 0",
+                "completion_tokens INTEGER NOT NULL DEFAULT 0",
+                "total_tokens INTEGER NOT NULL DEFAULT 0",
+                "planner_model_calls INTEGER NOT NULL DEFAULT 0",
+                "planner_prompt_tokens INTEGER NOT NULL DEFAULT 0",
+                "planner_completion_tokens INTEGER NOT NULL DEFAULT 0",
+                "planner_total_tokens INTEGER NOT NULL DEFAULT 0",
+                "actor_model_calls INTEGER NOT NULL DEFAULT 0",
+                "actor_prompt_tokens INTEGER NOT NULL DEFAULT 0",
+                "actor_completion_tokens INTEGER NOT NULL DEFAULT 0",
+                "actor_total_tokens INTEGER NOT NULL DEFAULT 0",
+            ],
+            "game_eval_summary": [
+                "prompt_tokens_total INTEGER NOT NULL DEFAULT 0",
+                "completion_tokens_total INTEGER NOT NULL DEFAULT 0",
+                "total_tokens_total INTEGER NOT NULL DEFAULT 0",
+                "planner_total_tokens_total INTEGER NOT NULL DEFAULT 0",
+                "actor_total_tokens_total INTEGER NOT NULL DEFAULT 0",
+            ],
+        }
+        for table, columns in new_columns.items():
+            existing = {
+                row["name"]
+                for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            for column_def in columns:
+                name = column_def.split()[0]
+                if name not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
 
     @contextmanager
     def _connect(self):
@@ -374,8 +432,12 @@ class Memory:
                 INSERT INTO decision_eval_metrics
                   (game_id, turn, decision_index, decision_type, model_calls,
                    tool_rounds, parse_retries, legality_retries, fell_back_to_pass,
-                   latency_ms, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   latency_ms, prompt_tokens, completion_tokens, total_tokens,
+                   planner_model_calls, planner_prompt_tokens,
+                   planner_completion_tokens, planner_total_tokens,
+                   actor_model_calls, actor_prompt_tokens,
+                   actor_completion_tokens, actor_total_tokens, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     game_id,
@@ -388,6 +450,17 @@ class Memory:
                     int(metrics.get("legality_retries", 0)),
                     1 if metrics.get("fell_back_to_pass") else 0,
                     int(metrics.get("latency_ms", 0)),
+                    int(metrics.get("prompt_tokens", 0)),
+                    int(metrics.get("completion_tokens", 0)),
+                    int(metrics.get("total_tokens", 0)),
+                    int(metrics.get("planner_model_calls", 0)),
+                    int(metrics.get("planner_prompt_tokens", 0)),
+                    int(metrics.get("planner_completion_tokens", 0)),
+                    int(metrics.get("planner_total_tokens", 0)),
+                    int(metrics.get("actor_model_calls", 0)),
+                    int(metrics.get("actor_prompt_tokens", 0)),
+                    int(metrics.get("actor_completion_tokens", 0)),
+                    int(metrics.get("actor_total_tokens", 0)),
                     now,
                 ),
             )
@@ -430,7 +503,9 @@ class Memory:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT model_calls, parse_retries, legality_retries, "
-                "fell_back_to_pass, latency_ms FROM decision_eval_metrics "
+                "fell_back_to_pass, latency_ms, total_tokens, prompt_tokens, "
+                "completion_tokens, planner_total_tokens, actor_total_tokens "
+                "FROM decision_eval_metrics "
                 "WHERE game_id=? ORDER BY id",
                 (game_id,),
             ).fetchall()
@@ -444,6 +519,11 @@ class Memory:
             "parse_retry_total": sum(r["parse_retries"] for r in rows),
             "legality_retry_total": sum(r["legality_retries"] for r in rows),
             "fallback_count": sum(r["fell_back_to_pass"] for r in rows),
+            "prompt_tokens_total": sum(r["prompt_tokens"] for r in rows),
+            "completion_tokens_total": sum(r["completion_tokens"] for r in rows),
+            "total_tokens_total": sum(r["total_tokens"] for r in rows),
+            "planner_total_tokens_total": sum(r["planner_total_tokens"] for r in rows),
+            "actor_total_tokens_total": sum(r["actor_total_tokens"] for r in rows),
         }
         if rows:
             latencies = sorted(r["latency_ms"] for r in rows)
@@ -457,8 +537,10 @@ class Memory:
                 INSERT INTO game_eval_summary
                   (game_id, decisions, model_calls_total, avg_latency_ms,
                    p95_latency_ms, parse_retry_total, legality_retry_total,
-                   fallback_count, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   fallback_count, prompt_tokens_total, completion_tokens_total,
+                   total_tokens_total, planner_total_tokens_total,
+                   actor_total_tokens_total, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(game_id) DO UPDATE SET
                     decisions=excluded.decisions,
                     model_calls_total=excluded.model_calls_total,
@@ -467,6 +549,11 @@ class Memory:
                     parse_retry_total=excluded.parse_retry_total,
                     legality_retry_total=excluded.legality_retry_total,
                     fallback_count=excluded.fallback_count,
+                    prompt_tokens_total=excluded.prompt_tokens_total,
+                    completion_tokens_total=excluded.completion_tokens_total,
+                    total_tokens_total=excluded.total_tokens_total,
+                    planner_total_tokens_total=excluded.planner_total_tokens_total,
+                    actor_total_tokens_total=excluded.actor_total_tokens_total,
                     timestamp=excluded.timestamp
                 """,
                 (
@@ -478,6 +565,11 @@ class Memory:
                     summary["parse_retry_total"],
                     summary["legality_retry_total"],
                     summary["fallback_count"],
+                    summary["prompt_tokens_total"],
+                    summary["completion_tokens_total"],
+                    summary["total_tokens_total"],
+                    summary["planner_total_tokens_total"],
+                    summary["actor_total_tokens_total"],
                     now,
                 ),
             )
@@ -539,7 +631,18 @@ class Memory:
                 "COALESCE(AVG(latency_ms),0) AS avg_lat, "
                 "COALESCE(SUM(parse_retries),0) AS parse_r, "
                 "COALESCE(SUM(legality_retries),0) AS legal_r, "
-                "COALESCE(SUM(fell_back_to_pass),0) AS fallbacks "
+                "COALESCE(SUM(fell_back_to_pass),0) AS fallbacks, "
+                "COALESCE(SUM(prompt_tokens),0) AS prompt_t, "
+                "COALESCE(SUM(completion_tokens),0) AS completion_t, "
+                "COALESCE(SUM(total_tokens),0) AS total_t, "
+                "COALESCE(SUM(planner_model_calls),0) AS planner_calls, "
+                "COALESCE(SUM(planner_total_tokens),0) AS planner_total_t, "
+                "COALESCE(SUM(planner_prompt_tokens),0) AS planner_prompt_t, "
+                "COALESCE(SUM(planner_completion_tokens),0) AS planner_completion_t, "
+                "COALESCE(SUM(actor_model_calls),0) AS actor_calls, "
+                "COALESCE(SUM(actor_total_tokens),0) AS actor_total_t, "
+                "COALESCE(SUM(actor_prompt_tokens),0) AS actor_prompt_t, "
+                "COALESCE(SUM(actor_completion_tokens),0) AS actor_completion_t "
                 "FROM decision_eval_metrics"
             ).fetchone()
             cm = conn.execute(
@@ -579,6 +682,24 @@ class Memory:
                 "parse_retries": dm["parse_r"],
                 "legality_retries": dm["legal_r"],
                 "fallback_passes": dm["fallbacks"],
+                "tokens": {
+                    "prompt": dm["prompt_t"],
+                    "completion": dm["completion_t"],
+                    "total": dm["total_t"],
+                    "avg_total_per_decision": round(dm["total_t"] / server_decisions, 1) if server_decisions else 0,
+                    "planner": {
+                        "model_calls": dm["planner_calls"],
+                        "prompt": dm["planner_prompt_t"],
+                        "completion": dm["planner_completion_t"],
+                        "total": dm["planner_total_t"],
+                    },
+                    "actor": {
+                        "model_calls": dm["actor_calls"],
+                        "prompt": dm["actor_prompt_t"],
+                        "completion": dm["actor_completion_t"],
+                        "total": dm["actor_total_t"],
+                    },
+                },
             },
             "engine_observed": {
                 "decisions": cm["n"],

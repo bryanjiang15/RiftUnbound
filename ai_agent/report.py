@@ -103,7 +103,18 @@ def gather(conn: sqlite3.Connection) -> dict:
         "COALESCE(SUM(parse_retries),0) AS parse_r, "
         "COALESCE(SUM(legality_retries),0) AS legal_r, "
         "COALESCE(SUM(fell_back_to_pass),0) AS fallbacks, "
-        "COALESCE(AVG(tool_rounds),0) AS avg_tools "
+        "COALESCE(AVG(tool_rounds),0) AS avg_tools, "
+        "COALESCE(SUM(prompt_tokens),0) AS prompt_t, "
+        "COALESCE(SUM(completion_tokens),0) AS completion_t, "
+        "COALESCE(SUM(total_tokens),0) AS total_t, "
+        "COALESCE(SUM(planner_model_calls),0) AS planner_calls, "
+        "COALESCE(SUM(planner_prompt_tokens),0) AS planner_prompt_t, "
+        "COALESCE(SUM(planner_completion_tokens),0) AS planner_completion_t, "
+        "COALESCE(SUM(planner_total_tokens),0) AS planner_total_t, "
+        "COALESCE(SUM(actor_model_calls),0) AS actor_calls, "
+        "COALESCE(SUM(actor_prompt_tokens),0) AS actor_prompt_t, "
+        "COALESCE(SUM(actor_completion_tokens),0) AS actor_completion_t, "
+        "COALESCE(SUM(actor_total_tokens),0) AS actor_total_t "
         "FROM decision_eval_metrics",
     )
     client = _scalar(
@@ -253,6 +264,32 @@ def render(data: dict) -> str:
         out.append(f"  Fallback passes     {fb_str}   {_dim(f'({_safe_pct(fb, n)} of decisions)')}")
     else:
         out.append(_dim("  No server-side decision metrics recorded yet."))
+
+    # ── Token usage (planner vs decision/actor agents) ──
+    out.append(_header("Token Usage (planner vs decision agent)"))
+    if n and s["total_t"]:
+        total_t = s["total_t"]
+        planner_t = s["planner_total_t"]
+        actor_t = s["actor_total_t"]
+        out.append(f"  Total tokens        {_bold(f'{total_t:,}')}   {_dim(f'(avg {total_t / n:,.0f}/decision)')}")
+        out.append(f"    prompt            {s['prompt_t']:,}")
+        out.append(f"    completion        {s['completion_t']:,}")
+        out.append(
+            f"  Planner agent       {planner_t:,} tok  {_dim(f'({_safe_pct(planner_t, total_t)})')}"
+            f"  {_bar(planner_t, max(total_t, 1))}"
+        )
+        out.append(
+            f"    calls/prompt/comp  {s['planner_calls']} / {s['planner_prompt_t']:,} / {s['planner_completion_t']:,}"
+        )
+        out.append(
+            f"  Decision agent      {actor_t:,} tok  {_dim(f'({_safe_pct(actor_t, total_t)})')}"
+            f"  {_bar(actor_t, max(total_t, 1))}"
+        )
+        out.append(
+            f"    calls/prompt/comp  {s['actor_calls']} / {s['actor_prompt_t']:,} / {s['actor_completion_t']:,}"
+        )
+    else:
+        out.append(_dim("  No token usage recorded yet (older games or no usage data)."))
 
     # ── Latency distribution ──
     if lats:
@@ -509,6 +546,24 @@ def _aggregate_json(data: dict) -> dict:
             "parse_retries": s["parse_r"],
             "legality_retries": s["legal_r"],
             "fallback_passes": s["fallbacks"],
+            "tokens": {
+                "prompt": s["prompt_t"],
+                "completion": s["completion_t"],
+                "total": s["total_t"],
+                "avg_total_per_decision": round(s["total_t"] / n, 1) if n else 0,
+                "planner": {
+                    "model_calls": s["planner_calls"],
+                    "prompt": s["planner_prompt_t"],
+                    "completion": s["planner_completion_t"],
+                    "total": s["planner_total_t"],
+                },
+                "actor": {
+                    "model_calls": s["actor_calls"],
+                    "prompt": s["actor_prompt_t"],
+                    "completion": s["actor_completion_t"],
+                    "total": s["actor_total_t"],
+                },
+            },
         },
         "engine_observed": {
             "decisions": c["n"],

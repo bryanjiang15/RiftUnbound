@@ -91,6 +91,109 @@ DecisionType = Literal[
     "pending_choice",
 ]
 
+# ── Simulation (Phase 2.5) ────────────────────────────────────────────────────
+#
+# Engine-truth simulation results. Produced by Godot's MoveSimulator on a cloned
+# GameState and inlined into BriefState, then surfaced to the model via the
+# simulate_move / simulate_line skills. Defined before BriefState because
+# BriefState references SimResult / LineResult. See
+# docs/Phase2_5_Engine_Truth_Simulation.md.
+#
+# Serialization rule (mirrors the Godot delta serializer): field order is
+# normative (headline win-condition fields first, then board deltas, then
+# resources/tempo), and empty collections are OMITTED — the presence of a key
+# means "something of this kind changed." Pydantic models below keep the fields
+# Optional/default-empty so a partial dict from Godot validates cleanly.
+
+
+class ControllerChange(BaseModel):
+    controller_before: str  # "me" | "opponent" | "neutral"
+    controller_after: str
+
+
+class UnitDamage(BaseModel):
+    id: str
+    damage: int
+
+
+class UnitMove(BaseModel):
+    id: str
+    to: str
+
+
+class UnitBuff(BaseModel):
+    id: str
+    might_after: int
+
+
+class ResolvedState(BaseModel):
+    """The deterministic all-pass resolution of a move/line (classes A+B).
+
+    Every field traces to an engine-mutable domain field (see §3.4 of the design
+    doc). Collections default empty and are omitted by the Godot serializer when
+    empty; the model tolerates their absence.
+    """
+
+    # ── headline: win condition ──
+    wins_game: bool = False
+    conquer: bool = False
+    my_score_after: int = 0
+    opp_score_after: int = 0
+
+    # ── board deltas (omit-empty on the wire) ──
+    battlefields: dict[str, ControllerChange] = Field(default_factory=dict)
+    trade: Optional[str] = None
+    units_killed: list[str] = Field(default_factory=list)
+    units_damaged: list[UnitDamage] = Field(default_factory=list)
+    my_units_surviving: list[str] = Field(default_factory=list)
+    units_moved: list[UnitMove] = Field(default_factory=list)
+    units_buffed: list[UnitBuff] = Field(default_factory=list)
+    units_stunned: list[str] = Field(default_factory=list)
+
+    # ── resources / tempo ──
+    cards_drawn: Union[list[str], int] = 0
+    cards_discarded: list[str] = Field(default_factory=list)
+    energy_spent: int = 0
+    exhausted: list[str] = Field(default_factory=list)
+    next_decision: str = ""
+
+
+class ResponseWindow(BaseModel):
+    """A class-C branch point: where the opponent could legally respond.
+
+    The simulator auto-passes these (the deterministic optimistic closure) and
+    records them so the agent knows exactly where the line depends on the
+    opponent doing nothing. The opponent's hidden choice is never resolved.
+    """
+
+    after_move: str = ""
+    opponent_may_respond: bool = True
+    legal_response_classes: list[str] = Field(default_factory=list)
+    opponent_unknown_cards: int = 0
+    note: str = ""
+
+
+class SimResult(BaseModel):
+    """Result of simulating a single move to quiescence."""
+
+    legal: bool
+    resolved_if_unanswered: Optional[ResolvedState] = None
+    response_window: Optional[ResponseWindow] = None
+    error: Optional[str] = None
+
+
+class LineResult(BaseModel):
+    """Result of simulating a scripted multi-step line (the agent's own moves)."""
+
+    legal: bool
+    applied_moves: list[str] = Field(default_factory=list)
+    stopped_reason: str = ""  # quiescence | ply_budget | agent_choice | illegal
+    resolved_if_unanswered: Optional[ResolvedState] = None
+    opponent_windows: list[ResponseWindow] = Field(default_factory=list)
+    first_illegal_move: Optional[str] = None
+    error: Optional[str] = None
+
+
 class PendingChoiceContext(BaseModel):
     """Why the engine is waiting for a choose command (from BriefStateSerializer.gd)."""
 
@@ -144,6 +247,14 @@ class BriefState(BaseModel):
     # Enumerated legal moves (populated per-trigger from Godot)
     legal_moves: list[str] = Field(default_factory=list)
     legal_action_categories: list[str] = Field(default_factory=list)
+
+    # Engine-truth pre-simulations (Phase 2.5, option C). Godot pre-runs each
+    # single legal move (and a few auto-detected combat lines) on a clone and
+    # inlines the resulting SimResult/LineResult keyed by the exact command
+    # string(s). The simulate_move / simulate_line skills read these so the model
+    # gets observed facts without a round-trip. Empty when sim is disabled.
+    move_simulations: dict[str, SimResult] = Field(default_factory=dict)
+    line_simulations: dict[str, LineResult] = Field(default_factory=dict)
 
     # Pending choice context
     pending_choice_options: list[str] = Field(default_factory=list)
