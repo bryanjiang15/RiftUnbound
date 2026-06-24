@@ -202,7 +202,8 @@ There is no:
 | `get_card_detail(card_id)` | Read | Full card definition JSON from Data/Cards/ |
 | `get_opponent_history` | Read | Opponent public info — score, hand size, base units (no history) |
 | `lookup_rule(query)` | Read | Keyword search over implementation rules doc |
-| `simulate_move(move)` | Helper | 1-ply heuristic simulation of a hypothetical move |
+| `simulate_move(move)` | Helper | Engine-truth result of one move (Phase 2.5): structured facts from Godot's rules engine run on a clone, not a heuristic guess |
+| `simulate_line(moves[])` | Helper | Engine-truth result of a scripted multi-step line of the AI's own moves (e.g. enter combat then play a trick) |
 | `evaluate_position` | Helper | Heuristic assessment: score gap, unit counts, BF control |
 
 ---

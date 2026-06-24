@@ -70,3 +70,11 @@ func describe() -> String:
 		if power[d] > 0:
 			parts.append("%s:%d" % [CardDefinition._domain_abbr(d), power[d]])
 	return " | ".join(parts) if not parts.is_empty() else "empty"
+
+
+# Deep-copy this rune pool (Phase 2.5 simulation). No CardInstance references.
+func clone() -> RunePool:
+	var r := RunePool.new()
+	r.energy = energy
+	r.power = power.duplicate()
+	return r

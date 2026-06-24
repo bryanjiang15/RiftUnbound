@@ -195,54 +195,97 @@ def list_legal_moves() -> list[str]:
     return _current_legal_moves
 
 
-def simulate_move(move: dict) -> str:
+def simulate_move(move: dict) -> dict:
     """
-    Simulate what would happen if the agent played this move.
-    This is a lightweight heuristic simulation based on brief state — it does
-    not invoke Godot's rules engine and may not capture edge cases.
+    Return the engine-truth result of playing this move, as structured facts.
+
+    Phase 2.5: outcomes are computed by Godot's rules engine on a clone of the
+    live state (not guessed). Godot pre-simulates each legal move and inlines the
+    result into the brief state keyed by the command string; this skill looks up
+    that SimResult. The returned dict separates the deterministic
+    `resolved_if_unanswered` line (facts the agent may assert) from a
+    `response_window` flag (a hidden opponent choice the agent must hedge).
     """
-    action = move.get("action", "")
-    p = move.get("parameters", {})
     bs = _current_brief_state
+    command = _move_to_command(move)
+    sims = bs.get("move_simulations", {}) or {}
 
-    if action == "end_turn":
-        return "Turn would end.  Opponent takes over.  Score unchanged this action."
+    if command in sims:
+        return sims[command]
 
-    if action == "pass":
-        return "Pass priority/focus.  No state change."
+    # Not pre-simulated. Tell the model plainly rather than inventing an outcome.
+    legal = command in (bs.get("legal_moves", []) or [])
+    return {
+        "legal": legal,
+        "error": (
+            f"No engine simulation available for '{command}'. "
+            "Do not assert its outcome as fact — reason from the labeled "
+            "legal_moves and mark the result uncertain."
+        ),
+    }
 
-    if action == "play_card":
-        card_id = p.get("card_id", "")
-        card = _find_hand_card(bs, card_id)
-        if not card:
-            return f"Card '{card_id}' not found in hand."
-        dest = p.get("destination", "base")
-        return (
-            f"Play {card.get('name', card_id)} ({card.get('card_type', '?')}) "
-            f"to {dest}.  Costs {card.get('energy_cost', 0)} energy + "
-            f"{_power_cost_str(card.get('power_cost', []))}.  "
-            f"Card enters exhausted (unless Accelerate used)."
-        )
 
-    if action == "move_unit":
-        unit_ids = p.get("unit_ids", [])
-        dest = p.get("destination", "?")
-        names = []
-        for uid in unit_ids:
-            u = _find_unit_anywhere(bs, uid)
-            names.append(u.get("name", uid) if u else uid)
-        enemy_at_dest = _enemy_units_at(bs, dest)
-        if enemy_at_dest:
-            return (
-                f"Move {', '.join(names)} to {dest}.  "
-                f"Opponent has {len(enemy_at_dest)} unit(s) there — Combat will be triggered."
-            )
-        return (
-            f"Move {', '.join(names)} to {dest}.  No enemy units — "
-            f"Non-Combat Showdown will occur; you will gain control if unopposed."
-        )
+def simulate_line(moves: list) -> dict:
+    """
+    Return the engine-truth result of a scripted multi-step line of YOUR OWN
+    moves (e.g. move a unit into combat, then play a trick to win it).
 
-    return f"Move '{action}' — no simulation available; general effect expected."
+    Phase 2.5: Godot pre-simulates auto-detected combat lines (a contested move
+    followed by an affordable Action/Reaction). This looks up the matching
+    LineResult. `resolved_if_unanswered` is the deterministic outcome assuming the
+    opponent does not respond; each entry in `opponent_windows` is a point where
+    the opponent could have answered (hedge those).
+    """
+    bs = _current_brief_state
+    commands = [_move_to_command(m) for m in (moves or [])]
+    key = " ; ".join(commands)
+    line_sims = bs.get("line_simulations", {}) or {}
+
+    if key in line_sims:
+        return line_sims[key]
+
+    # Fall back to chaining single-move sims where possible so the agent still
+    # gets the first move's verified outcome rather than nothing.
+    move_sims = bs.get("move_simulations", {}) or {}
+    first = commands[0] if commands else ""
+    if first in move_sims:
+        return {
+            "legal": move_sims[first].get("legal", False),
+            "applied_moves": [first],
+            "stopped_reason": "line_not_presimulated",
+            "resolved_if_unanswered": move_sims[first].get("resolved_if_unanswered"),
+            "error": (
+                "Only the first move of this line was simulated by the engine. "
+                "Treat later steps as uncertain and hedge."
+            ),
+        }
+    return {
+        "legal": False,
+        "applied_moves": [],
+        "stopped_reason": "not_simulated",
+        "error": (
+            f"No engine simulation available for the line '{key}'. "
+            "Do not assert its outcome as fact."
+        ),
+    }
+
+
+def _move_to_command(move: dict) -> str:
+    """Build the same console command string Godot keys pre-simulations by.
+
+    Reuses the Move.to_command() translation so the lookup key matches exactly.
+    Accepts either a raw {action, parameters} dict or an already-built string.
+    """
+    if isinstance(move, str):
+        return move
+    try:
+        from .schemas import Move
+
+        return Move(**move).to_command()
+    except Exception:
+        # Best-effort fallback for malformed tool input.
+        action = (move or {}).get("action", "")
+        return str(action)
 
 
 def evaluate_position() -> dict[str, Any]:
@@ -405,34 +448,6 @@ def _power_cost_str(power_cost: list[dict]) -> str:
 
 
 # ── Card / state lookup helpers ───────────────────────────────────────────────
-
-
-def _find_hand_card(bs: dict, instance_id: str) -> Optional[dict]:
-    for c in bs.get("my_hand", []):
-        if c["instance_id"] == instance_id:
-            return c
-    return None
-
-
-def _find_unit_anywhere(bs: dict, instance_id: str) -> Optional[dict]:
-    for u in bs.get("my_base_units", []):
-        if u["instance_id"] == instance_id:
-            return u
-    for u in bs.get("opponent_base_units", []):
-        if u["instance_id"] == instance_id:
-            return u
-    for bf in bs.get("battlefields", []):
-        for u in bf.get("my_units", []) + bf.get("opponent_units", []):
-            if u["instance_id"] == instance_id:
-                return u
-    return None
-
-
-def _enemy_units_at(bs: dict, battlefield_id: str) -> list[dict]:
-    for bf in bs.get("battlefields", []):
-        if bf["battlefield_id"] == battlefield_id:
-            return bf.get("opponent_units", [])
-    return []
 
 
 def _find_card_definition(def_id: str) -> Optional[dict]:

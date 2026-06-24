@@ -214,3 +214,39 @@ func hand_description() -> String:
 				c.instance_id, c.definition.name, cost_str, type_str
 			])
 	return "\n".join(lines)
+
+
+# Deep-copy this player through the shared identity map (Phase 2.5 simulation).
+# All zone cards resolve through `map`. id_registry is intentionally left null
+# here and rewired to the cloned GameState by GameState.clone().
+func clone(map: Dictionary) -> PlayerState:
+	var p := PlayerState.new()
+	p.player_index = player_index
+	p.player_name = player_name
+	p.deck = _clone_cards(deck, map)
+	p.rune_deck = _clone_cards(rune_deck, map)
+	p.hand = _clone_cards(hand, map)
+	p.trash = _clone_cards(trash, map)
+	p.banishment = _clone_cards(banishment, map)
+	p.base_permanents = _clone_cards(base_permanents, map)
+	p.channeled_runes = _clone_cards(channeled_runes, map)
+	p.champion_zone = champion_zone.clone(map) if champion_zone != null else null
+	p.legend = legend.clone(map) if legend != null else null
+	p.rune_pool = rune_pool.clone()
+	p.score = score
+	p.cards_played_this_turn = cards_played_this_turn
+	p.cards_discarded_count = cards_discarded_count
+	p.discarded_this_turn = _clone_cards(discarded_this_turn, map)
+	p.battlefields_scored_this_turn = battlefields_scored_this_turn.duplicate()
+	p.units_enter_ready_this_turn = units_enter_ready_this_turn
+	p.deck_battlefields = deck_battlefields.duplicate()
+	p.id_registry = null
+	p._id_counters = _id_counters.duplicate()
+	return p
+
+
+static func _clone_cards(arr: Array, map: Dictionary) -> Array[CardInstance]:
+	var out: Array[CardInstance] = []
+	for c in arr:
+		out.append(c.clone(map))
+	return out

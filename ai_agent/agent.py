@@ -240,8 +240,14 @@ TOOLS: list[dict] = [
         "function": {
             "name": "simulate_move",
             "description": (
-                "Apply a hypothetical move to a copy of the brief state and report "
-                "the expected result. No real game effect. Use to check a line one ply deep."
+                "Return the ENGINE-TRUTH result of a single move as structured "
+                "facts (computed by the rules engine on a clone, not guessed). "
+                "Use before asserting what a move does. The result separates "
+                "'resolved_if_unanswered' (the deterministic outcome if the "
+                "opponent does not respond — you may state these as fact) from "
+                "'response_window' (a point the opponent could answer — you must "
+                "hedge that branch). If 'error' is present, the move was not "
+                "simulated; do not assert its outcome."
             ),
             "parameters": {
                 "type": "object",
@@ -257,6 +263,39 @@ TOOLS: list[dict] = [
                     }
                 },
                 "required": ["move"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "simulate_line",
+            "description": (
+                "Return the ENGINE-TRUTH result of a scripted multi-step line of "
+                "YOUR OWN moves (e.g. move a unit into combat, THEN play a trick "
+                "to win it). Pass the moves in order. 'resolved_if_unanswered' is "
+                "the deterministic outcome assuming the opponent does not respond; "
+                "each entry in 'opponent_windows' is a point the opponent could "
+                "have answered — hedge those. Use this for combat/contested lines "
+                "instead of guessing how the sequence resolves."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "moves": {
+                        "type": "array",
+                        "description": "Ordered list of move objects, each with 'action' and 'parameters'.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "action": {"type": "string"},
+                                "parameters": {"type": "object"},
+                            },
+                            "required": ["action"],
+                        },
+                    }
+                },
+                "required": ["moves"],
             },
         },
     },
@@ -294,6 +333,8 @@ def _dispatch_tool(name: str, arguments: dict) -> Any:
         return skill_module.get_keyword(arguments.get("name", ""))
     if name == "simulate_move":
         return skill_module.simulate_move(arguments.get("move", {}))
+    if name == "simulate_line":
+        return skill_module.simulate_line(arguments.get("moves", []))
     if name == "evaluate_position":
         return skill_module.evaluate_position()
     return f"Unknown skill: {name}"
