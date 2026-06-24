@@ -1,3 +1,373 @@
 Riftbound AI Agent — Plan Log
-Started: 2026-06-23 23:38:36 UTC
+Started: 2026-06-24 15:21:07 UTC
 ════════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────
+Turn 1  Type: main_phase  Decision #: 1  Game: Master Yi (Calm/Body)-vs-Player 2-1782314479-16388568  [2026-06-24T15:21:49Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "develop_board",
+  "plan_for_turn": "Play Chemtech Enforcer to establish board presence and discard Scrapheap to draw a card, leveraging its effect.",
+  "priority_order": [
+    "chemtech-enforcer",
+    "scrapheap"
+  ],
+  "focus_battlefields": [
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "chemtech-enforcer",
+    "scrapheap"
+  ],
+  "target_profile": {
+    "kind": "none",
+    "ids": []
+  },
+  "contingencies": [],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 3  Type: main_phase  Decision #: 5  Game: Master Yi (Calm/Body)-vs-Player 2-1782314479-16388568  [2026-06-24T15:24:21Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "develop_board",
+  "plan_for_turn": "Play Traveling Merchant to increase board presence and prepare for future card cycling. Consider moving units to contest battlefields next turn.",
+  "priority_order": [
+    "play_traveling_merchant",
+    "prepare_for_battlefield_contest"
+  ],
+  "focus_battlefields": [
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "traveling-merchant-3"
+  ],
+  "target_profile": {
+    "kind": "none",
+    "ids": []
+  },
+  "contingencies": [],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 3  Type: main_phase  Decision #: 6  Game: Master Yi (Calm/Body)-vs-Player 2-1782314479-16388568  [2026-06-24T15:24:26Z]
+Plan source: CACHED (reused this turn)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "develop_board",
+  "plan_for_turn": "Play Traveling Merchant to increase board presence and prepare for future card cycling. Consider moving units to contest battlefields next turn.",
+  "priority_order": [
+    "play_traveling_merchant",
+    "prepare_for_battlefield_contest"
+  ],
+  "focus_battlefields": [
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "traveling-merchant-3"
+  ],
+  "target_profile": {
+    "kind": "none",
+    "ids": []
+  },
+  "contingencies": [],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 5  Type: main_phase  Decision #: 11  Game: Master Yi (Calm/Body)-vs-Player 2-1782314479-16388568  [2026-06-24T15:30:06Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "pressure_battlefield",
+  "plan_for_turn": "Deploy Cemetery Attendant to strengthen our board presence and prepare for a potential attack on battlefield-b.",
+  "priority_order": [
+    "cemetery-attendant-2",
+    "void-seeker-2",
+    "battlefield-b"
+  ],
+  "focus_battlefields": [
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "cemetery-attendant-2",
+    "void-seeker-2"
+  ],
+  "target_profile": {
+    "kind": "battlefield",
+    "ids": [
+      "battlefield-b"
+    ]
+  },
+  "contingencies": [],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 5  Type: main_phase  Decision #: 12  Game: Master Yi (Calm/Body)-vs-Player 2-1782314479-16388568  [2026-06-24T15:30:12Z]
+Plan source: CACHED (reused this turn)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "pressure_battlefield",
+  "plan_for_turn": "Deploy Cemetery Attendant to strengthen our board presence and prepare for a potential attack on battlefield-b.",
+  "priority_order": [
+    "cemetery-attendant-2",
+    "void-seeker-2",
+    "battlefield-b"
+  ],
+  "focus_battlefields": [
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "cemetery-attendant-2",
+    "void-seeker-2"
+  ],
+  "target_profile": {
+    "kind": "battlefield",
+    "ids": [
+      "battlefield-b"
+    ]
+  },
+  "contingencies": [],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 5  Type: main_phase  Decision #: 13  Game: Master Yi (Calm/Body)-vs-Player 2-1782314479-16388568  [2026-06-24T15:30:18Z]
+Plan source: CACHED (reused this turn)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "pressure_battlefield",
+  "plan_for_turn": "Deploy Cemetery Attendant to strengthen our board presence and prepare for a potential attack on battlefield-b.",
+  "priority_order": [
+    "cemetery-attendant-2",
+    "void-seeker-2",
+    "battlefield-b"
+  ],
+  "focus_battlefields": [
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "cemetery-attendant-2",
+    "void-seeker-2"
+  ],
+  "target_profile": {
+    "kind": "battlefield",
+    "ids": [
+      "battlefield-b"
+    ]
+  },
+  "contingencies": [],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 5  Type: main_phase  Decision #: 16  Game: Master Yi (Calm/Body)-vs-Player 2-1782314479-16388568  [2026-06-24T15:32:35Z]
+Plan source: CACHED (reused this turn)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "pressure_battlefield",
+  "plan_for_turn": "Deploy Cemetery Attendant to strengthen our board presence and prepare for a potential attack on battlefield-b.",
+  "priority_order": [
+    "cemetery-attendant-2",
+    "void-seeker-2",
+    "battlefield-b"
+  ],
+  "focus_battlefields": [
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "cemetery-attendant-2",
+    "void-seeker-2"
+  ],
+  "target_profile": {
+    "kind": "battlefield",
+    "ids": [
+      "battlefield-b"
+    ]
+  },
+  "contingencies": [],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 7  Type: main_phase  Decision #: 20  Game: Master Yi (Calm/Body)-vs-Player 2-1782314479-16388568  [2026-06-24T15:34:17Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "pressure_battlefield",
+  "plan_for_turn": "Utilize Void Seeker to deal damage to the opponent's Zephyr Sage at Battlefield A, then move Traveling Merchant to Battlefield B to contest it and trigger its ability.",
+  "priority_order": [
+    "void-seeker-2",
+    "traveling-merchant-2",
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "focus_battlefields": [
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "void-seeker-2",
+    "traveling-merchant-2"
+  ],
+  "target_profile": {
+    "kind": "unit",
+    "ids": [
+      "zephyr-sage-3"
+    ]
+  },
+  "contingencies": [],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 7  Type: main_phase  Decision #: 22  Game: Master Yi (Calm/Body)-vs-Player 2-1782314479-16388568  [2026-06-24T15:36:47Z]
+Plan source: CACHED (reused this turn)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "pressure_battlefield",
+  "plan_for_turn": "Utilize Void Seeker to deal damage to the opponent's Zephyr Sage at Battlefield A, then move Traveling Merchant to Battlefield B to contest it and trigger its ability.",
+  "priority_order": [
+    "void-seeker-2",
+    "traveling-merchant-2",
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "focus_battlefields": [
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "void-seeker-2",
+    "traveling-merchant-2"
+  ],
+  "target_profile": {
+    "kind": "unit",
+    "ids": [
+      "zephyr-sage-3"
+    ]
+  },
+  "contingencies": [],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 7  Type: showdown_focus  Decision #: 23  Game: Master Yi (Calm/Body)-vs-Player 2-1782314479-16388568  [2026-06-24T15:36:58Z]
+Plan source: CACHED (reused this turn)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "pressure_battlefield",
+  "plan_for_turn": "Utilize Void Seeker to deal damage to the opponent's Zephyr Sage at Battlefield A, then move Traveling Merchant to Battlefield B to contest it and trigger its ability.",
+  "priority_order": [
+    "void-seeker-2",
+    "traveling-merchant-2",
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "focus_battlefields": [
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "void-seeker-2",
+    "traveling-merchant-2"
+  ],
+  "target_profile": {
+    "kind": "unit",
+    "ids": [
+      "zephyr-sage-3"
+    ]
+  },
+  "contingencies": [],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 9  Type: main_phase  Decision #: 29  Game: Master Yi (Calm/Body)-vs-Player 2-1782314479-16388568  [2026-06-24T15:41:54Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "pressure_battlefield",
+  "plan_for_turn": "Deploy Magma Wurm to establish board presence and prepare for a counter-attack on battlefield-a.",
+  "priority_order": [
+    "play magma-wurm",
+    "move_unit to battlefield-a"
+  ],
+  "focus_battlefields": [
+    "battlefield-a"
+  ],
+  "anchor_cards": [
+    "magma-wurm"
+  ],
+  "target_profile": {
+    "kind": "battlefield",
+    "ids": [
+      "battlefield-a"
+    ]
+  },
+  "contingencies": [],
+  "tactical_flexibility": "medium"
+}
+
+
+────────────────────────────────────────────────────────────────────────
+Turn 11  Type: main_phase  Decision #: 30  Game: Master Yi (Calm/Body)-vs-Player 2-1782314479-16388568  [2026-06-24T15:43:12Z]
+Plan source: FRESH (new planner call)
+────────────────────────────────────────────────────────────────────────
+{
+  "schema_version": "2.0",
+  "intent": "pressure_battlefield",
+  "plan_for_turn": "Deploy Magma Wurm to enable immediate unit readiness and use Void Seeker to weaken opponent's battlefield presence.",
+  "priority_order": [
+    "play_card(magma-wurm)",
+    "play_card(void-seeker-3)"
+  ],
+  "focus_battlefields": [
+    "battlefield-a",
+    "battlefield-b"
+  ],
+  "anchor_cards": [
+    "magma-wurm",
+    "void-seeker-3"
+  ],
+  "target_profile": {
+    "kind": "unit",
+    "ids": [
+      "zephyr-sage-3",
+      "wielder-of-water-2",
+      "master-yi-meditative"
+    ]
+  },
+  "contingencies": [],
+  "tactical_flexibility": "medium"
+}
+

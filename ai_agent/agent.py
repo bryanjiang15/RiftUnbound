@@ -89,18 +89,57 @@ def get_client() -> AsyncOpenAI:
     return _client
 
 
-async def _chat_create(client: AsyncOpenAI, *, metrics: Optional[dict] = None, **kwargs):
+def _record_token_usage(metrics: Optional[dict], stage: str, response: Any) -> None:
+    """Accumulate token usage from one chat completion into ``metrics``.
+
+    Tracks both overall totals and per-stage (``planner`` / ``actor``) totals so
+    the planner and decision agents can be reported separately. Also bumps the
+    per-stage model-call counter. Tolerates responses without a ``usage`` field
+    (e.g. test doubles) by recording nothing.
+    """
+    if metrics is None:
+        return
+    usage = getattr(response, "usage", None)
+    metrics[f"{stage}_model_calls"] = metrics.get(f"{stage}_model_calls", 0) + 1
+    if usage is None:
+        return
+    prompt = int(getattr(usage, "prompt_tokens", 0) or 0)
+    completion = int(getattr(usage, "completion_tokens", 0) or 0)
+    total = int(getattr(usage, "total_tokens", 0) or (prompt + completion))
+    for key, value in (
+        ("prompt_tokens", prompt),
+        ("completion_tokens", completion),
+        ("total_tokens", total),
+        (f"{stage}_prompt_tokens", prompt),
+        (f"{stage}_completion_tokens", completion),
+        (f"{stage}_total_tokens", total),
+    ):
+        metrics[key] = metrics.get(key, 0) + value
+
+
+async def _chat_create(
+    client: AsyncOpenAI,
+    *,
+    metrics: Optional[dict] = None,
+    stage: str = "actor",
+    **kwargs,
+):
     """Call chat.completions.create, retrying transient failures with backoff.
 
     The OpenAI SDK already retries internally up to ``max_retries``; this adds a
     second, in-process layer so a sustained-but-brief rate limit (429) is waited
     out rather than instantly degrading the decision to a fallback ``pass``. Only
     transient errors are retried; everything else propagates to the caller.
+
+    ``stage`` ("actor" or "planner") routes token-usage accounting into
+    stage-specific metric keys so the two agents can be reported separately.
     """
     last_exc: Exception | None = None
     for attempt in range(MAX_TRANSIENT_RETRIES + 1):
         try:
-            return await client.chat.completions.create(**kwargs)
+            response = await client.chat.completions.create(**kwargs)
+            _record_token_usage(metrics, stage, response)
+            return response
         except TRANSIENT_API_ERRORS as exc:
             last_exc = exc
             if metrics is not None:
@@ -648,6 +687,19 @@ async def decide(
         "transient_retries": 0,
         "fell_back_to_pass": False,
         "latency_ms": 0,
+        # Token usage (overall + per-stage planner/actor breakdown). Populated by
+        # _chat_create via _record_token_usage as model calls are made.
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "planner_model_calls": 0,
+        "planner_prompt_tokens": 0,
+        "planner_completion_tokens": 0,
+        "planner_total_tokens": 0,
+        "actor_model_calls": 0,
+        "actor_prompt_tokens": 0,
+        "actor_completion_tokens": 0,
+        "actor_total_tokens": 0,
     })
 
     def _finalize(decision: Decision, fell_back: bool) -> Decision:
@@ -988,6 +1040,7 @@ async def _decide_staged(
             brief_state=brief_state,
             memory_summary=timeline,
             opponent_action_count=opponent_action_count,
+            metrics=metrics,
         )
         decision_index = memory._decision_counters.get(game_id, 0)
         _log_plan(
