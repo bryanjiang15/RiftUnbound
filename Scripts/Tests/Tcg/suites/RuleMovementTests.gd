@@ -7,6 +7,7 @@ static func run(assertions) -> void:
 	_test_move_exhausts_unit(assertions)
 	_test_cannot_move_exhausted(assertions)
 	_test_play_unit_to_controlled_battlefield(assertions)
+	_test_enumerator_lists_play_unit_to_controlled_battlefield(assertions)
 
 
 static func _test_move_exhausts_unit(assertions) -> void:
@@ -58,3 +59,36 @@ static func _test_play_unit_to_controlled_battlefield(assertions) -> void:
 		"unit is placed at controlled battlefield")
 	assertions.assert_eq(h.gs().board.battlefields[0].units[0][0].instance_id, "flame-chompers",
 		"played unit keeps instance id at battlefield")
+
+
+# Regression: legal_moves must offer deploying a unit straight to a Battlefield
+# the player controls, not only to base. Ambush is NOT required for controlled
+# battlefields; it only extends deployment to uncontrolled ones.
+static func _test_enumerator_lists_play_unit_to_controlled_battlefield(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0,
+		"phase": "MAIN",
+		"state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"battlefield_control": [0, -1],
+		"players": [
+			{
+				"hand": ["flame-chompers"],
+				"pool": {"energy": 3},
+				"deck_size": 5,
+				"rune_deck_size": 12
+			},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	var moves: Array = LegalMoveEnumerator.enumerate(h.gs(), 0)
+	assertions.assert_true(
+		"play flame-chompers to battlefield-a" in moves,
+		"enumerator offers play to controlled battlefield-a")
+	assertions.assert_true(
+		not ("play flame-chompers to battlefield-b" in moves),
+		"enumerator does not offer play to uncontrolled battlefield-b (no Ambush)")
+	assertions.assert_true(
+		"play flame-chompers" in moves,
+		"enumerator still offers play to base")

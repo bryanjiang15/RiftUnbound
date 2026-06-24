@@ -43,8 +43,10 @@ Action names and their required parameters:
                           "from_champion": false,
                           "from_hidden": false,
                           "accelerate": false}
-                          # Omit destination (or use "") for units to base — legal_moves
-                          # lists "play <id>" without "to base".
+                          # Omit destination (or use "") to play a unit to base.
+                          # Set a battlefield id to deploy a unit straight to a
+                          # Battlefield you control (or any battlefield if Ambush) —
+                          # only when legal_moves lists "play <id> to <battlefield>".
   hide_card              {"card_id": "<id>",
                           "battlefield_id": "<battlefield-a|battlefield-b>"}
   move_unit              {"unit_ids": ["<id>", ...],
@@ -92,9 +94,11 @@ CORE_RULES = """
   reflects what you can afford.
 
 ### Units
-- Permanents — stay on board after play.  Units are ALWAYS played to base; use
-  `destination: "base"` or omit the field.
-- Enter exhausted when played to base (cannot act that turn), unless Accelerate.
+- Permanents — stay on board after play.  Units are played to base by default
+  (omit `destination` or use `""`).  You may also deploy a unit straight to a
+  Battlefield you control by setting `destination` to that battlefield id — but
+  only when `legal_moves` lists `"play <id> to <battlefield>"`.
+- Enter exhausted when played (cannot act that turn), unless Accelerate.
 - Use `move_unit` on a later action to send a ready base unit to a Battlefield.
 - Standard Move: exhaust a unit to move it Base <-> Battlefield.
 - A unit dies during Cleanup when damage >= its Might. Damage heals at the end of
@@ -285,9 +289,6 @@ trigger fires rather than assuming:
   back it with a trick), call `simulate_line` with the moves in order — simulate
   the LINE you intend, not just the first move. Use `evaluate_position` to
   confirm a play helps.
-- When the opponent's likely response matters, call `get_opponent_history`.
-- Call `list_legal_moves` when you want a concrete, fresh option set to choose
-  over; the brief state already includes one, but this is always current.
 Prefer one or two targeted tool calls over a confident guess.
 """
 

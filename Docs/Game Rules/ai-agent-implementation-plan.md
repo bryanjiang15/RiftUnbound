@@ -304,12 +304,10 @@ These should hold no matter what:
 
 This section tracks rules that have been deliberately simplified or deferred in the current implementation. It exists so design decisions are explicit rather than accidental, and so future implementors know where to re-open the work.
 
-### 13.1 Unit placement — Ambush keyword (deferred)
+### 13.1 Unit placement — Ambush keyword (implemented)
 
-**Rule:** Units are played from hand to the player's **base**. Direct deployment onto a Battlefield normally requires the **Ambush** keyword.
+**Rule:** Units are played from hand to the player's **base** by default, but may be deployed directly onto a Battlefield the player **controls**. Direct deployment onto a Battlefield the player does **not** control requires the **Ambush** keyword.
 
-**Current implementation:** The Ambush keyword is not yet implemented. The `play` command enforces that any unit played with a `to battlefield-*` destination is immediately rejected with an error. Units must always be played to base, then repositioned via the `move` command.
+**Current implementation:** The `play` command validates unit destinations in `_cmd_play` (see `GameController._cmd_play`): a `to battlefield-*` destination is accepted when the player controls that Battlefield, or when the unit has the **Ambush** keyword; otherwise it is rejected. `_place_unit` performs the actual placement. `LegalMoveEnumerator._add_playable_cards` enumerates a `play <id> to <battlefield>` move for every controlled Battlefield (and every Battlefield for Ambush units).
 
-**Implication for the agent:** `play_card` actions for units must omit `destination` or set it to `base`. The only way to get a unit onto a Battlefield is a subsequent `move_unit` action on the unit once it is ready.
-
-**When to revisit:** Implement Ambush as a keyword effect that overrides the base-only placement restriction. At that point, remove the destination guard in `_cmd_play` and add a keyword check in `_place_unit` instead.
+**Implication for the agent:** `play_card` actions for units may omit `destination` (base), or set `destination` to a Battlefield that appears as a `"play <id> to <battlefield>"` entry in `legal_moves`. A unit can also be repositioned later via a `move_unit` action once it is ready.

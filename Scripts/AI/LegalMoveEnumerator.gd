@@ -108,10 +108,6 @@ static func enumerate(gs: GameState, player_index: int) -> Array:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 static func _add_playable_cards(gs: GameState, ps: PlayerState, player_index: int, moves: Array) -> void:
-	var bf_ids: Array = []
-	for bf in gs.board.battlefields:
-		bf_ids.append(bf.battlefield_id)
-
 	for card in ps.hand:
 		if card.definition.card_type == "rune":
 			continue
@@ -124,9 +120,12 @@ static func _add_playable_cards(gs: GameState, ps: PlayerState, player_index: in
 
 		if card.definition.card_type == "unit":
 			moves.append("play %s" % card.instance_id)
-			if card.has_keyword("ambush"):
-				for bf_id in bf_ids:
-					moves.append("play %s to %s" % [card.instance_id, bf_id])
+			# Units may deploy directly to a Battlefield the player controls.
+			# Ambush extends this to any Battlefield (even uncontrolled/enemy).
+			var has_ambush := card.has_keyword("ambush")
+			for bf in gs.board.battlefields:
+				if has_ambush or bf.controller_index == player_index:
+					moves.append("play %s to %s" % [card.instance_id, bf.battlefield_id])
 			if card.has_keyword("accelerate"):
 				var accel_cost = CostCalculator.compute_play_cost(card, player_index, gs, true)
 				if CostCalculator.can_afford_with_autopay(player_index, accel_cost, gs):
