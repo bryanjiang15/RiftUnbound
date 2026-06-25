@@ -41,12 +41,24 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 	var branches_expanded := 0
 	var transposition_hits := 0
 	var max_depth_reached := 0
-	var root_sc: GameController = _sim._build_sim_controller(live_gs)
+	_sim.ai_index = ai_index
+	# Track every simulated GameController (a Node, created via .new() and never
+	# added to the tree) so they can be freed when the search ends. Without this,
+	# each expanded branch leaks an orphan Node on every AI decision.
+	var controllers: Array = []
+	var root_sc: GameController = _sim.build_sim_controller(live_gs)
 	if root_sc == null:
 		return {"candidate_lines": [], "search_stats": _stats(0, 0, 0, 0, beam_width, 0, "clone_failed")}
-	_sim._ai_index = ai_index
-	var root_snapshot := _sim._snapshot(root_sc.gs)
-	var root_hash := MoveSimulator.structural_hash(root_snapshot)
+	controllers.append(root_sc)
+	var root_snapshot := ScoreModel.snapshot(root_sc.gs, _ai_index)
+	var root_hash := ScoreModel.structural_hash(root_snapshot)
+	# Ranker for the AI's own forced sub-decisions (e.g. which card to discard):
+	# score the settled board of each option so quiescence can pick the best one
+	# inline, without spawning beam branches that would dilute move diversity.
+	var choice_ranker := func(cand_gs: GameState) -> float:
+		var snap := ScoreModel.snapshot(cand_gs, _ai_index)
+		var feats := ScoreModel.build_score_features(root_snapshot, snap, [])
+		return float(_scorer.score_with_breakdown(feats)["score"])
 	var seen: Dictionary = {}
 	seen[root_hash] = true
 	var frontier: Array = [{"sc": root_sc, "steps": [], "windows": [], "score": -INF, "breakdown": {}, "resolved_state": {}}]
@@ -80,24 +92,25 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 				# Hash of the parent state — the state the AI is in when it issues
 				# this scripted move. Recorded as the step's pre_hash so the live
 				# executor can verify the world still matches before replaying it.
-				var scripted_pre_hash := MoveSimulator.structural_hash(_sim._snapshot(sc.gs))
-				var child: GameController = _sim._build_sim_controller(sc.gs)
+				var scripted_pre_hash := ScoreModel.structural_hash(ScoreModel.snapshot(sc.gs, _ai_index))
+				var child: GameController = _sim.build_sim_controller(sc.gs)
 				if child == null:
 					continue
+				controllers.append(child)
 				child.submit_command(ai_index, cmd_str)
 				if child.last_command_error:
 					continue
 				var child_windows: Array = []
 				var ai_steps: Array = []
-				_sim._advance_to_quiescence(child, cmd_str, child_windows, ai_steps)
-				var snap := _sim._snapshot(child.gs)
-				var hash := MoveSimulator.structural_hash(snap)
+				_sim.advance_to_quiescence(child, cmd_str, child_windows, ai_steps, choice_ranker)
+				var snap := ScoreModel.snapshot(child.gs, _ai_index)
+				var hash := ScoreModel.structural_hash(snap)
 				if seen.has(hash):
 					transposition_hits += 1
 					continue
 				seen[hash] = true
 				expanded_any = true
-				var resolved := _sim._build_delta(root_snapshot, snap, child.gs)
+				var resolved := _sim.build_delta(root_snapshot, snap, child.gs)
 				var steps: Array = node["steps"].duplicate(true)
 				steps.append({
 					"command": cmd_str, "context": "", "kind": "scripted",
@@ -106,7 +119,7 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 				# Any auto-resolved AI sub-decisions (target choices, showdown /
 				# chain passes) become explicit intermediate steps in the line.
 				steps.append_array(ai_steps)
-				var features := _sim._build_score_features(root_snapshot, snap, steps)
+				var features := ScoreModel.build_score_features(root_snapshot, snap, steps)
 				var scored := _scorer.score_with_breakdown(features)
 				var windows: Array = node["windows"].duplicate(true)
 				windows.append_array(child_windows)
@@ -123,17 +136,23 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 	for node in frontier:
 		_add_leaf(leaves, node, node["sc"], root_snapshot)
 	var elapsed := Time.get_ticks_msec() - start_ms
-	return {"candidate_lines": _build_candidate_lines(leaves, top_n), "search_stats": _stats(nodes_explored, branches_expanded, transposition_hits, max_depth_reached, beam_width, elapsed, stopped_reason)}
+	var candidate_lines := _build_candidate_lines(leaves, top_n)
+	# Free every simulated controller Node now that candidate lines (built from
+	# snapshots/deltas, not the controllers) are extracted.
+	for sc in controllers:
+		if is_instance_valid(sc):
+			sc.free()
+	return {"candidate_lines": candidate_lines, "search_stats": _stats(nodes_explored, branches_expanded, transposition_hits, max_depth_reached, beam_width, elapsed, stopped_reason)}
 
 
 func _add_leaf(leaves: Array, node: Dictionary, sc: GameController, root_snapshot: Dictionary) -> void:
-	var snap := _sim._snapshot(sc.gs)
-	var features := _sim._build_score_features(root_snapshot, snap, node.get("steps", []))
+	var snap := ScoreModel.snapshot(sc.gs, _ai_index)
+	var features := ScoreModel.build_score_features(root_snapshot, snap, node.get("steps", []))
 	var scored := _scorer.score_with_breakdown(features)
 	var leaf := node.duplicate(true)
 	leaf["score"] = scored["score"]
 	leaf["breakdown"] = scored["breakdown"]
-	leaf["resolved_state"] = _sim._build_delta(root_snapshot, snap, sc.gs)
+	leaf["resolved_state"] = _sim.build_delta(root_snapshot, snap, sc.gs)
 	leaves.append(leaf)
 
 

@@ -11,7 +11,7 @@
     "unusable_runes": -0.15
   },
   "action_weights": {
-    "card_played": 0.75,
+    "card_played": 1.0,
     "unit_moved": 0.2,
     "card_discarded": -0.5,
     "enemy_unit_killed": 1.5,
@@ -30,5 +30,5 @@
     "deathknell": 0.2
   },
   "battlefield_weights": { "battlefield-a": 1.5, "battlefield-b": 1.0 },
-  "end_of_turn": { "hand_size_target": 3, "hand_size_weight": 0.3, "rune_weight": 0.5 }
+  "end_of_turn": { "hand_size_target": 3, "hand_size_weight": 0.3, "rune_weight": 0.2 }
 }

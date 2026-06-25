@@ -5,13 +5,12 @@ extends RefCounted
 #
 # The AI does NOT invent terms in this phase; it only edits the weights in
 # Data/AI/scoring_profile.json. Scoring consumes the flat feature dict produced
-# by MoveSimulator._build_score_features() (state diffs + action/outcome deltas +
+# by ScoreModel.build_score_features() (state diffs + action/outcome deltas +
 # board keyword presence), and returns a weighted sum plus a per-term breakdown.
 
 const DEFAULT_PROFILE_PATH := "res://Data/AI/scoring_profile.json"
 
 var profile: Dictionary = {}
-var last_breakdown: Dictionary = {}
 
 
 func _init(path: String = DEFAULT_PROFILE_PATH) -> void:
@@ -30,16 +29,8 @@ static func load_profile(path: String = DEFAULT_PROFILE_PATH) -> Dictionary:
 	return parsed
 
 
-func score_state(features: Dictionary, scoring_profile: Dictionary = {}) -> float:
-	var result := score_with_breakdown(features, scoring_profile)
-	last_breakdown = result.get("breakdown", {})
-	return float(result.get("score", 0.0))
-
-
-func score_with_breakdown(features: Dictionary, scoring_profile: Dictionary = {}) -> Dictionary:
-	var p := scoring_profile if not scoring_profile.is_empty() else profile
-	if p.is_empty():
-		p = _default_profile()
+func score_with_breakdown(features: Dictionary) -> Dictionary:
+	var p := profile if not profile.is_empty() else _default_profile()
 	var state_w: Dictionary = p.get("state_weights", {})
 	var action_w: Dictionary = p.get("action_weights", {})
 	var keyword_w: Dictionary = p.get("keyword_weights", {})
@@ -134,12 +125,12 @@ static func _default_profile() -> Dictionary:
 			"battlefield_control": 5.0,
 			"unit_might_on_board": 0.5,
 			"cards_in_hand": 0.3,
-			"runes_available": 0.2,
+			"runes_available": -0.1,
 			"reactive_potential": 1.0,
 			"unusable_runes": -0.15,
 		},
 		"action_weights": {
-			"card_played": 0.5,
+			"card_played": 0.75,
 			"unit_moved": 0.2,
 			"card_discarded": -0.5,
 			"enemy_unit_killed": 1.5,

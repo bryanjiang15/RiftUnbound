@@ -1040,12 +1040,22 @@ async def choose_line(
                     chosen_line_id=chosen.line_id,
                 )
         messages.append({"role": "user", "content": "Choose a valid line_id from the provided candidate_lines and return raw JSON only."})
-    best = max(candidate_lines, key=lambda line: line.score)
-    commands = [_line_move_command(m) for m in best.moves]
-    first_move = _move_from_command(commands[0]) if commands else None
+    # Fallback: pick the highest-scoring line that actually starts with a usable
+    # move. A line with no parseable first move cannot be committed (Godot would
+    # replay a move the search never planned), so such lines are skipped and we
+    # pass without committing a line if none qualify.
+    playable: list[tuple[CandidateLine, Move]] = []
+    for line in candidate_lines:
+        commands = [_line_move_command(m) for m in line.moves]
+        first_move = _move_from_command(commands[0]) if commands else None
+        if first_move is not None:
+            playable.append((line, first_move))
+    if not playable:
+        return _PASS_DECISION
+    best, best_move = max(playable, key=lambda pair: pair[0].score)
     return Decision(
         reasoning="Fallback: selected the highest-scoring searched line.",
-        move=first_move or Move(action="pass"),
+        move=best_move,
         confidence="medium",
         alternatives_considered=f"Search selector fallback among {len(candidate_lines)} lines.",
         chosen_line_id=best.line_id,

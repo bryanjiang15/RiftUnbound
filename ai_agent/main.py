@@ -580,7 +580,12 @@ async def game_state_event_endpoint(body: GameStateEventRequest) -> dict:
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok", "version": "1.0.0"}
+    return {
+        "status": "ok",
+        "version": "1.0.0",
+        "search_enabled": _search_enabled,
+        "pipeline": _pipeline_mode,
+    }
 
 
 @app.get("/legal_moves")
