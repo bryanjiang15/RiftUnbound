@@ -22,6 +22,9 @@ const HTTP_TIMEOUT := 30.0     # seconds before falling back to heuristic
 							   # (the agent may make several sequential LLM
 							   # calls per decision; 8s was far too short)
 const MAX_RETRIES := 3         # max rejection retry attempts
+const SEARCH_MODE := true
+const TurnSearchScript = preload("res://Scripts/Game/TurnSearch.gd")
+const MoveSimulatorScript = preload("res://Scripts/Game/MoveSimulator.gd")
 
 # Resolved in setup() so it can differ per OS (see _agent_base_url()).
 var AGENT_URL := ""
@@ -32,6 +35,10 @@ var _retry_count: int = 0
 var _last_rejected_move: Dictionary = {}
 var _last_rejection_reason: String = ""
 var _waiting_for_http: bool = false
+var _candidate_lines: Array = []
+var _search_stats: Dictionary = {}
+var _committed_line: Dictionary = {}
+var _committed_line_index: int = 0
 
 # Eval (reliability track): wall-clock start of the in-flight decision request,
 # used to report engine-observed latency back to the agent service.
@@ -90,6 +97,12 @@ func take_turn() -> void:
 		return
 	if _legal_moves_for(gs).is_empty():
 		return
+	if SEARCH_MODE and not _committed_line.is_empty():
+		if _play_committed_step(gs):
+			return
+		# The committed line is finished or diverged — fall through to a fresh
+		# decision so anything after the planned turn (e.g. an opponent-initiated
+		# showdown where the AI must pass) is still handled instead of hanging.
 
 	_retry_count = 0
 	_last_rejected_move = {}
@@ -102,6 +115,18 @@ func take_turn() -> void:
 func _request_decision(gs: GameState) -> void:
 	_pending_brief_state = BriefStateSerializer.serialize(gs, player_index)
 	_on_session_changed(_pending_brief_state.get("game_id", ""))
+	_candidate_lines = []
+	_search_stats = {}
+	if SEARCH_MODE and _should_run_search(gs):
+		var searcher = TurnSearchScript.new()
+		var result: Dictionary = searcher.search(gs, player_index, {"mode": "main"})
+		_candidate_lines = result.get("candidate_lines", [])
+		_search_stats = result.get("search_stats", {})
+	elif SEARCH_MODE and _should_run_reactive_search(gs):
+		var reactive = TurnSearchScript.new()
+		var rresult: Dictionary = reactive.search(gs, player_index, {"mode": "reactive"})
+		_candidate_lines = rresult.get("candidate_lines", [])
+		_search_stats = rresult.get("search_stats", {})
 
 	var payload := JSON.stringify(_build_request_payload())
 	var headers := PackedStringArray(["Content-Type: application/json"])
@@ -127,6 +152,9 @@ func _build_request_payload() -> Dictionary:
 			"rejected_move": _last_rejected_move,
 			"rejection_reason": _last_rejection_reason,
 		}
+	if SEARCH_MODE and not _candidate_lines.is_empty():
+		payload["candidate_lines"] = _candidate_lines
+		payload["search_stats"] = _search_stats
 	return payload
 
 
@@ -167,15 +195,24 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 
 	# Store decision for potential rejection context on next call
 	_last_rejected_move = move_dict
+	if SEARCH_MODE and decision.has("chosen_line_id"):
+		_commit_chosen_line(str(decision.get("chosen_line_id", "")))
 
 	# Submit the command.  submit_command sets controller.last_command_error if it
 	# produced an [ERROR] log, letting us distinguish real rejections from normal
 	# "still my turn" situations.
 	_submit(cmd)
+	if SEARCH_MODE and not _committed_line.is_empty():
+		# The first command (decision.move) is step 0 of the committed line; it
+		# was just submitted above. Remaining steps are replayed by take_turn via
+		# _play_committed_step. No pre-hash check on step 0 — we are at the root
+		# state the search planned from.
+		_committed_line_index = 1
 
 	# Rejection detected: retry immediately (synchronously, before any deferred
 	# _trigger_ai_turn fires) so _waiting_for_http is set before the next take_turn().
 	if controller.last_command_error:
+		_drop_committed_line()
 		_last_rejection_reason = "Game engine rejected the command."
 		_report_outcome(false, _last_rejection_reason)
 		if _retry_count < MAX_RETRIES:
@@ -430,6 +467,92 @@ func _get_ready_units_at_base(gs: GameState) -> Array:
 	return result
 
 
+# ── Search line execution ──────────────────────────────────────────────────────
+
+func _should_run_search(gs: GameState) -> bool:
+	return SEARCH_MODE \
+		and _committed_line.is_empty() \
+		and _last_rejected_move.is_empty() \
+		and gs.turn_player_index == player_index \
+		and gs.current_phase == TurnStateMachine.Phase.MAIN \
+		and gs.current_state == TurnStateMachine.State.NEUTRAL_OPEN
+
+
+# Reactive search fires when the AI holds a response window in a chain or
+# showdown — on EITHER player's turn. This covers two cases the user asked for:
+#   1. The opponent interferes mid-line (their reaction opens a chain / contests
+#      a showdown): the committed line diverges, take_turn falls through here,
+#      and we search the AI's responses until the window resolves.
+#   2. It is the opponent's turn and the AI gets a chance to interfere: same
+#      window, same reactive search.
+# It deliberately does NOT require the AI's own turn. pending_choice / mulligan /
+# combat_assignment are left to the staged agent (not chain/showdown windows).
+func _should_run_reactive_search(gs: GameState) -> bool:
+	if not SEARCH_MODE or not _committed_line.is_empty() or not _last_rejected_move.is_empty():
+		return false
+	if not gs.pending_prompt.is_empty() or gs.combat_assignment_active:
+		return false
+	if gs.is_closed_chain_state() and gs.priority_player_index == player_index:
+		return true
+	if gs.current_state == TurnStateMachine.State.SHOWDOWN_OPEN and gs.focus_player_index == player_index:
+		return true
+	return false
+
+
+func _commit_chosen_line(line_id: String) -> void:
+	_committed_line = {}
+	_committed_line_index = 0
+	for line in _candidate_lines:
+		if str(line.get("line_id", "")) == line_id:
+			_committed_line = line
+			return
+
+
+# Replay the next step of the committed line. Each step carries the state hash
+# Play the next step of the committed line. Each step carries the state hash
+# the search expected to see at this point (pre_hash). If the live state no
+# longer matches — the opponent interacted, or anything diverged from the
+# simulated "if-unanswered" line — the line is abandoned.
+# Intermediate steps (the AI's own target choices / showdown-focus passes) are
+# regular steps here, so the line carries across them without a fresh search.
+#
+# Returns true if a committed step was submitted (the line is still in control);
+# false if the line is finished or diverged and the caller should request a
+# fresh decision. Returning false instead of dead-ending is what prevents the AI
+# from hanging once its planned turn is exhausted but it is later asked to act
+# again (e.g. passing an opponent-initiated showdown).
+func _play_committed_step(gs: GameState) -> bool:
+	var moves: Array = _committed_line.get("moves", [])
+	if _committed_line_index >= moves.size():
+		_drop_committed_line()
+		return false
+	var hashes: Array = _committed_line.get("expected_pre_hashes", [])
+	var idx := _committed_line_index
+	if idx < hashes.size():
+		var expected := str(hashes[idx])
+		if expected != "" and _live_hash(gs) != expected:
+			_drop_committed_line()
+			return false
+	var cmd := str(moves[idx])
+	_submit(cmd)
+	_committed_line_index += 1
+	if controller.last_command_error:
+		_drop_committed_line()
+		return false
+	return true
+
+
+func _drop_committed_line() -> void:
+	_committed_line = {}
+	_committed_line_index = 0
+
+
+func _live_hash(gs: GameState) -> String:
+	var sim = MoveSimulatorScript.new()
+	sim._ai_index = player_index
+	return MoveSimulator.structural_hash(sim._snapshot(gs))
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 func _can_act_now(gs: GameState) -> bool:
@@ -459,6 +582,7 @@ func _on_session_changed(new_id: String) -> void:
 	_last_rejected_move = {}
 	_last_rejection_reason = ""
 	_move_seq = 0
+	_drop_committed_line()
 
 
 func _active_game_id(gs: GameState) -> String:

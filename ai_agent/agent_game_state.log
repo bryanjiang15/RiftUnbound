@@ -1,0 +1,828 @@
+Riftbound AI Agent — Game State Log
+Started: 2026-06-25 04:04:54 UTC
+========================================================================
+
+------------------------------------------------------------------------
+Turn 1  Event: ai_decision  Actor: ai  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:05:52Z]
+------------------------------------------------------------------------
+Description: Mulligan
+Decision type: mulligan
+Command: mulligan mountain-drake
+
+State after event:
+Turn 1 | Phase: Main Phase | State: Neutral Open | Decision type: **main_phase**
+Acting context: Focus=opponent | Priority=you
+My score: 0 | Opponent score: 0 | Victory: 8 pts
+
+Resources: 2E playable  BOD×2  [2 untapped (2 body)]
+
+Hand (5 cards):
+  wielder-of-water — Wielder of Water [unit] (3E) Might:2
+    Effect: While I'm attacking or defending alone, I have +2 Might.
+  playful-phantom-2 — Playful Phantom [unit] (5E) Might:5
+  stormclaw-ursine-2 — Stormclaw Ursine [unit] (7E) Might:6 tank
+    Effect: Tank (I must be assigned combat damage first.) When you play me, channel 1 rune exhausted.
+  wielder-of-water-2 — Wielder of Water [unit] (3E) Might:2
+    Effect: While I'm attacking or defending alone, I have +2 Might.
+  stalwart-poro-3 — Stalwart Poro [unit] (2E) Might:2 shield
+    Effect: Shield (+1 Might while I'm a defender.)
+
+Opponent hand size: 4
+
+[battlefield-a] Zaun Warrens — uncontrolled
+  Effect: When you conquer here, discard 1, then draw 1.
+[battlefield-b] Fortified Position — uncontrolled
+  Effect: When you defend here, choose a unit. It gains Shield 2 this combat. (+2 Might while it's a defender.)
+
+Legal moves (2 total) — pick ONE value per [slot]:
+    play stalwart-poro-3 [to: base]
+    end turn
+  Typed legal actions:
+```json
+[
+  {
+    "action": "play_card",
+    "params": {
+      "card_id": "stalwart-poro-3",
+      "from_champion": false,
+      "from_hidden": false,
+      "accelerate": false
+    },
+    "label": "play stalwart-poro-3",
+    "raw_command": "play stalwart-poro-3"
+  },
+  {
+    "action": "end_turn",
+    "params": {},
+    "label": "end turn",
+    "raw_command": "end turn"
+  }
+]
+```
+  Use list_legal_moves for a fresh full list if needed.
+
+
+------------------------------------------------------------------------
+Turn 1  Event: ai_decision  Actor: ai  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:05:55Z]
+------------------------------------------------------------------------
+Description: Play stalwart-poro-3
+Decision type: main_phase
+Command: play stalwart-poro-3
+
+State after event:
+Turn 1 | Phase: Main Phase | State: Neutral Open | Decision type: **main_phase**
+Acting context: Focus=opponent | Priority=you
+My score: 0 | Opponent score: 0 | Victory: 8 pts
+
+Resources: 0E playable  [0 untapped (none) | 2 exhausted (2 body)]
+
+Hand (4 cards):
+  wielder-of-water — Wielder of Water [unit] (3E) Might:2
+    Effect: While I'm attacking or defending alone, I have +2 Might.
+  playful-phantom-2 — Playful Phantom [unit] (5E) Might:5
+  stormclaw-ursine-2 — Stormclaw Ursine [unit] (7E) Might:6 tank
+    Effect: Tank (I must be assigned combat damage first.) When you play me, channel 1 rune exhausted.
+  wielder-of-water-2 — Wielder of Water [unit] (3E) Might:2
+    Effect: While I'm attacking or defending alone, I have +2 Might.
+
+My base units: stalwart-poro-3(2MHT*)
+Opponent hand size: 4
+
+[battlefield-a] Zaun Warrens — uncontrolled
+  Effect: When you conquer here, discard 1, then draw 1.
+[battlefield-b] Fortified Position — uncontrolled
+  Effect: When you defend here, choose a unit. It gains Shield 2 this combat. (+2 Might while it's a defender.)
+
+Legal moves (1 total) — pick ONE value per [slot]:
+    end turn
+  Typed legal actions:
+```json
+[
+  {
+    "action": "end_turn",
+    "params": {},
+    "label": "end turn",
+    "raw_command": "end turn"
+  }
+]
+```
+  Use list_legal_moves for a fresh full list if needed.
+
+
+------------------------------------------------------------------------
+Turn 2  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:06:03Z]
+------------------------------------------------------------------------
+Description: played chemtech-enforcer
+
+
+------------------------------------------------------------------------
+Turn 2  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:06:07Z]
+------------------------------------------------------------------------
+Description: chose flame-chompers
+
+
+------------------------------------------------------------------------
+Turn 2  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:06:10Z]
+------------------------------------------------------------------------
+Description: chose yes
+
+
+------------------------------------------------------------------------
+Turn 2  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:06:13Z]
+------------------------------------------------------------------------
+Description: ended their turn
+
+
+------------------------------------------------------------------------
+Turn 3  Event: ai_decision  Actor: ai  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:06:18Z]
+------------------------------------------------------------------------
+Description: Move stalwart-poro-3 to battlefield-a
+Decision type: main_phase
+Command: move stalwart-poro-3 to battlefield-a
+
+State after event:
+Turn 3 | Phase: Main Phase | State: Showdown Open | Decision type: **showdown_focus**
+Acting context: Focus=you | Priority=you
+My score: 0 | Opponent score: 0 | Victory: 8 pts
+
+Resources: 4E playable  BOD×3 CAL×1  [4 untapped (3 body, 1 calm)]
+
+Hand (5 cards):
+  wielder-of-water — Wielder of Water [unit] (3E) Might:2
+    Effect: While I'm attacking or defending alone, I have +2 Might.
+  playful-phantom-2 — Playful Phantom [unit] (5E) Might:5
+  stormclaw-ursine-2 — Stormclaw Ursine [unit] (7E) Might:6 tank
+    Effect: Tank (I must be assigned combat damage first.) When you play me, channel 1 rune exhausted.
+  wielder-of-water-2 — Wielder of Water [unit] (3E) Might:2
+    Effect: While I'm attacking or defending alone, I have +2 Might.
+  master-yi-honed — Master Yi - Honed [unit] (7E+1.0BOD) Might:6 ganking
+    Effect: Ganking (I can move from battlefield to battlefield.) I enter ready.
+
+Opponent base units: chemtech-enforcer(2MHT*), flame-chompers(3MHT*)
+Opponent hand size: 3
+
+[battlefield-a] Zaun Warrens — uncontrolled
+  Effect: When you conquer here, discard 1, then draw 1.
+  My units: stalwart-poro-3(2MHT)
+[battlefield-b] Fortified Position — uncontrolled
+  Effect: When you defend here, choose a unit. It gains Shield 2 this combat. (+2 Might while it's a defender.)
+
+Legal moves (1 total) — pick ONE value per [slot]:
+    pass
+  Typed legal actions:
+```json
+[
+  {
+    "action": "pass",
+    "params": {},
+    "label": "pass",
+    "raw_command": "pass"
+  }
+]
+```
+  Use list_legal_moves for a fresh full list if needed.
+
+
+------------------------------------------------------------------------
+Turn 3  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:06:23Z]
+------------------------------------------------------------------------
+Description: passed
+
+
+------------------------------------------------------------------------
+Turn 4  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:08:37Z]
+------------------------------------------------------------------------
+Description: played gust-3
+
+
+------------------------------------------------------------------------
+Turn 4  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:08:44Z]
+------------------------------------------------------------------------
+Description: chose stalwart-poro-3
+
+
+------------------------------------------------------------------------
+Turn 4  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:08:51Z]
+------------------------------------------------------------------------
+Description: passed
+
+
+------------------------------------------------------------------------
+Turn 4  Event: chain_resolved  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:08:51Z]
+------------------------------------------------------------------------
+Description: Resolving: [P1] Gust
+
+State after event:
+Turn 4 | Phase: Main Phase | State: Neutral Open | Decision type: **main_phase**
+Acting context: Focus=opponent | Priority=opponent
+My score: 1 | Opponent score: 0 | Victory: 8 pts
+
+Resources: 4E playable  BOD×3 CAL×1  [4 untapped (3 body, 1 calm)]
+
+Hand (6 cards):
+  playful-phantom-2 — Playful Phantom [unit] (5E) Might:5
+  stormclaw-ursine-2 — Stormclaw Ursine [unit] (7E) Might:6 tank
+    Effect: Tank (I must be assigned combat damage first.) When you play me, channel 1 rune exhausted.
+  wielder-of-water-2 — Wielder of Water [unit] (3E) Might:2
+    Effect: While I'm attacking or defending alone, I have +2 Might.
+  master-yi-honed — Master Yi - Honed [unit] (7E+1.0BOD) Might:6 ganking
+    Effect: Ganking (I can move from battlefield to battlefield.) I enter ready.
+  gentlemens-duel-2 — Gentlemen's Duel [spell] (6E+1.0BOD) action
+    Effect: Action (Play on your turn or in showdowns.) Give a friendly unit +3 Might this turn. Then choose an enemy unit. They deal damage equal to their Mights to each other.
+  stalwart-poro-3 — Stalwart Poro [unit] (2E) Might:2 shield
+    Effect: Shield (+1 Might while I'm a defender.)
+
+Opponent base units: chemtech-enforcer(2MHT), flame-chompers(3MHT)
+Opponent hand size: 3
+
+[battlefield-a] Zaun Warrens — P2
+  Effect: When you conquer here, discard 1, then draw 1.
+[battlefield-b] Fortified Position — uncontrolled
+  Effect: When you defend here, choose a unit. It gains Shield 2 this combat. (+2 Might while it's a defender.)
+
+
+
+------------------------------------------------------------------------
+Turn 4  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:09:07Z]
+------------------------------------------------------------------------
+Description: moved unit to battlefield-a
+
+
+------------------------------------------------------------------------
+Turn 4  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:09:10Z]
+------------------------------------------------------------------------
+Description: passed
+
+
+------------------------------------------------------------------------
+Turn 4  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:09:22Z]
+------------------------------------------------------------------------
+Description: moved unit to battlefield-b
+
+
+------------------------------------------------------------------------
+Turn 4  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:09:30Z]
+------------------------------------------------------------------------
+Description: chose fading-memories
+
+
+------------------------------------------------------------------------
+Turn 4  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:09:37Z]
+------------------------------------------------------------------------
+Description: moved unit to battlefield-b
+
+
+------------------------------------------------------------------------
+Turn 4  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:09:39Z]
+------------------------------------------------------------------------
+Description: passed
+
+
+------------------------------------------------------------------------
+Turn 4  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:09:51Z]
+------------------------------------------------------------------------
+Description: played jinx-demolitionist
+
+
+------------------------------------------------------------------------
+Turn 4  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:09:58Z]
+------------------------------------------------------------------------
+Description: chose jinx-demolitionist-2
+
+
+------------------------------------------------------------------------
+Turn 4  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:10:03Z]
+------------------------------------------------------------------------
+Description: chose get-excited
+
+
+------------------------------------------------------------------------
+Turn 4  Event: opponent_action  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:10:05Z]
+------------------------------------------------------------------------
+Description: ended their turn
+
+
+------------------------------------------------------------------------
+Turn 5  Event: ai_decision  Actor: ai  Game: Player 1-vs-Master Yi (Calm/Body)-1782360334-1b82484a  [2026-06-25T04:10:11Z]
+------------------------------------------------------------------------
+Description: Play stalwart-poro-3
+Decision type: main_phase
+Command: play stalwart-poro-3
+
+State after event:
+Turn 5 | Phase: Main Phase | State: Neutral Open | Decision type: **main_phase**
+Acting context: Focus=opponent | Priority=you
+My score: 1 | Opponent score: 2 | Victory: 8 pts
+
+Resources: 4E playable  BOD×2 CAL×2  [4 untapped (2 body, 2 calm) | 2 exhausted (2 body)]
+
+Hand (6 cards):
+  playful-phantom-2 — Playful Phantom [unit] (5E) Might:5
+  stormclaw-ursine-2 — Stormclaw Ursine [unit] (7E) Might:6 tank
+    Effect: Tank (I must be assigned combat damage first.) When you play me, channel 1 rune exhausted.
+  wielder-of-water-2 — Wielder of Water [unit] (3E) Might:2
+    Effect: While I'm attacking or defending alone, I have +2 Might.
+  master-yi-honed — Master Yi - Honed [unit] (7E+1.0BOD) Might:6 ganking
+    Effect: Ganking (I can move from battlefield to battlefield.) I enter ready.
+  gentlemens-duel-2 — Gentlemen's Duel [spell] (6E+1.0BOD) action
+    Effect: Action (Play on your turn or in showdowns.) Give a friendly unit +3 Might this turn. Then choose an enemy unit. They deal damage equal to their Mights to each other.
+  mountain-drake-2 — Mountain Drake [unit] (9E) Might:10
+
+My base units: stalwart-poro-3(2MHT*)
+Opponent base units: jinx-demolitionist(4MHT*)
+Opponent hand size: 1
+
+[battlefield-a] Zaun Warrens — P1
+  Effect: When you conquer here, discard 1, then draw 1.
+  Opp units: flame-chompers(3MHT)
+[battlefield-b] Fortified Position — P1
+  Effect: When you defend here, choose a unit. It gains Shield 2 this combat. (+2 Might while it's a defender.)
+  Opp units: chemtech-enforcer(2MHT)
+
+Legal moves (2 total) — pick ONE value per [slot]:
+    play wielder-of-water-2 [to: base]
+    end turn
+  Typed legal actions:
+```json
+[
+  {
+    "action": "play_card",
+    "params": {
+      "card_id": "wielder-of-water-2",
+      "from_champion": false,
+      "from_hidden": false,
+      "accelerate": false
+    },
+    "label": "play wielder-of-water-2",
+    "raw_command": "play wielder-of-water-2"
+  },
+  {
+    "action": "end_turn",
+    "params": {},
+    "label": "end turn",
+    "raw_command": "end turn"
+  }
+]
+```
+  Use list_legal_moves for a fresh full list if needed.
+
+
+------------------------------------------------------------------------
+Turn 1  Event: ai_decision  Actor: ai  Game: Master Yi (Calm/Body)-vs-Player 2-1782360779-8c84af9b  [2026-06-25T04:13:13Z]
+------------------------------------------------------------------------
+Description: Mulligan
+Decision type: mulligan
+Command: mulligan keep
+
+State after event:
+Turn 1 | Phase: Main Phase | State: Neutral Open | Decision type: **main_phase**
+Acting context: Focus=opponent | Priority=you
+My score: 0 | Opponent score: 0 | Victory: 8 pts
+
+Resources: 2E playable  FUR×2  [2 untapped (2 fury)]
+
+Hand (5 cards):
+  chemtech-enforcer-3 — Chemtech Enforcer [unit] (2E) Might:2 assault
+    Effect: Assault 2 (+2 Might while I'm an attacker.) When you play me, discard 1.
+  chemtech-enforcer — Chemtech Enforcer [unit] (2E) Might:2 assault
+    Effect: Assault 2 (+2 Might while I'm an attacker.) When you play me, discard 1.
+  scrapheap — Scrapheap [gear] (2E)
+    Effect: When this is played, discarded, or killed, draw 1.
+  traveling-merchant-2 — Traveling Merchant [unit] (2E) Might:2
+    Effect: When I move, discard 1, then draw 1.
+  traveling-merchant-3 — Traveling Merchant [unit] (2E) Might:2
+    Effect: When I move, discard 1, then draw 1.
+
+Opponent hand size: 4
+
+[battlefield-a] Fortified Position — uncontrolled
+  Effect: When you defend here, choose a unit. It gains Shield 2 this combat. (+2 Might while it's a defender.)
+[battlefield-b] Zaun Warrens — uncontrolled
+  Effect: When you conquer here, discard 1, then draw 1.
+
+Legal moves (6 total) — pick ONE value per [slot]:
+    play chemtech-enforcer-3 [to: base]
+    play chemtech-enforcer [to: base]
+    play scrapheap [to: base]
+    play traveling-merchant-2 [to: base]
+    play traveling-merchant-3 [to: base]
+    end turn
+  Typed legal actions:
+```json
+[
+  {
+    "action": "play_card",
+    "params": {
+      "card_id": "chemtech-enforcer-3",
+      "from_champion": false,
+      "from_hidden": false,
+      "accelerate": false
+    },
+    "label": "play chemtech-enforcer-3",
+    "raw_command": "play chemtech-enforcer-3"
+  },
+  {
+    "action": "play_card",
+    "params": {
+      "card_id": "chemtech-enforcer",
+      "from_champion": false,
+      "from_hidden": false,
+      "accelerate": false
+    },
+    "label": "play chemtech-enforcer",
+    "raw_command": "play chemtech-enforcer"
+  },
+  {
+    "action": "play_card",
+    "params": {
+      "card_id": "scrapheap",
+      "from_champion": false,
+      "from_hidden": false,
+      "accelerate": false
+    },
+    "label": "play scrapheap",
+    "raw_command": "play scrapheap"
+  },
+  {
+    "action": "play_card",
+    "params": {
+      "card_id": "traveling-merchant-2",
+      "from_champion": false,
+      "from_hidden": false,
+      "accelerate": false
+    },
+    "label": "play traveling-merchant-2",
+    "raw_command": "play traveling-merchant-2"
+  },
+  {
+    "action": "play_card",
+    "params": {
+      "card_id": "traveling-merchant-3",
+      "from_champion": false,
+      "from_hidden": false,
+      "accelerate": false
+    },
+    "label": "play traveling-merchant-3",
+    "raw_command": "play traveling-merchant-3"
+  },
+  {
+    "action": "end_turn",
+    "params": {},
+    "label": "end turn",
+    "raw_command": "end turn"
+  }
+]
+```
+  Use list_legal_moves for a fresh full list if needed.
+
+
+------------------------------------------------------------------------
+Turn 1  Event: ai_decision  Actor: ai  Game: Master Yi (Calm/Body)-vs-Player 2-1782360779-8c84af9b  [2026-06-25T04:13:16Z]
+------------------------------------------------------------------------
+Description: Play chemtech-enforcer-3
+Decision type: main_phase
+Command: play chemtech-enforcer-3
+
+State after event:
+Turn 1 | Phase: Main Phase | State: Neutral Open | Decision type: **pending_choice**
+Acting context: Focus=opponent | Priority=you
+My score: 0 | Opponent score: 0 | Victory: 8 pts
+
+Resources: 0E playable  [0 untapped (none) | 2 exhausted (2 fury)]
+
+Hand (4 cards):
+  chemtech-enforcer — Chemtech Enforcer [unit] (2E) Might:2 assault
+    Effect: Assault 2 (+2 Might while I'm an attacker.) When you play me, discard 1.
+  scrapheap — Scrapheap [gear] (2E)
+    Effect: When this is played, discarded, or killed, draw 1.
+  traveling-merchant-2 — Traveling Merchant [unit] (2E) Might:2
+    Effect: When I move, discard 1, then draw 1.
+  traveling-merchant-3 — Traveling Merchant [unit] (2E) Might:2
+    Effect: When I move, discard 1, then draw 1.
+
+My base units: chemtech-enforcer-3(2MHT*)
+Opponent hand size: 4
+
+[battlefield-a] Fortified Position — uncontrolled
+  Effect: When you defend here, choose a unit. It gains Shield 2 this combat. (+2 Might while it's a defender.)
+[battlefield-b] Zaun Warrens — uncontrolled
+  Effect: When you conquer here, discard 1, then draw 1.
+
+Legal moves (5 total) — pick ONE value per [slot]:
+    choose chemtech-enforcer
+    choose scrapheap
+    choose traveling-merchant-2
+    choose traveling-merchant-3
+    choose none
+  Typed legal actions:
+```json
+[
+  {
+    "action": "choose",
+    "params": {
+      "target_id": "chemtech-enforcer"
+    },
+    "label": "choose chemtech-enforcer",
+    "raw_command": "choose chemtech-enforcer"
+  },
+  {
+    "action": "choose",
+    "params": {
+      "target_id": "scrapheap"
+    },
+    "label": "choose scrapheap",
+    "raw_command": "choose scrapheap"
+  },
+  {
+    "action": "choose",
+    "params": {
+      "target_id": "traveling-merchant-2"
+    },
+    "label": "choose traveling-merchant-2",
+    "raw_command": "choose traveling-merchant-2"
+  },
+  {
+    "action": "choose",
+    "params": {
+      "target_id": "traveling-merchant-3"
+    },
+    "label": "choose traveling-merchant-3",
+    "raw_command": "choose traveling-merchant-3"
+  },
+  {
+    "action": "choose_none",
+    "params": {},
+    "label": "choose none",
+    "raw_command": "choose none"
+  }
+]
+```
+  Use list_legal_moves for a fresh full list if needed.
+
+=== PENDING CHOICE ===
+Type: choose_discard
+What: [PROMPT] Choose a card to discard (1 remaining) (use: choose <id>)
+Source: Chemtech Enforcer (id: chemtech-enforcer-3)
+Source effect: Assault 2 (+2 Might while I'm an attacker.) When you play me, discard 1.
+Discards: 1 remaining (mandatory)
+Options (use choose <option>): ['chemtech-enforcer', 'scrapheap', 'traveling-merchant-2', 'traveling-merchant-3']
+======================
+
+
+------------------------------------------------------------------------
+Turn 2  Event: opponent_action  Game: Master Yi (Calm/Body)-vs-Player 2-1782360779-8c84af9b  [2026-06-25T04:13:55Z]
+------------------------------------------------------------------------
+Description: played confront
+
+
+------------------------------------------------------------------------
+Turn 2  Event: chain_resolved  Game: Master Yi (Calm/Body)-vs-Player 2-1782360779-8c84af9b  [2026-06-25T04:14:00Z]
+------------------------------------------------------------------------
+Description: Resolving: [P1] Confront
+
+State after event:
+Turn 2 | Phase: Main Phase | State: Neutral Open | Decision type: **main_phase**
+Acting context: Focus=opponent | Priority=opponent
+My score: 0 | Opponent score: 0 | Victory: 8 pts
+
+Resources: 0E playable  [0 untapped (none) | 2 exhausted (2 fury)]
+
+Hand (3 cards):
+  scrapheap — Scrapheap [gear] (2E)
+    Effect: When this is played, discarded, or killed, draw 1.
+  traveling-merchant-2 — Traveling Merchant [unit] (2E) Might:2
+    Effect: When I move, discard 1, then draw 1.
+  traveling-merchant-3 — Traveling Merchant [unit] (2E) Might:2
+    Effect: When I move, discard 1, then draw 1.
+
+My base units: chemtech-enforcer-3(2MHT*)
+Opponent hand size: 5
+
+[battlefield-a] Fortified Position — uncontrolled
+  Effect: When you defend here, choose a unit. It gains Shield 2 this combat. (+2 Might while it's a defender.)
+[battlefield-b] Zaun Warrens — uncontrolled
+  Effect: When you conquer here, discard 1, then draw 1.
+
+
+
+------------------------------------------------------------------------
+Turn 2  Event: opponent_action  Game: Master Yi (Calm/Body)-vs-Player 2-1782360779-8c84af9b  [2026-06-25T04:14:00Z]
+------------------------------------------------------------------------
+Description: passed
+
+
+------------------------------------------------------------------------
+Turn 2  Event: opponent_action  Game: Master Yi (Calm/Body)-vs-Player 2-1782360779-8c84af9b  [2026-06-25T04:14:04Z]
+------------------------------------------------------------------------
+Description: ended their turn
+
+
+------------------------------------------------------------------------
+Turn 3  Event: ai_decision  Actor: ai  Game: Master Yi (Calm/Body)-vs-Player 2-1782360779-8c84af9b  [2026-06-25T04:14:08Z]
+------------------------------------------------------------------------
+Description: Move chemtech-enforcer-3 to battlefield-a
+Decision type: main_phase
+Command: move chemtech-enforcer-3 to battlefield-a
+
+State after event:
+Turn 3 | Phase: Main Phase | State: Showdown Open | Decision type: **showdown_focus**
+Acting context: Focus=you | Priority=you
+My score: 0 | Opponent score: 0 | Victory: 8 pts
+
+Resources: 4E playable  FUR×4  [4 untapped (4 fury)]
+
+Hand (4 cards):
+  scrapheap — Scrapheap [gear] (2E)
+    Effect: When this is played, discarded, or killed, draw 1.
+  traveling-merchant-2 — Traveling Merchant [unit] (2E) Might:2
+    Effect: When I move, discard 1, then draw 1.
+  traveling-merchant-3 — Traveling Merchant [unit] (2E) Might:2
+    Effect: When I move, discard 1, then draw 1.
+  get-excited-2 — Get Excited! [spell] (2E+1.0FUR) action
+    Effect: Action (Play on your turn or in showdowns.) Discard 1. Deal its Energy cost as damage to a unit at a battlefield. (Ignore its Power cost.)
+
+Opponent hand size: 5
+
+[battlefield-a] Fortified Position — uncontrolled
+  Effect: When you defend here, choose a unit. It gains Shield 2 this combat. (+2 Might while it's a defender.)
+  My units: chemtech-enforcer-3(2MHT)
+[battlefield-b] Zaun Warrens — uncontrolled
+  Effect: When you conquer here, discard 1, then draw 1.
+
+Legal moves (2 total) — pick ONE value per [slot]:
+    play get-excited-2 [to: base; target: chemtech-enforcer-3]
+    pass
+  Typed legal actions:
+```json
+[
+  {
+    "action": "pass",
+    "params": {},
+    "label": "pass",
+    "raw_command": "pass"
+  },
+  {
+    "action": "play_card",
+    "params": {
+      "card_id": "get-excited-2",
+      "target_id": "chemtech-enforcer-3",
+      "from_champion": false,
+      "from_hidden": false,
+      "accelerate": false
+    },
+    "label": "play get-excited-2 target chemtech-enforcer-3",
+    "raw_command": "play get-excited-2 target chemtech-enforcer-3"
+  }
+]
+```
+  Use list_legal_moves for a fresh full list if needed.
+
+
+------------------------------------------------------------------------
+Turn 3  Event: opponent_action  Game: Master Yi (Calm/Body)-vs-Player 2-1782360779-8c84af9b  [2026-06-25T04:14:16Z]
+------------------------------------------------------------------------
+Description: passed
+
+
+------------------------------------------------------------------------
+Turn 4  Event: opponent_action  Game: Master Yi (Calm/Body)-vs-Player 2-1782360779-8c84af9b  [2026-06-25T04:14:48Z]
+------------------------------------------------------------------------
+Description: played master-yi-meditative
+
+
+------------------------------------------------------------------------
+Turn 4  Event: opponent_action  Game: Master Yi (Calm/Body)-vs-Player 2-1782360779-8c84af9b  [2026-06-25T04:14:51Z]
+------------------------------------------------------------------------
+Description: ended their turn
+
+
+------------------------------------------------------------------------
+Turn 5  Event: ai_decision  Actor: ai  Game: Master Yi (Calm/Body)-vs-Player 2-1782360779-8c84af9b  [2026-06-25T04:14:55Z]
+------------------------------------------------------------------------
+Description: Play traveling-merchant-3 to battlefield-a
+Decision type: main_phase
+Command: play traveling-merchant-3 to battlefield-a
+
+State after event:
+Turn 5 | Phase: Main Phase | State: Neutral Open | Decision type: **main_phase**
+Acting context: Focus=opponent | Priority=you
+My score: 2 | Opponent score: 0 | Victory: 8 pts
+
+Resources: 3E playable  CHA×1 FUR×2  [3 untapped (1 chaos, 2 fury) | 2 exhausted (2 fury)]
+
+Hand (3 cards):
+  get-excited-2 — Get Excited! [spell] (2E+1.0FUR) action
+    Effect: Action (Play on your turn or in showdowns.) Discard 1. Deal its Energy cost as damage to a unit at a battlefield. (Ignore its Power cost.)
+  blazing-scorcher-2 — Blazing Scorcher [unit] (5E) Might:5 accelerate
+    Effect: Accelerate (You may pay [1] and a fury rune as an additional cost to have me enter ready.)
+  fight-or-flight-2 — Fight or Flight [spell] (2E) hidden, action
+    Effect: Hidden (Hide now for a rainbow rune to react with later for [0].) Action (Play on your turn or in showdowns.) Move a unit from a battlefield to its base.
+
+My base units: jinx-demolitionist(4MHT)
+Opponent base units: master-yi-meditative(4MHT*)
+Opponent hand size: 6
+
+[battlefield-a] Fortified Position — P2
+  Effect: When you defend here, choose a unit. It gains Shield 2 this combat. (+2 Might while it's a defender.)
+  My units: chemtech-enforcer-3(2MHT), traveling-merchant-3(2MHT)
+[battlefield-b] Zaun Warrens — uncontrolled
+  Effect: When you conquer here, discard 1, then draw 1.
+
+Legal moves (8 total) — pick ONE value per [slot]:
+    play get-excited-2 [to: base; target: chemtech-enforcer-3|traveling-merchant-3]
+    play fight-or-flight-2 [to: base; target: chemtech-enforcer-3|traveling-merchant-3]
+    move jinx-demolitionist [to: battlefield-a|battlefield-b]
+    hide fight-or-flight-2 [at: battlefield-a]
+    end turn
+  Typed legal actions:
+```json
+[
+  {
+    "action": "play_card",
+    "params": {
+      "card_id": "get-excited-2",
+      "target_id": "chemtech-enforcer-3",
+      "from_champion": false,
+      "from_hidden": false,
+      "accelerate": false
+    },
+    "label": "play get-excited-2 target chemtech-enforcer-3",
+    "raw_command": "play get-excited-2 target chemtech-enforcer-3"
+  },
+  {
+    "action": "play_card",
+    "params": {
+      "card_id": "get-excited-2",
+      "target_id": "traveling-merchant-3",
+      "from_champion": false,
+      "from_hidden": false,
+      "accelerate": false
+    },
+    "label": "play get-excited-2 target traveling-merchant-3",
+    "raw_command": "play get-excited-2 target traveling-merchant-3"
+  },
+  {
+    "action": "play_card",
+    "params": {
+      "card_id": "fight-or-flight-2",
+      "target_id": "chemtech-enforcer-3",
+      "from_champion": false,
+      "from_hidden": false,
+      "accelerate": false
+    },
+    "label": "play fight-or-flight-2 target chemtech-enforcer-3",
+    "raw_command": "play fight-or-flight-2 target chemtech-enforcer-3"
+  },
+  {
+    "action": "play_card",
+    "params": {
+      "card_id": "fight-or-flight-2",
+      "target_id": "traveling-merchant-3",
+      "from_champion": false,
+      "from_hidden": false,
+      "accelerate": false
+    },
+    "label": "play fight-or-flight-2 target traveling-merchant-3",
+    "raw_command": "play fight-or-flight-2 target traveling-merchant-3"
+  },
+  {
+    "action": "move_unit",
+    "params": {
+      "unit_ids": [
+        "jinx-demolitionist"
+      ],
+      "destination": "battlefield-a"
+    },
+    "label": "move jinx-demolitionist to battlefield-a",
+    "raw_command": "move jinx-demolitionist to battlefield-a"
+  },
+  {
+    "action": "move_unit",
+    "params": {
+      "unit_ids": [
+        "jinx-demolitionist"
+      ],
+      "destination": "battlefield-b"
+    },
+    "label": "move jinx-demolitionist to battlefield-b",
+    "raw_command": "move jinx-demolitionist to battlefield-b"
+  },
+  {
+    "action": "hide_card",
+    "params": {
+      "card_id": "fight-or-flight-2",
+      "battlefield_id": "battlefield-a"
+    },
+    "label": "hide fight-or-flight-2 at battlefield-a",
+    "raw_command": "hide fight-or-flight-2 at battlefield-a"
+  },
+  {
+    "action": "end_turn",
+    "params": {},
+    "label": "end turn",
+    "raw_command": "end turn"
+  }
+]
+```
+  Use list_legal_moves for a fresh full list if needed.
+

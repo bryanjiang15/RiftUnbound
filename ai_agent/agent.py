@@ -34,7 +34,7 @@ from . import planner as planner_module
 from . import router as router_module
 from . import skills as skill_module
 from .memory import Memory
-from .schemas import Decision, LegalActionOption, Move, Plan
+from .schemas import CandidateLine, Decision, LegalActionOption, Move, Plan, SearchStats
 from .system_prompt import build_system_prompt, build_system_prompt_from_modules
 
 logger = logging.getLogger(__name__)
@@ -398,6 +398,22 @@ def _parse_decision(content: str) -> Optional[Decision]:
     except Exception as exc:
         logger.warning("Decision parse failed: %s", exc)
         return None
+
+
+def _parse_line_choice(content: str) -> dict | None:
+    content = content.strip()
+    if content.startswith("```"):
+        content = "\n".join(
+            line for line in content.splitlines()
+            if not line.strip().startswith("```")
+        ).strip()
+    try:
+        data = json.loads(content)
+        if isinstance(data, dict) and data.get("chosen_line_id"):
+            return data
+    except Exception as exc:
+        logger.warning("Line choice parse failed: %s", exc)
+    return None
 
 
 # Modifier keywords that introduce a parameter (or flag) inside a command.
@@ -896,6 +912,144 @@ def _move_from_command(cmd: str) -> Move | None:
     if verb == "choose" and head:
         return Move(action="choose", parameters={"target_id": head[0]})
     return None
+
+
+def _line_move_command(move: Any) -> str:
+    if isinstance(move, str):
+        return move
+    if isinstance(move, Move):
+        return move.to_command()
+    if isinstance(move, dict):
+        try:
+            return Move.model_validate(move).to_command()
+        except Exception:
+            return str(move)
+    return str(move)
+
+
+def _render_line_steps(line: CandidateLine) -> list[dict]:
+    """Render each step of a line as {command, context, kind} so the model can
+    see WHY intermediate steps exist (e.g. 'pass showdown focus', 'choose target
+    X for ability Y') rather than just an opaque command string."""
+    commands = [_line_move_command(m) for m in line.moves]
+    out: list[dict] = []
+    for i, cmd in enumerate(commands):
+        ctx = line.move_contexts[i] if i < len(line.move_contexts) else {}
+        step: dict[str, Any] = {"command": cmd, "kind": ctx.get("kind", "scripted")}
+        context_text = ctx.get("context", "")
+        if context_text:
+            step["context"] = context_text
+        out.append(step)
+    return out
+
+
+async def choose_line(
+    *,
+    brief_state: dict,
+    game_id: str,
+    memory: Memory,
+    candidate_lines: list[CandidateLine],
+    search_stats: SearchStats | None = None,
+    eval_metrics: Optional[dict] = None,
+) -> Decision:
+    """Use the Actor as a compact policy selector over Godot-searched lines."""
+    if not candidate_lines:
+        return _PASS_DECISION
+    metrics = eval_metrics if eval_metrics is not None else {}
+    metrics.setdefault("model_calls", 0)
+    metrics.setdefault("actor_model_calls", 0)
+    skill_module.set_history_context(memory, game_id)
+    legal_ids = {line.line_id for line in candidate_lines}
+    lines_payload = []
+    for line in candidate_lines:
+        lines_payload.append({
+            "line_id": line.line_id,
+            "steps": _render_line_steps(line),
+            "score": line.score,
+            "score_breakdown": line.score_breakdown,
+            "resolved_state": line.resolved_state,
+            "opponent_windows": [w.model_dump() for w in line.opponent_windows],
+        })
+    messages: list[ChatCompletionMessageParam] = [
+        {
+            "role": "system",
+            "content": (
+                "You choose one full-turn line from Godot's engine search. "
+                "Each line is a list of ordered steps. A step's kind is "
+                "'scripted' (a deliberate play) or 'intermediate' (a forced "
+                "sub-decision the engine auto-resolves mid-line, e.g. passing "
+                "showdown focus or choosing an ability target — its 'context' "
+                "explains it). The engine score is mechanical; use "
+                "opponent-history judgement for contested opponent_windows. "
+                "You may call get_opponent_history. "
+                "Respond with raw JSON only: {\"chosen_line_id\":\"line-1\","
+                "\"reasoning\":\"...\"}."
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "turn": brief_state.get("turn_number"),
+                    "decision_type": brief_state.get("decision_type"),
+                    "my_score": brief_state.get("my_score"),
+                    "opponent_score": brief_state.get("opponent_score"),
+                    "search_stats": search_stats.model_dump() if search_stats else {},
+                    "candidate_lines": lines_payload,
+                },
+                indent=2,
+            ),
+        },
+    ]
+    _log_input(game_id, brief_state, messages)
+    tools = [t for t in TOOLS if t.get("function", {}).get("name") == "get_opponent_history"]
+    for round_num in range(3):
+        try:
+            response = await _chat_create(
+                get_client(),
+                metrics=metrics,
+                model=os.environ.get("RIFTBOUND_AI_MODEL", DEFAULT_MODEL),
+                messages=messages,
+                tools=tools,  # type: ignore[arg-type]
+                tool_choice="auto",  # type: ignore[arg-type]
+                temperature=0.2,
+                response_format={"type": "text"},
+            )
+            metrics["model_calls"] = metrics.get("model_calls", 0) + 1
+        except Exception as exc:
+            logger.error("Line selector API error: %s", exc)
+            break
+        msg = response.choices[0].message
+        if msg.tool_calls:
+            messages.append(msg)  # type: ignore[arg-type]
+            for tc in msg.tool_calls:
+                result = _dispatch_tool(tc.function.name, {})
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+            continue
+        parsed = _parse_line_choice(msg.content or "")
+        if parsed and parsed["chosen_line_id"] in legal_ids:
+            chosen = next(line for line in candidate_lines if line.line_id == parsed["chosen_line_id"])
+            commands = [_line_move_command(m) for m in chosen.moves]
+            first_move = _move_from_command(commands[0]) if commands else None
+            if first_move is not None:
+                return Decision(
+                    reasoning=str(parsed.get("reasoning", "Selected searched line.")),
+                    move=first_move,
+                    confidence="high",
+                    alternatives_considered=f"Selected from {len(candidate_lines)} searched lines.",
+                    chosen_line_id=chosen.line_id,
+                )
+        messages.append({"role": "user", "content": "Choose a valid line_id from the provided candidate_lines and return raw JSON only."})
+    best = max(candidate_lines, key=lambda line: line.score)
+    commands = [_line_move_command(m) for m in best.moves]
+    first_move = _move_from_command(commands[0]) if commands else None
+    return Decision(
+        reasoning="Fallback: selected the highest-scoring searched line.",
+        move=first_move or Move(action="pass"),
+        confidence="medium",
+        alternatives_considered=f"Search selector fallback among {len(candidate_lines)} lines.",
+        chosen_line_id=best.line_id,
+    )
 
 
 def _forced_decision(cmd: str) -> Decision | None:

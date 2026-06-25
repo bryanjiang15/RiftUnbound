@@ -41,6 +41,7 @@ from .agent import (
     _PLAN_LOG_PATH,
     _LOG_INPUTS,
     _log_game_state_event,
+    choose_line,
 )
 from .memory import DecisionLogger, Memory
 from .schemas import Decision, DecisionRequest, Move
@@ -55,11 +56,13 @@ logger = logging.getLogger(__name__)
 _memory: Memory | None = None
 _decision_logger: DecisionLogger | None = None
 _pipeline_mode: str = PIPELINE_LEGACY
+_search_enabled: bool = False
+_SEARCH_LOG_PATH = os.path.join(os.path.dirname(__file__), "agent_search.log")
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    global _memory, _decision_logger, _pipeline_mode
+    global _memory, _decision_logger, _pipeline_mode, _search_enabled
     _memory = Memory()
     _decision_logger = DecisionLogger()
     _decision_logger.clear()          # fresh log on every server start
@@ -68,6 +71,12 @@ async def _lifespan(app: FastAPI):
         requested_pipeline
         if requested_pipeline in (PIPELINE_LEGACY, PIPELINE_STAGED)
         else PIPELINE_LEGACY
+    )
+    _search_enabled = os.environ.get("RIFTBOUND_SEARCH", "off").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
     )
     if _LOG_INPUTS:
         _INPUT_LOG_PATH.write_text(
@@ -94,6 +103,7 @@ async def _lifespan(app: FastAPI):
     logger.info("Plan logging: %s", "ENABLED → agent_plans.log" if _LOG_INPUTS else "disabled")
     logger.info("Game state logging: %s", "ENABLED → agent_game_state.log" if _LOG_INPUTS else "disabled")
     logger.info("Pipeline mode: %s", _pipeline_mode)
+    logger.info("Search mode: %s", "ENABLED" if _search_enabled else "disabled")
     yield
     logger.info("Riftbound AI agent service shutting down.")
 
@@ -104,6 +114,114 @@ app = FastAPI(
     version="1.0.0",
     lifespan=_lifespan,
 )
+
+
+def _log_search_payload(game_id: str, request: DecisionRequest) -> None:
+    if not (_LOG_INPUTS and _search_enabled):
+        return
+    if not request.candidate_lines:
+        return
+    try:
+        mode = request.search_stats.mode if request.search_stats else "main"
+        lines = [
+            "",
+            "═" * 72,
+            f"Search payload [{mode}]: game={game_id} "
+            f"turn={request.brief_state.turn_number} "
+            f"type={request.brief_state.decision_type}",
+            "═" * 72,
+        ]
+        if request.search_stats:
+            lines.append("Stats:")
+            lines.append(json.dumps(request.search_stats.model_dump(), indent=2))
+        lines.append("Candidate lines:")
+        for line in request.candidate_lines:
+            lines.append("")
+            lines.append(f"{line.line_id} | score={line.score:.3f}")
+            lines.append("Steps:")
+            commands = [
+                m.to_command() if hasattr(m, "to_command") else str(m)
+                for m in line.moves
+            ]
+            for i, cmd in enumerate(commands):
+                ctx = line.move_contexts[i] if i < len(line.move_contexts) else {}
+                kind = ctx.get("kind", "scripted")
+                context_text = ctx.get("context", "")
+                if kind == "intermediate":
+                    note = context_text or "auto-resolved decision"
+                    lines.append(f"  - {cmd}    ← [intermediate] {note}")
+                elif context_text:
+                    lines.append(f"  - {cmd}    ({context_text})")
+                else:
+                    lines.append(f"  - {cmd}")
+            lines.append("Breakdown:")
+            lines.append(json.dumps(line.score_breakdown, indent=2, default=str))
+            lines.append("Resolved delta:")
+            lines.append(json.dumps(line.resolved_state, indent=2, default=str))
+            if line.opponent_windows:
+                lines.append("Opponent windows:")
+                lines.append(json.dumps([w.model_dump() for w in line.opponent_windows], indent=2))
+        with open(_SEARCH_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except Exception as exc:
+        logger.warning("Search log write failed: %s", exc)
+
+
+def _log_search_deferral(game_id: str, request: DecisionRequest) -> None:
+    """Record turns where search mode is on but no candidate lines were supplied,
+    so the decision fell back to the staged/legacy agent pipeline.
+
+    Godot only runs the turn search when, at this decision, it is the AI's turn
+    AND the engine is in the MAIN phase / NEUTRAL_OPEN state (a fresh main-phase
+    choice). `decision_type == "main_phase"` is a catch-all label and does NOT
+    guarantee that state, so we surface the actual phase/state/seat here to make
+    the real deferral cause visible rather than guessed."""
+    if not (_LOG_INPUTS and _search_enabled):
+        return
+    try:
+        bs = request.brief_state
+        my_turn = bs.turn_player_index == bs.my_player_index
+        dtype = str(bs.decision_type).strip().lower()
+        phase = bs.current_phase.strip().lower()
+        state = bs.current_state.strip().lower()
+        reasons = []
+        # chain_reaction / showdown_focus are reactive-search windows; if we
+        # reached the deferral path for one, the reactive search produced no
+        # lines (e.g. nothing but an unavailable response) rather than this being
+        # an ineligible decision type.
+        is_reactive_window = dtype in ("chain_reaction", "showdown_focus")
+        if is_reactive_window:
+            reasons.append(
+                f"reactive window ({dtype}) produced no candidate lines"
+            )
+        else:
+            if not my_turn:
+                reasons.append("not AI's turn")
+            if phase != "main phase":
+                reasons.append(f"phase={bs.current_phase} (need Main Phase)")
+            if state != "neutral open":
+                reasons.append(f"state={bs.current_state} (need Neutral Open)")
+        if request.rejection_context is not None:
+            reasons.append("retry after rejected move")
+        if not reasons:
+            reasons.append(
+                "search ran but returned no candidate lines "
+                "(mid-line execution, or only 'end turn' was legal)"
+            )
+        lines = [
+            "",
+            "═" * 72,
+            f"Search DEFERRED to {_pipeline_mode} agent: "
+            f"game={game_id} turn={bs.turn_number} type={bs.decision_type}",
+            f"  phase={bs.current_phase} state={bs.current_state} "
+            f"turn_player={bs.turn_player_index} me={bs.my_player_index}",
+            "  Reason: " + "; ".join(reasons),
+            "═" * 72,
+        ]
+        with open(_SEARCH_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except Exception as exc:
+        logger.warning("Search deferral log write failed: %s", exc)
 
 
 # ── Main decision endpoint ────────────────────────────────────────────────────
@@ -138,16 +256,30 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
         brief_state.get("decision_type", "?"),
     )
 
+    _log_search_payload(game_id, request)
+
     # Run reasoning loop
     eval_metrics: dict = {}
-    decision = await decide(
-        brief_state=brief_state,
-        game_id=game_id,
-        memory=_memory,
-        rejection_context=rejection_ctx,
-        eval_metrics=eval_metrics,
-        pipeline_mode=_pipeline_mode,
-    )
+    if _search_enabled and request.candidate_lines:
+        decision = await choose_line(
+            brief_state=brief_state,
+            game_id=game_id,
+            memory=_memory,
+            candidate_lines=request.candidate_lines,
+            search_stats=request.search_stats,
+            eval_metrics=eval_metrics,
+        )
+    else:
+        if _search_enabled:
+            _log_search_deferral(game_id, request)
+        decision = await decide(
+            brief_state=brief_state,
+            game_id=game_id,
+            memory=_memory,
+            rejection_context=rejection_ctx,
+            eval_metrics=eval_metrics,
+            pipeline_mode=_pipeline_mode,
+        )
 
     # Record in episodic memory (accepted status unknown until Godot responds)
     try:
