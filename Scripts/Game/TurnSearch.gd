@@ -152,6 +152,7 @@ func _add_leaf(leaves: Array, node: Dictionary, sc: GameController, root_snapsho
 	var leaf := node.duplicate(true)
 	leaf["score"] = scored["score"]
 	leaf["breakdown"] = scored["breakdown"]
+	leaf["features"] = features
 	leaf["resolved_state"] = _sim.build_delta(root_snapshot, snap, sc.gs)
 	leaves.append(leaf)
 
@@ -207,6 +208,7 @@ func _build_candidate_lines(leaves: Array, top_n: int) -> Array:
 			"expected_pre_hashes": pre_hashes,
 			"score": float(leaf.get("score", 0.0)),
 			"score_breakdown": leaf.get("breakdown", {}),
+			"features": leaf.get("features", {}),
 			"resolved_state": leaf.get("resolved_state", {}),
 			"opponent_windows": leaf.get("windows", []),
 		})

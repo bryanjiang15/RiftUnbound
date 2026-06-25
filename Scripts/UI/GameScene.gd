@@ -15,6 +15,12 @@ const MoveFeedbackBoxScript = preload("res://Scripts/UI/MoveFeedbackBox.gd")
 
 var _ai: AIPlayer
 
+# AI vs AI mode: both seats driven by the AI for human observation/analysis.
+const AI_VS_AI_MOVE_DELAY := 3.0  # seconds between AI moves, for readability
+var _ai0: AIPlayer = null
+var _ai1: AIPlayer = null
+var _ai_driving: bool = false
+
 # Human-evaluation feedback flow (set from Main Menu toggle).
 var _human_eval_enabled: bool = false
 var _feedback_shown: bool = false
@@ -27,7 +33,8 @@ var _popup_tex: TextureRect
 # Local human seat — matches BoardView hand visibility (P1 faces, P2 backs).
 const LOCAL_PLAYER_INDEX := 0
 
-# "pvp" = no AI, "pvai" = P2 is AI (default when launched directly)
+# "pvp" = no AI, "pvai" = P2 is AI (default when launched directly),
+# "aivai" = both seats are AI (observation/analysis mode).
 var _game_mode: String = "pvai"
 
 
@@ -39,6 +46,8 @@ func _ready() -> void:
 	_setup_controller()
 	if _game_mode == "pvai":
 		_setup_ai()
+	elif _game_mode == "aivai":
+		_setup_ai_vs_ai()
 	_wire_signals()
 
 
@@ -97,7 +106,9 @@ func _setup_popup() -> void:
 func _setup_controller() -> void:
 	_controller = GameController.new()
 	_controller.name = "GameController"
-	if _game_mode == "pvp":
+	if _game_mode == "pvp" or _game_mode == "aivai":
+		# pvp: no AI. aivai: both seats are driven manually from this scene, so
+		# disable GameController's built-in single-seat AI trigger.
 		_controller._ai_player_index = -1
 
 	# Optional per-match deck overrides set by the Main Menu.
@@ -125,6 +136,54 @@ func _setup_ai() -> void:
 	_ai.setup(_controller, 1)
 	if _human_eval_enabled:
 		_setup_move_feedback_box()
+
+
+func _setup_ai_vs_ai() -> void:
+	# Two AI seats. Both run the same TurnSearch + agent pipeline as Player vs AI;
+	# a per-move delay keeps the play watchable for human analysis.
+	_ai0 = AIPlayer.new()
+	_ai0.name = "AIPlayer0"
+	_controller.add_child(_ai0)
+	_ai0.setup(_controller, 0)
+	_ai0._think_delay = AI_VS_AI_MOVE_DELAY
+
+	_ai1 = AIPlayer.new()
+	_ai1.name = "AIPlayer1"
+	_controller.add_child(_ai1)
+	_ai1.setup(_controller, 1)
+	_ai1._think_delay = AI_VS_AI_MOVE_DELAY
+
+	# Kick the driver once the scene is wired (deferred so it never runs inside a
+	# board_updated emission before the tree has settled).
+	call_deferred("_drive_ai_vs_ai")
+
+
+# Serial driver: whichever seat can act takes one turn, then we poke for the
+# next. The _ai_driving guard + each AIPlayer's _waiting_for_http flag ensure
+# exactly one decision is in flight at a time despite repeated board_updated.
+func _drive_ai_vs_ai() -> void:
+	if _ai_driving:
+		return
+	var gs = _controller.gs if _controller else null
+	if gs == null or gs.game_over:
+		return
+	if _ai0 == null or _ai1 == null:
+		return
+	if _ai0._waiting_for_http or _ai1._waiting_for_http:
+		return
+	var actor: AIPlayer = null
+	if _ai0._can_act_now(gs) and not _ai0._legal_moves_for(gs).is_empty():
+		actor = _ai0
+	elif _ai1._can_act_now(gs) and not _ai1._legal_moves_for(gs).is_empty():
+		actor = _ai1
+	if actor == null:
+		return
+	_ai_driving = true
+	await actor.take_turn()
+	while actor != null and actor._waiting_for_http:
+		await get_tree().process_frame
+	_ai_driving = false
+	call_deferred("_drive_ai_vs_ai")
 
 
 func _setup_move_feedback_box() -> void:
@@ -178,6 +237,9 @@ func _on_board_updated() -> void:
 	_update_console_prompt(gs)
 	if gs.game_over:
 		_maybe_show_feedback(gs)
+		return
+	if _game_mode == "aivai":
+		call_deferred("_drive_ai_vs_ai")
 
 
 func _maybe_show_feedback(gs: GameState) -> void:

@@ -418,6 +418,7 @@ class CandidateLine(BaseModel):
     move_contexts: list[dict[str, Any]] = Field(default_factory=list)
     score: float = 0.0
     score_breakdown: dict[str, Any] = Field(default_factory=dict)
+    features: dict[str, Any] = Field(default_factory=dict)
     resolved_state: dict[str, Any] = Field(default_factory=dict)
     opponent_windows: list[ResponseWindow] = Field(default_factory=list)
 
@@ -442,6 +443,7 @@ class Decision(BaseModel):
     confidence: Optional[str] = None
     alternatives_considered: Optional[Union[str, list]] = None
     chosen_line_id: Optional[str] = None
+    selector_source: Optional[str] = None  # 'llm' | 'fallback' | 'argmax'
 
     @field_validator("alternatives_considered", mode="before")
     @classmethod

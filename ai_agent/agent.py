@@ -951,10 +951,19 @@ async def choose_line(
     candidate_lines: list[CandidateLine],
     search_stats: SearchStats | None = None,
     eval_metrics: Optional[dict] = None,
+    argmax_only: bool = False,
 ) -> Decision:
-    """Use the Actor as a compact policy selector over Godot-searched lines."""
+    """Use the Actor as a compact policy selector over Godot-searched lines.
+
+    When ``argmax_only`` is set (RIFTBOUND_SEARCH_ARGMAX), the LLM round-trip is
+    skipped entirely and the top-scored playable line is returned directly. This
+    is the bulk data-generation / weight-tuning regime; rows are tagged
+    ``selector_source='argmax'`` so the two regimes stay separable.
+    """
     if not candidate_lines:
         return _PASS_DECISION
+    if argmax_only:
+        return _argmax_line(candidate_lines, source="argmax")
     metrics = eval_metrics if eval_metrics is not None else {}
     metrics.setdefault("model_calls", 0)
     metrics.setdefault("actor_model_calls", 0)
@@ -1038,12 +1047,22 @@ async def choose_line(
                     confidence="high",
                     alternatives_considered=f"Selected from {len(candidate_lines)} searched lines.",
                     chosen_line_id=chosen.line_id,
+                    selector_source="llm",
                 )
         messages.append({"role": "user", "content": "Choose a valid line_id from the provided candidate_lines and return raw JSON only."})
     # Fallback: pick the highest-scoring line that actually starts with a usable
     # move. A line with no parseable first move cannot be committed (Godot would
     # replay a move the search never planned), so such lines are skipped and we
     # pass without committing a line if none qualify.
+    return _argmax_line(candidate_lines, source="fallback")
+
+
+def _argmax_line(candidate_lines: list[CandidateLine], *, source: str) -> Decision:
+    """Return the highest-scoring playable line as a Decision (engine argmax).
+
+    Shared by the LLM-selector fallback (``source='fallback'``) and the no-LLM
+    argmax data-generation path (``source='argmax'``).
+    """
     playable: list[tuple[CandidateLine, Move]] = []
     for line in candidate_lines:
         commands = [_line_move_command(m) for m in line.moves]
@@ -1053,12 +1072,18 @@ async def choose_line(
     if not playable:
         return _PASS_DECISION
     best, best_move = max(playable, key=lambda pair: pair[0].score)
+    reasoning = (
+        "Argmax: selected the highest-scoring searched line."
+        if source == "argmax"
+        else "Fallback: selected the highest-scoring searched line."
+    )
     return Decision(
-        reasoning="Fallback: selected the highest-scoring searched line.",
+        reasoning=reasoning,
         move=best_move,
         confidence="medium",
-        alternatives_considered=f"Search selector fallback among {len(candidate_lines)} lines.",
+        alternatives_considered=f"Search selector {source} among {len(candidate_lines)} lines.",
         chosen_line_id=best.line_id,
+        selector_source=source,
     )
 
 

@@ -1,0 +1,95 @@
+﻿Godot Engine v4.6.stable.official.89cea1439 - https://godotengine.org
+
+
+============================================================
+ RiftBound Self-Play  |  2 games  |  seed base 1000
+ server http://127.0.0.1:8766
+============================================================
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+
+ [############------------] 1/2 | P1 0  P2 1  Unfinished 0 | last: seed 1000 -> P2 won (t12)        [ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+[ERROR] Usage: equip <gear-id> target <unit-id>
+
+ [########################] 2/2 | P1 1  P2 1  Unfinished 0 | last: seed 1001 -> P1 won (t16)        
+============================================================
+ Done: 2/2 games finished with a winner
+   P1 wins: 1 (50.0%)
+   P2 wins: 1 (50.0%)
+   Unfinished (turn cap): 0
+============================================================
+godot_console.exe : WARNING: ObjectDB instances leaked at exit (run with --verbose for details).
+At line:2 char:281
++ ... _DELAY="0"; & $g --headless --path . --script res://Scripts/Tools/Sel ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (WARNING: Object...e for details).:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   at: cleanup (core/object/object.cpp:2641)
+ERROR: 7 resources still in use at exit (run with --verbose for details).
+   at: clear (core/io/resource.cpp:810)

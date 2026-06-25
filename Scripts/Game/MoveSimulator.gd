@@ -101,6 +101,9 @@ func build_sim_controller(live_gs: GameState) -> GameController:
 	var sc: GameController = GameControllerScript.new()
 	sc.skip_auto_start = true
 	sc._ai_player_index = -1
+	# Simulation controllers replay hypothetical lines (search / brief-state
+	# windows); their log output is internal and must never echo to the console.
+	sc.quiet_logs = true
 	sc.trigger_dispatcher = TriggerDispatcherScript.new()
 	sc.log_lines.clear()
 	sc.gs = clone

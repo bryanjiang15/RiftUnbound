@@ -5,6 +5,8 @@
 
 # AI agent runtime files
 ai_agent/agent_memory.db
+ai_agent/selfplay.db
+ai_agent/*.db
 ai_agent/agent_decisions.log
 ai_agent/agent_inputs.log
 ai_agent/agent_plans.log

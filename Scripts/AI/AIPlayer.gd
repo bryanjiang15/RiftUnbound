@@ -15,17 +15,25 @@ signal ai_move_completed(description: String, turn: int, move_seq: int)
 
 var controller: GameController
 var player_index: int = 1
+var _think_delay: float = THINK_DELAY
 
 const AGENT_PORT := 8765
-const THINK_DELAY := 0.5       # seconds before each decision
+const THINK_DELAY := 0.5       # seconds before each decision (default; override
+							   # per-instance via RIFTBOUND_AI_THINK_DELAY env)
 const HTTP_TIMEOUT := 30.0     # seconds before falling back to heuristic
 							   # (the agent may make several sequential LLM
 							   # calls per decision; 8s was far too short)
 const MAX_RETRIES := 3         # max rejection retry attempts
 const TurnSearchScript = preload("res://Scripts/Game/TurnSearch.gd")
+const ScoringProfileScript = preload("res://Scripts/Game/ScoringProfile.gd")
+const MulliganHeuristicScript = preload("res://Scripts/AI/MulliganHeuristic.gd")
 
 # Resolved in setup() so it can differ per OS (see _agent_base_url()).
 var AGENT_URL := ""
+
+# Mulligan keep/set-aside priors, loaded from scoring_profile.json["mulligan"].
+# Handled locally by MulliganHeuristic instead of deferring to the agent server.
+var _mulligan_config: Dictionary = {}
 
 # Whether to run the engine-side turn search and ship candidate lines to the
 # agent. The agent service is the single source of truth (it reads RIFTBOUND_SEARCH
@@ -67,6 +75,10 @@ func setup(gc: GameController, pi: int) -> void:
 	# Pre-handshake default from the engine's own env (usually unset); the agent
 	# service's /health response is authoritative and overrides this below.
 	_search_mode = _env_flag("RIFTBOUND_SEARCH")
+	var delay_override := OS.get_environment("RIFTBOUND_AI_THINK_DELAY").strip_edges()
+	if delay_override != "":
+		_think_delay = maxf(0.0, float(delay_override))
+	_mulligan_config = ScoringProfileScript.load_profile().get("mulligan", {})
 	AGENT_URL = _agent_base_url() + "/decision"
 	_http = HTTPRequest.new()
 	_http.timeout = HTTP_TIMEOUT
@@ -112,7 +124,11 @@ func _agent_base_url() -> String:
 	# Use the explicit IPv4 loopback on Windows; "localhost" works elsewhere
 	# (macOS/Linux) where resolution doesn't incur that stall.
 	var host := "127.0.0.1" if OS.get_name() == "Windows" else "localhost"
-	return "http://%s:%d" % [host, AGENT_PORT]
+	var port := AGENT_PORT
+	var port_override := OS.get_environment("RIFTBOUND_AGENT_PORT").strip_edges()
+	if port_override != "" and int(port_override) > 0:
+		port = int(port_override)
+	return "http://%s:%d" % [host, port]
 
 
 func take_turn() -> void:
@@ -130,7 +146,7 @@ func take_turn() -> void:
 		return
 
 	# Delay slightly so the game log is readable
-	await get_tree().create_timer(THINK_DELAY).timeout
+	await get_tree().create_timer(_think_delay).timeout
 	if gs.game_over:
 		return
 
@@ -138,6 +154,13 @@ func take_turn() -> void:
 		return
 	if _legal_moves_for(gs).is_empty():
 		return
+
+	# Mulligan is decided by a local cost/type heuristic (priors from
+	# scoring_profile.json["mulligan"]) rather than a round-trip to the agent.
+	if gs.mulligan_phase and not gs.mulligan_done[player_index]:
+		_submit(MulliganHeuristicScript.choose_command(gs, player_index, _mulligan_config))
+		return
+
 	if _search_mode and not _committed_line.is_empty():
 		if _play_committed_step(gs):
 			return
@@ -389,9 +412,9 @@ func _heuristic_fallback(gs: GameState) -> void:
 	if legal.is_empty():
 		return
 
-	# Mulligan: always keep
+	# Mulligan: use the local cost/type heuristic (same as the main path)
 	if gs.mulligan_phase and not gs.mulligan_done[player_index]:
-		_submit("mulligan keep")
+		_submit(MulliganHeuristicScript.choose_command(gs, player_index, _mulligan_config))
 		return
 
 	# Pending prompt: pick first option
@@ -716,6 +739,9 @@ func _on_board_updated() -> void:
 		return
 	_game_over_reported = true
 	var game_id := _active_game_id(gs)
+	var first_player := -1
+	if controller and controller.has_method("_determine_first_player"):
+		first_player = controller._determine_first_player()
 	var body := {
 		"game_id": game_id,
 		"winner_index": gs.winner_index,
@@ -723,6 +749,8 @@ func _on_board_updated() -> void:
 		"my_score": gs.players[player_index].score,
 		"opp_score": gs.players[1 - player_index].score,
 		"total_turns": gs.turn_number,
+		"first_player_index": first_player,
+		"seed": gs.rng_seed,
 	}
 	_fire_and_forget(AGENT_URL.replace("/decision", "/game_over"), body)
 

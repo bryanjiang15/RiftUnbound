@@ -32,6 +32,11 @@ uvicorn ai_agent.main:app --port 8765 --reload
 | `RIFTBOUND_CLIENT_MAX_RETRIES` | `2` | No | How many times the OpenAI SDK itself retries a failed request (with its own backoff that respects `Retry-After`). |
 | `RIFTBOUND_TRANSIENT_RETRIES` | `3` | No | Extra in-process retries layered on top of the SDK for transient failures (rate limits / 429, timeouts, connection drops, 5xx) before a decision degrades to a fallback `pass`. |
 | `RIFTBOUND_TRANSIENT_BACKOFF_S` | `1.0` | No | Base seconds for exponential backoff between in-process transient retries (used when the error carries no `Retry-After` header). |
+| `RIFTBOUND_SEARCH` | `off` | No | Enables engine search mode. When on, Godot runs `TurnSearch` and posts candidate lines; the server selects a line (via `choose_line`) and captures the tuning dataset (`search_decisions` / `candidate_lines` / `decision_snapshots`). |
+| `RIFTBOUND_SEARCH_ARGMAX` | `off` | No | When on (with search enabled), skips the LLM line-selector round-trip and returns the top-scored line directly. Decisions are tagged `selector_source='argmax'`. Use for bulk data generation / weight tuning. |
+| `RIFTBOUND_DATA_ORIGIN` | `vs_human` | No | Provenance tag stamped on captured `search_decisions` rows: `vs_human`, `self_play`, or `vs_heuristic`. Keeps state distributions separable so they are never silently mixed in tuning. |
+| `RIFTBOUND_DB_PATH` | (default `ai_agent/agent_memory.db`) | No | Override the SQLite database path. Useful to write self-play data to a dedicated file (e.g. `ai_agent/selfplay.db`) instead of the live-play DB. |
+
 
 Notes:
 - `RIFTBOUND_LOG_INPUTS` is the single switch for the input log, the plan log,
@@ -154,3 +159,48 @@ Per-decision rows live in `decision_eval_metrics` (overall + `planner_*` /
 `game_eval_summary`. The scorecard's "Token Usage (planner vs decision agent)"
 section and the `server_side.tokens` block of `--json` surface the breakdown.
 Rows recorded before this feature show zero tokens.
+
+## Tuning dataset (search mode)
+
+When `RIFTBOUND_SEARCH` is on, every engine-searched decision is captured for
+later score tuning (see `docs/Statistical_Analysis_Storage.md`):
+
+- `weight_versions` — the active `Data/AI/scoring_profile.json`, hashed + tagged
+  with the current git SHA, recorded on server start.
+- `search_decisions` — one row per searched decision: chosen/best score, regret,
+  score margin, the chosen line's raw feature vector (`chosen_features_json`) and
+  `score_breakdown`, search stats, `selector_source` (`llm` | `fallback` |
+  `argmax`), `origin`, and the deciding seat (`my_player_index`).
+- `candidate_lines` — every candidate per decision (rank, score, moves, features,
+  breakdown) for search-vs-eval-vs-selection error analysis.
+- `decision_snapshots` — full `BriefState` + extracted scalar columns.
+- Backfilled on `/game_over`: `game_outcome`, `final_score_diff`, and
+  `went_first` (seat-aware, so two-seat self-play under one `game_id` is not
+  cross-contaminated). `games` also stores `first_player_index` and `seed`.
+
+### Self-play data generation
+
+`Scripts/Tools/SelfPlaySim.gd` runs headless AI-vs-AI games where both seats use
+the argmax short-circuit (no LLM), generating bulk tuning data fast.
+
+```bash
+# 1. Start the agent server in argmax self-play mode on a dedicated DB.
+RIFTBOUND_SEARCH=on RIFTBOUND_SEARCH_ARGMAX=on \
+RIFTBOUND_DATA_ORIGIN=self_play RIFTBOUND_DB_PATH=ai_agent/selfplay.db \
+  uvicorn ai_agent.main:app --port 8766
+
+# 2. Run N games against it (Godot headless).
+#    RIFTBOUND_AGENT_PORT points the engine at the server above;
+#    RIFTBOUND_AI_THINK_DELAY=0 removes the per-move readability delay.
+RIFTBOUND_SEARCH=on RIFTBOUND_AGENT_PORT=8766 RIFTBOUND_AI_THINK_DELAY=0 \
+  <godot> --headless --path . --script res://Scripts/Tools/SelfPlaySim.gd -- \
+    --games 50 --seed 1000 --turn-cap 200
+```
+
+Engine-side env vars consumed by `Scripts/AI/AIPlayer.gd`:
+
+| Variable | Default | Description |
+|---|---|---|
+| `RIFTBOUND_AGENT_PORT` | `8765` | Agent server port the engine connects to. |
+| `RIFTBOUND_AI_THINK_DELAY` | `0.5` | Per-decision delay (seconds); set `0` for bulk runs. |
+| `RIFTBOUND_SEARCH` | `off` | Pre-handshake search default (the server's `/health` is authoritative). |

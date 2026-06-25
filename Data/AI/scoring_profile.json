@@ -30,5 +30,12 @@
     "deathknell": 0.2
   },
   "battlefield_weights": { "battlefield-a": 1.5, "battlefield-b": 1.0 },
-  "end_of_turn": { "hand_size_target": 3, "hand_size_weight": 0.3, "rune_weight": 0.2 }
+  "end_of_turn": { "hand_size_target": 3, "hand_size_weight": 0.3, "rune_weight": 0.2 },
+  "mulligan": {
+    "max_set_aside": 2,
+    "keep_threshold": 3.0,
+    "cost_prior": { "0": 3.0, "1": 4.0, "2": 7.0, "3": 5.0, "4": 2.0, "5": 1.0, "default": 0.5 },
+    "low_cost_unit_prior": 10.0,
+    "low_cost_unit_max_cost": 2
+  }
 }

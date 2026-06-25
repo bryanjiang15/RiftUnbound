@@ -27,6 +27,10 @@ var victory_score: int = 8
 # Used by the AI agent to scope episodic memory to this game only.
 var game_session_id: String = ""
 
+# Deck/shuffle seed for this match, when started from a seeded config (self-play
+# reproducibility). Empty string when unseeded. Set in start_game_from_config().
+var rng_seed: String = ""
+
 # Pending prompt for player choices
 var pending_prompt: Dictionary = {}
 

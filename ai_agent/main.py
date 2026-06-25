@@ -57,13 +57,54 @@ _memory: Memory | None = None
 _decision_logger: DecisionLogger | None = None
 _pipeline_mode: str = PIPELINE_LEGACY
 _search_enabled: bool = False
+_argmax_enabled: bool = False
+_weight_version_id: int | None = None
+_data_origin: str = "vs_human"
 _SEARCH_LOG_PATH = os.path.join(os.path.dirname(__file__), "agent_search.log")
+
+
+def _load_scoring_profile() -> str | None:
+    """Read the active scoring profile JSON (the weights being tuned)."""
+    path = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "Data", "AI", "scoring_profile.json"
+    )
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except OSError as exc:
+        logger.warning("Could not read scoring profile at %s: %s", path, exc)
+        return None
+
+
+def _current_git_sha() -> str | None:
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=os.path.dirname(os.path.dirname(__file__)),
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        sha = out.stdout.strip()
+        return sha or None
+    except (OSError, subprocess.SubprocessError):
+        return None
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     global _memory, _decision_logger, _pipeline_mode, _search_enabled
-    _memory = Memory()
+    global _argmax_enabled, _weight_version_id, _data_origin
+    db_path_override = os.environ.get("RIFTBOUND_DB_PATH", "").strip()
+    if db_path_override:
+        from pathlib import Path
+
+        _memory = Memory(db_path=Path(db_path_override))
+        logger.info("Memory DB path override: %s", db_path_override)
+    else:
+        _memory = Memory()
     _decision_logger = DecisionLogger()
     _decision_logger.clear()          # fresh log on every server start
     requested_pipeline = os.environ.get("RIFTBOUND_PIPELINE", PIPELINE_LEGACY).strip().lower()
@@ -78,6 +119,26 @@ async def _lifespan(app: FastAPI):
         "yes",
         "on",
     )
+    _argmax_enabled = os.environ.get("RIFTBOUND_SEARCH_ARGMAX", "off").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    # Provenance tag for captured rows: 'vs_human' (default live play),
+    # 'self_play', or 'vs_heuristic'. The self-play harness sets this so the two
+    # state distributions are never silently mixed in tuning.
+    _data_origin = os.environ.get("RIFTBOUND_DATA_ORIGIN", "vs_human").strip() or "vs_human"
+    # Record the active scoring profile so every captured decision is attributable
+    # to the exact weights that produced it (A/B + tuning provenance).
+    profile_json = _load_scoring_profile()
+    if profile_json is not None:
+        try:
+            _weight_version_id = _memory.record_weight_version(
+                profile_json=profile_json, git_sha=_current_git_sha()
+            )
+        except Exception as exc:
+            logger.warning("Weight version record failed: %s", exc)
     if _LOG_INPUTS:
         _INPUT_LOG_PATH.write_text(
             f"Riftbound AI Agent — Input Log\nStarted: "
@@ -104,6 +165,8 @@ async def _lifespan(app: FastAPI):
     logger.info("Game state logging: %s", "ENABLED → agent_game_state.log" if _LOG_INPUTS else "disabled")
     logger.info("Pipeline mode: %s", _pipeline_mode)
     logger.info("Search mode: %s", "ENABLED" if _search_enabled else "disabled")
+    logger.info("Argmax-only selection: %s", "ENABLED" if _argmax_enabled else "disabled")
+    logger.info("Weight version id: %s", _weight_version_id)
     yield
     logger.info("Riftbound AI agent service shutting down.")
 
@@ -224,6 +287,130 @@ def _log_search_deferral(game_id: str, request: DecisionRequest) -> None:
         logger.warning("Search deferral log write failed: %s", exc)
 
 
+# ── Tuning dataset capture ────────────────────────────────────────────────────
+
+
+def _snapshot_scalars(brief_state: dict) -> dict:
+    """Extract the fast-filter scalar columns from a BriefState dict."""
+    my_units = brief_state.get("my_base_units", []) or []
+    opp_units = brief_state.get("opponent_base_units", []) or []
+    battlefields = brief_state.get("battlefields", []) or []
+    my_index = brief_state.get("my_player_index", 0)
+
+    def _might(units: list) -> int:
+        return sum(int(u.get("current_might", 0) or 0) for u in units if isinstance(u, dict))
+
+    # Battlefield units also carry might; include them in the board-might diff.
+    my_bf_might = 0
+    opp_bf_might = 0
+    bf_control_net = 0
+    for bf in battlefields:
+        if not isinstance(bf, dict):
+            continue
+        my_bf_might += _might(bf.get("my_units", []) or [])
+        opp_bf_might += _might(bf.get("opponent_units", []) or [])
+        controller = bf.get("controller_index", -1)
+        if controller == my_index:
+            bf_control_net += 1
+        elif controller >= 0:
+            bf_control_net -= 1
+
+    board_might_diff = (_might(my_units) + my_bf_might) - (_might(opp_units) + opp_bf_might)
+    return {
+        "my_score": brief_state.get("my_score"),
+        "opp_score": brief_state.get("opponent_score"),
+        "my_energy": brief_state.get("my_energy"),
+        "board_might_diff": board_might_diff,
+        "cards_in_hand": len(brief_state.get("my_hand", []) or []),
+        "cards_in_hand_opp": brief_state.get("opponent_hand_size"),
+        "bf_control_net": bf_control_net,
+    }
+
+
+def _serialize_moves(moves: list) -> list:
+    """Render a candidate line's moves to a JSON-safe list."""
+    out = []
+    for m in moves:
+        if hasattr(m, "model_dump"):
+            out.append(m.model_dump())
+        else:
+            out.append(m)
+    return out
+
+
+def _capture_search_decision(
+    *,
+    game_id: str,
+    decision_index: int,
+    brief_state: dict,
+    request: DecisionRequest,
+    decision: Decision,
+) -> None:
+    """Persist the search_decisions / candidate_lines / decision_snapshots rows."""
+    candidates = list(request.candidate_lines or [])
+    if not candidates:
+        return
+    ranked = sorted(candidates, key=lambda c: c.score, reverse=True)
+    best_score = ranked[0].score
+    second_score = ranked[1].score if len(ranked) > 1 else None
+    score_margin = (best_score - second_score) if second_score is not None else None
+
+    chosen = None
+    if decision.chosen_line_id:
+        chosen = next((c for c in candidates if c.line_id == decision.chosen_line_id), None)
+    chosen_score = chosen.score if chosen is not None else None
+    regret = (best_score - chosen_score) if chosen_score is not None else None
+
+    cand_rows = []
+    for rank, c in enumerate(ranked):
+        cand_rows.append(
+            {
+                "line_id": c.line_id,
+                "rank": rank,
+                "score": c.score,
+                "chosen": bool(chosen is not None and c.line_id == chosen.line_id),
+                "moves": _serialize_moves(c.moves),
+                "breakdown": c.score_breakdown,
+                "features": c.features,
+                "resolved_state": c.resolved_state,
+            }
+        )
+
+    turn = brief_state.get("turn_number", 0)
+    decision_type = brief_state.get("decision_type", "unknown")
+    mode = request.search_stats.mode if request.search_stats else "main"
+
+    _memory.record_search_decision(
+        game_id=game_id,
+        turn=turn,
+        decision_index=decision_index,
+        decision_type=decision_type,
+        mode=mode,
+        my_player_index=brief_state.get("my_player_index"),
+        chosen_line_id=decision.chosen_line_id,
+        chosen_line_score=chosen_score,
+        best_candidate_score=best_score,
+        regret=regret,
+        score_margin=score_margin,
+        num_candidates=len(candidates),
+        chosen_breakdown=(chosen.score_breakdown if chosen is not None else None),
+        chosen_features=(chosen.features if chosen is not None else None),
+        search_stats=(request.search_stats.model_dump() if request.search_stats else None),
+        selector_source=decision.selector_source,
+        selector_reasoning=decision.reasoning,
+        origin=_data_origin,
+        weight_version_id=_weight_version_id,
+        candidates=cand_rows,
+    )
+    _memory.record_decision_snapshot(
+        game_id=game_id,
+        turn=turn,
+        decision_index=decision_index,
+        scalars=_snapshot_scalars(brief_state),
+        brief_state=brief_state,
+    )
+
+
 # ── Main decision endpoint ────────────────────────────────────────────────────
 
 
@@ -268,6 +455,7 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
             candidate_lines=request.candidate_lines,
             search_stats=request.search_stats,
             eval_metrics=eval_metrics,
+            argmax_only=_argmax_enabled,
         )
     else:
         if _search_enabled:
@@ -309,6 +497,23 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
     except Exception as exc:
         logger.warning("Decision metrics record failed: %s", exc)
 
+    # Capture the tuning dataset row (search_decisions + candidate_lines +
+    # decision_snapshots) when this decision came from the engine search.
+    if _search_enabled and request.candidate_lines:
+        try:
+            decision_index = (
+                _memory._decision_counters.get(game_id, 0) - 1 if _memory else 0
+            )
+            _capture_search_decision(
+                game_id=game_id,
+                decision_index=decision_index,
+                brief_state=brief_state,
+                request=request,
+                decision=decision,
+            )
+        except Exception as exc:
+            logger.warning("Search decision capture failed: %s", exc)
+
     # Write human-readable decision log
     if _decision_logger:
         try:
@@ -344,6 +549,8 @@ class GameOverRequest(BaseModel):
     my_score: int
     opp_score: int
     total_turns: int
+    first_player_index: int = -1  # which seat took turn 1 (-1 = unknown)
+    seed: str | None = None       # deck/shuffle seed (self-play reproducibility)
 
 
 class OpponentActionRequest(BaseModel):
@@ -393,6 +600,7 @@ async def game_over_endpoint(body: GameOverRequest) -> dict:
     if _memory is None:
         return {"status": "no-op"}
     outcome = "win" if body.winner_index == body.my_player_index else "loss"
+    first_player = body.first_player_index if body.first_player_index >= 0 else None
     try:
         _memory.record_game_outcome(
             game_id=body.game_id,
@@ -400,9 +608,24 @@ async def game_over_endpoint(body: GameOverRequest) -> dict:
             my_score=body.my_score,
             opp_score=body.opp_score,
             turns_played=body.total_turns,
+            first_player_index=first_player,
+            seed=body.seed,
         )
     except Exception as exc:
         logger.warning("Game outcome record failed: %s", exc)
+
+    # Backfill the tuning dataset: label every search_decisions row for this game
+    # with the final result + initiative. Without this the tuner has no label.
+    try:
+        _memory.backfill_game_outcome(
+            game_id=body.game_id,
+            game_outcome=outcome,
+            final_score_diff=body.my_score - body.opp_score,
+            my_player_index=body.my_player_index,
+            first_player_index=first_player,
+        )
+    except Exception as exc:
+        logger.warning("Search decision backfill failed: %s", exc)
 
     # Aggregate the reliability scorecard for this finished game (eval track).
     try:
