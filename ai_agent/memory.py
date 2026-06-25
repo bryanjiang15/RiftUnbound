@@ -55,13 +55,15 @@ CREATE TABLE IF NOT EXISTS opponent_actions (
 CREATE INDEX IF NOT EXISTS idx_opp_game ON opponent_actions (game_id, turn);
 
 CREATE TABLE IF NOT EXISTS games (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    game_id      TEXT UNIQUE NOT NULL,
-    outcome      TEXT,          -- 'win' | 'loss' | 'draw' | NULL = in progress
-    my_score     INTEGER,
-    opp_score    INTEGER,
-    turns_played INTEGER,
-    timestamp    TEXT NOT NULL
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id            TEXT UNIQUE NOT NULL,
+    outcome            TEXT,    -- 'win' | 'loss' | 'draw' | NULL = in progress
+    my_score           INTEGER,
+    opp_score          INTEGER,
+    turns_played       INTEGER,
+    first_player_index INTEGER, -- which seat took turn 1 (initiative bias control)
+    seed               TEXT,    -- deck/shuffle seed (self-play reproducibility)
+    timestamp          TEXT NOT NULL
 );
 
 -- Server-side reliability metrics: one row per produced decision.
@@ -160,6 +162,81 @@ CREATE TABLE IF NOT EXISTS move_feedback (
     timestamp   TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_move_feedback_game ON move_feedback (game_id, turn);
+
+-- ── Tuning dataset (storage doc §2) ─────────────────────────────────────────
+-- One row per searched decision: the core Texel/CMA-ES training record.
+CREATE TABLE IF NOT EXISTS search_decisions (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id              TEXT    NOT NULL,
+    turn                 INTEGER NOT NULL,
+    decision_index       INTEGER NOT NULL,
+    decision_type        TEXT,
+    mode                 TEXT,        -- 'main' | 'reactive'
+    my_player_index      INTEGER,     -- which seat made this decision (self-play)
+    chosen_line_id       TEXT,
+    chosen_line_score    REAL,
+    best_candidate_score REAL,
+    regret               REAL,        -- best − chosen
+    score_margin         REAL,        -- best − 2nd-best
+    num_candidates       INTEGER NOT NULL DEFAULT 0,
+    chosen_breakdown_json TEXT,       -- per-term score_breakdown of chosen line
+    chosen_features_json  TEXT,       -- raw build_score_features dict (Texel input)
+    search_stats_json    TEXT,        -- nodes/branches/beam/elapsed/stopped_reason
+    selector_source      TEXT,        -- 'llm' | 'fallback' | 'argmax'
+    selector_reasoning   TEXT,
+    origin               TEXT,        -- 'self_play' | 'vs_human' | 'vs_heuristic'
+    -- backfilled at game end:
+    went_first           INTEGER,     -- 1 = deciding seat took turn 1
+    game_outcome         TEXT,        -- 'win' | 'loss' | 'draw'
+    final_score_diff     INTEGER,
+    weight_version_id    INTEGER,
+    timestamp            TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_search_dec_game ON search_decisions (game_id, turn, decision_index);
+
+-- One row per candidate line per searched decision (search vs eval vs selection
+-- error analysis; "was the realized-best line even generated?").
+CREATE TABLE IF NOT EXISTS candidate_lines (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    search_decision_id  INTEGER NOT NULL,
+    line_id             TEXT,
+    rank                INTEGER,
+    score               REAL,
+    chosen              INTEGER NOT NULL DEFAULT 0,
+    moves_json          TEXT,
+    breakdown_json      TEXT,
+    features_json       TEXT,
+    resolved_state_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_cand_lines_dec ON candidate_lines (search_decision_id);
+
+-- Full queryable state at each searched decision (replaces hash-only). Compact
+-- normalized BriefState JSON + extracted scalar columns for fast SQL filtering.
+CREATE TABLE IF NOT EXISTS decision_snapshots (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id           TEXT    NOT NULL,
+    turn              INTEGER NOT NULL,
+    decision_index    INTEGER NOT NULL,
+    my_score          INTEGER,
+    opp_score         INTEGER,
+    my_energy         INTEGER,
+    board_might_diff  INTEGER,
+    cards_in_hand     INTEGER,
+    cards_in_hand_opp INTEGER,
+    bf_control_net    INTEGER,
+    brief_state_json  TEXT,
+    timestamp         TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dec_snap_game ON decision_snapshots (game_id, turn, decision_index);
+
+-- Every scoring profile that produced data, so results are attributable (A/B).
+CREATE TABLE IF NOT EXISTS weight_versions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_hash TEXT UNIQUE NOT NULL,
+    profile_json TEXT NOT NULL,
+    git_sha      TEXT,
+    created_at   TEXT NOT NULL
+);
 """
 
 # Maximum number of recent events (own decisions + opponent actions, merged) to inject into context
@@ -319,22 +396,221 @@ class Memory:
         my_score: int,
         opp_score: int,
         turns_played: int,
+        first_player_index: Optional[int] = None,
+        seed: Optional[str] = None,
     ) -> None:
         """Upsert a completed game record. Called via /game_over."""
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO games (game_id, outcome, my_score, opp_score, turns_played, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO games
+                  (game_id, outcome, my_score, opp_score, turns_played,
+                   first_player_index, seed, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(game_id) DO UPDATE SET
                     outcome=excluded.outcome,
                     my_score=excluded.my_score,
                     opp_score=excluded.opp_score,
                     turns_played=excluded.turns_played,
+                    first_player_index=COALESCE(excluded.first_player_index, games.first_player_index),
+                    seed=COALESCE(excluded.seed, games.seed),
                     timestamp=excluded.timestamp
                 """,
-                (game_id, outcome, my_score, opp_score, turns_played, now),
+                (
+                    game_id,
+                    outcome,
+                    my_score,
+                    opp_score,
+                    turns_played,
+                    first_player_index,
+                    seed,
+                    now,
+                ),
+            )
+
+    # ── Tuning dataset writes (storage doc §2) ──────────────────────────────────
+
+    def record_weight_version(
+        self, *, profile_json: str, git_sha: Optional[str] = None
+    ) -> int:
+        """Upsert the scoring profile that is producing data; return its row id.
+
+        Idempotent on profile content (profile_hash UNIQUE), so restarting the
+        server with an unchanged profile reuses the same weight_version id.
+        """
+        profile_hash = hashlib.sha256(profile_json.encode("utf-8")).hexdigest()
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO weight_versions (profile_hash, profile_json, git_sha, created_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(profile_hash) DO NOTHING
+                """,
+                (profile_hash, profile_json, git_sha, now),
+            )
+            row = conn.execute(
+                "SELECT id FROM weight_versions WHERE profile_hash=?", (profile_hash,)
+            ).fetchone()
+            return int(row["id"]) if row else 0
+
+    def record_search_decision(
+        self,
+        *,
+        game_id: str,
+        turn: int,
+        decision_index: int,
+        decision_type: Optional[str],
+        mode: Optional[str],
+        my_player_index: Optional[int],
+        chosen_line_id: Optional[str],
+        chosen_line_score: Optional[float],
+        best_candidate_score: Optional[float],
+        regret: Optional[float],
+        score_margin: Optional[float],
+        num_candidates: int,
+        chosen_breakdown: Optional[dict],
+        chosen_features: Optional[dict],
+        search_stats: Optional[dict],
+        selector_source: Optional[str],
+        selector_reasoning: Optional[str],
+        origin: Optional[str],
+        weight_version_id: Optional[int],
+        candidates: Optional[list[dict]] = None,
+    ) -> int:
+        """Persist one searched decision plus its candidate lines. Returns row id."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO search_decisions
+                  (game_id, turn, decision_index, decision_type, mode,
+                   my_player_index, chosen_line_id, chosen_line_score, best_candidate_score,
+                   regret, score_margin, num_candidates,
+                   chosen_breakdown_json, chosen_features_json, search_stats_json,
+                   selector_source, selector_reasoning, origin,
+                   weight_version_id, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    game_id,
+                    turn,
+                    decision_index,
+                    decision_type,
+                    mode,
+                    my_player_index,
+                    chosen_line_id,
+                    chosen_line_score,
+                    best_candidate_score,
+                    regret,
+                    score_margin,
+                    num_candidates,
+                    json.dumps(chosen_breakdown) if chosen_breakdown is not None else None,
+                    json.dumps(chosen_features) if chosen_features is not None else None,
+                    json.dumps(search_stats) if search_stats is not None else None,
+                    selector_source,
+                    selector_reasoning,
+                    origin,
+                    weight_version_id,
+                    now,
+                ),
+            )
+            decision_id = int(cur.lastrowid)  # type: ignore[arg-type]
+            for cand in candidates or []:
+                conn.execute(
+                    """
+                    INSERT INTO candidate_lines
+                      (search_decision_id, line_id, rank, score, chosen,
+                       moves_json, breakdown_json, features_json, resolved_state_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        decision_id,
+                        cand.get("line_id"),
+                        cand.get("rank"),
+                        cand.get("score"),
+                        1 if cand.get("chosen") else 0,
+                        json.dumps(cand.get("moves")) if cand.get("moves") is not None else None,
+                        json.dumps(cand.get("breakdown")) if cand.get("breakdown") is not None else None,
+                        json.dumps(cand.get("features")) if cand.get("features") is not None else None,
+                        json.dumps(cand.get("resolved_state")) if cand.get("resolved_state") is not None else None,
+                    ),
+                )
+            return decision_id
+
+    def record_decision_snapshot(
+        self,
+        *,
+        game_id: str,
+        turn: int,
+        decision_index: int,
+        scalars: dict,
+        brief_state: dict,
+    ) -> None:
+        """Persist the full BriefState at a decision + extracted scalar columns."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO decision_snapshots
+                  (game_id, turn, decision_index, my_score, opp_score, my_energy,
+                   board_might_diff, cards_in_hand, cards_in_hand_opp, bf_control_net,
+                   brief_state_json, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    game_id,
+                    turn,
+                    decision_index,
+                    scalars.get("my_score"),
+                    scalars.get("opp_score"),
+                    scalars.get("my_energy"),
+                    scalars.get("board_might_diff"),
+                    scalars.get("cards_in_hand"),
+                    scalars.get("cards_in_hand_opp"),
+                    scalars.get("bf_control_net"),
+                    json.dumps(brief_state),
+                    now,
+                ),
+            )
+
+    def backfill_game_outcome(
+        self,
+        *,
+        game_id: str,
+        game_outcome: str,
+        final_score_diff: int,
+        my_player_index: int,
+        first_player_index: Optional[int],
+    ) -> None:
+        """Label this game's search_decisions with the final result + initiative.
+
+        The single most important wiring step: without it the tuner has no label
+        on its feature vectors. `went_first` is 1 when the deciding seat (always the
+        AI/my seat for captured rows) took turn 1.
+        """
+        went_first: Optional[int]
+        if first_player_index is None:
+            went_first = None
+        else:
+            went_first = 1 if first_player_index == my_player_index else 0
+        with self._connect() as conn:
+            # Seat-aware: only label rows this seat produced, so two-seat self-play
+            # (shared game_id) doesn't cross-contaminate went_first / outcome.
+            conn.execute(
+                """
+                UPDATE search_decisions
+                SET game_outcome=?, final_score_diff=?, went_first=?
+                WHERE game_id=? AND (my_player_index=? OR my_player_index IS NULL)
+                """,
+                (
+                    game_outcome,
+                    final_score_diff,
+                    went_first,
+                    game_id,
+                    my_player_index,
+                ),
             )
 
     # ── Reading ───────────────────────────────────────────────────────────────

@@ -12,6 +12,9 @@ extends RefCounted
 # ResponseWindow schemas in ai_agent/schemas.py. Empty collections are omitted so
 # the presence of a key means "something of this kind changed."
 #
+# Snapshot + scoring-feature math lives in ScoreModel; this file owns only the
+# simulation control flow.
+#
 # See docs/Phase2_5_Engine_Truth_Simulation.md.
 
 const GameControllerScript = preload("res://Scripts/Game/GameController.gd")
@@ -21,15 +24,17 @@ const TriggerDispatcherScript = preload("res://Scripts/Game/TriggerDispatcher.gd
 # never hang on a pathological loop.
 const PLY_BUDGET := 24
 
-var _ai_index: int = 1
+# Seat the simulation treats as the AI. Public so the search can target a seat
+# without reaching into private state.
+var ai_index: int = 1
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
 
 # Simulate a single move to quiescence. Returns a SimResult dict.
-func simulate_move(live_gs: GameState, ai_index: int, move_command: String) -> Dictionary:
-	var line := simulate_line(live_gs, ai_index, [move_command])
+func simulate_move(live_gs: GameState, seat: int, move_command: String) -> Dictionary:
+	var line := simulate_line(live_gs, seat, [move_command])
 	var result := {"legal": line.get("legal", false)}
 	if line.has("error"):
 		result["error"] = line["error"]
@@ -44,13 +49,13 @@ func simulate_move(live_gs: GameState, ai_index: int, move_command: String) -> D
 
 
 # Simulate a scripted line of the AI's own moves. Returns a LineResult dict.
-func simulate_line(live_gs: GameState, ai_index: int, move_commands: Array) -> Dictionary:
-	_ai_index = ai_index
-	var sc: GameController = _build_sim_controller(live_gs)
+func simulate_line(live_gs: GameState, seat: int, move_commands: Array) -> Dictionary:
+	ai_index = seat
+	var sc: GameController = build_sim_controller(live_gs)
 	if sc == null:
 		return {"legal": false, "error": "failed to clone game state"}
 
-	var before := _snapshot(sc.gs)
+	var before := ScoreModel.snapshot(sc.gs, ai_index)
 	var applied: Array = []
 	var windows: Array = []
 	var stopped_reason := "quiescence"
@@ -58,13 +63,13 @@ func simulate_line(live_gs: GameState, ai_index: int, move_commands: Array) -> D
 
 	for cmd in move_commands:
 		var cmd_str := str(cmd)
-		sc.submit_command(_ai_index, cmd_str)
+		sc.submit_command(ai_index, cmd_str)
 		if sc.last_command_error:
 			first_illegal = cmd_str
 			stopped_reason = "illegal"
 			break
 		applied.append(cmd_str)
-		stopped_reason = _advance_to_quiescence(sc, cmd_str, windows)
+		stopped_reason = advance_to_quiescence(sc, cmd_str, windows)
 		if stopped_reason == "game_over":
 			break
 
@@ -77,23 +82,28 @@ func simulate_line(live_gs: GameState, ai_index: int, move_commands: Array) -> D
 		result["first_illegal_move"] = first_illegal
 		# A line that became illegal mid-way still reports the partial resolution
 		# so the agent sees how far it got.
-	var after := _snapshot(sc.gs)
-	result["resolved_if_unanswered"] = _build_delta(before, after, sc.gs)
+	var after := ScoreModel.snapshot(sc.gs, ai_index)
+	result["resolved_if_unanswered"] = build_delta(before, after, sc.gs)
 	if not windows.is_empty():
 		result["opponent_windows"] = windows
+	# Free the simulated controller Node (created via .new(), never tree-attached).
+	sc.free()
 	return result
 
 
 # ── Sim controller setup ──────────────────────────────────────────────────────
 
 
-func _build_sim_controller(live_gs: GameState) -> GameController:
+func build_sim_controller(live_gs: GameState) -> GameController:
 	var clone: GameState = live_gs.clone()
 	if clone == null:
 		return null
 	var sc: GameController = GameControllerScript.new()
 	sc.skip_auto_start = true
 	sc._ai_player_index = -1
+	# Simulation controllers replay hypothetical lines (search / brief-state
+	# windows); their log output is internal and must never echo to the console.
+	sc.quiet_logs = true
 	sc.trigger_dispatcher = TriggerDispatcherScript.new()
 	sc.log_lines.clear()
 	sc.gs = clone
@@ -110,9 +120,14 @@ func _build_sim_controller(live_gs: GameState) -> GameController:
 # deterministic "if-unanswered" line. Every time the seat being passed for is the
 # OPPONENT, a response window is recorded (a class-C branch point the agent must
 # reason about). Opponent pending-prompts are auto-resolved with the first valid
-# choice; the AI's own pending prompts are likewise auto-resolved so the sim
-# yields a concrete resolved board.
-func _advance_to_quiescence(sc: GameController, after_move: String, windows: Array) -> String:
+# choice.
+#
+# The AI's OWN forced choices are resolved inline (not branched into the beam, so
+# they never crowd out strategically distinct lines). When a choice_ranker is
+# supplied and the prompt offers more than one option (e.g. which card to
+# discard, which target to pick), the option that yields the highest-scoring
+# settled board is chosen greedily; otherwise the first valid option is used.
+func advance_to_quiescence(sc: GameController, after_move: String, windows: Array, ai_steps: Array = [], choice_ranker: Callable = Callable()) -> String:
 	var steps := 0
 	while steps < PLY_BUDGET:
 		steps += 1
@@ -122,21 +137,47 @@ func _advance_to_quiescence(sc: GameController, after_move: String, windows: Arr
 
 		# Resolve any outstanding choice prompt first.
 		if not sc.gs.pending_prompt.is_empty():
-			_resolve_prompt(sc)
-			if sc.last_command_error:
-				return "quiescence"
+			var prompt_pi: int = sc.gs.pending_prompt.get("player_index", ai_index)
+			if prompt_pi == ai_index:
+				# The AI's OWN forced choice — resolve it (greedily when a ranker
+				# is given) and capture it as an explicit line step (command +
+				# human-readable context) so the executor replays it instead of
+				# treating it as an unexpected divergence.
+				var pre_hash := ScoreModel.structural_hash(ScoreModel.snapshot(sc.gs, ai_index))
+				var cc := _resolve_ai_prompt(sc, choice_ranker)
+				if sc.last_command_error:
+					return "quiescence"
+				ai_steps.append({
+					"command": cc["command"], "context": cc["context"],
+					"kind": "intermediate", "pre_hash": pre_hash,
+				})
+			else:
+				_resolve_prompt(sc)
+				if sc.last_command_error:
+					return "quiescence"
 			continue
 
 		var seat := _acting_seat(sc.gs)
 		if seat < 0:
 			return "quiescence"
 
-		if seat == 1 - _ai_index:
+		if seat == ai_index:
+			# The AI's own pass in a showdown/chain window — record it as an
+			# intermediate step so the planned line carries the pass forward.
+			var pre_hash := ScoreModel.structural_hash(ScoreModel.snapshot(sc.gs, ai_index))
+			var ctx := _describe_ai_pass(sc.gs)
+			sc.submit_command(seat, "pass")
+			if sc.last_command_error:
+				return "quiescence"
+			ai_steps.append({
+				"command": "pass", "context": ctx,
+				"kind": "intermediate", "pre_hash": pre_hash,
+			})
+		else:
 			_record_window(sc.gs, after_move, windows)
-
-		sc.submit_command(seat, "pass")
-		if sc.last_command_error:
-			return "quiescence"
+			sc.submit_command(seat, "pass")
+			if sc.last_command_error:
+				return "quiescence"
 
 	return "ply_budget"
 
@@ -161,12 +202,13 @@ func _record_window(gs: GameState, after_move: String, windows: Array) -> void:
 		classes = ["Reaction"]
 	elif gs.current_state == TurnStateMachine.State.SHOWDOWN_OPEN:
 		classes = ["Action", "Reaction"]
-	var opp: PlayerState = gs.players[1 - _ai_index]
+	var opp: PlayerState = gs.players[1 - ai_index]
 	windows.append({
 		"after_move": after_move,
 		"opponent_may_respond": true,
 		"legal_response_classes": classes,
 		"opponent_unknown_cards": opp.hand.size(),
+		"opponent_potential_energy": ScoreModel.ready_runes(opp),
 		"note": "auto-passed; opponent could respond here (contested branch not resolved)",
 	})
 
@@ -175,7 +217,7 @@ func _record_window(gs: GameState, after_move: String, windows: Array) -> void:
 # engine's deterministic default). Used for both seats so the board resolves.
 func _resolve_prompt(sc: GameController) -> void:
 	var prompt: Dictionary = sc.gs.pending_prompt
-	var prompt_pi: int = prompt.get("player_index", _ai_index)
+	var prompt_pi: int = prompt.get("player_index", ai_index)
 	var ptype: String = prompt.get("type", "")
 	var choice := "none"
 	var valid: Array = prompt.get("valid_choices", [])
@@ -187,48 +229,96 @@ func _resolve_prompt(sc: GameController) -> void:
 	sc.submit_command(prompt_pi, "choose %s" % choice)
 
 
-# ── State snapshot + delta ────────────────────────────────────────────────────
+# Resolve the AI's own pending prompt and return the {command, context} that was
+# applied. With a valid choice_ranker and more than one option, the option whose
+# settled board scores highest is chosen greedily (so e.g. the AI discards the
+# card that best preserves its position rather than valid_choices[0]); otherwise
+# it mirrors _resolve_prompt's deterministic first-valid selection.
+func _resolve_ai_prompt(sc: GameController, choice_ranker: Callable) -> Dictionary:
+	var prompt: Dictionary = sc.gs.pending_prompt
+	var prompt_pi: int = prompt.get("player_index", ai_index)
+	var ptype: String = prompt.get("type", "")
+	var valid: Array = prompt.get("valid_choices", [])
+	var choice := "none"
+	if ptype == "choose_optional":
+		choice = "yes"
+	elif valid.size() > 1 and choice_ranker.is_valid():
+		choice = _best_choice(sc, valid, choice_ranker)
+	elif not valid.is_empty():
+		var v = valid[0]
+		choice = v.instance_id if v is CardInstance else str(v)
+	var ctx := _describe_prompt(prompt, choice)
+	sc.submit_command(prompt_pi, "choose %s" % choice)
+	return {"command": "choose %s" % choice, "context": ctx}
 
 
-func _snapshot(gs: GameState) -> Dictionary:
-	var me: PlayerState = gs.players[_ai_index]
-	var opp: PlayerState = gs.players[1 - _ai_index]
-	var bf: Dictionary = {}
-	for entry in gs.board.battlefields:
-		bf[entry.battlefield_id] = entry.controller_index
-	var units: Dictionary = {}
-	for u in gs.all_units_on_board():
-		units[u.instance_id] = {
-			"owner": u.owner_index,
-			"location": u.location,
-			"might": u.get_current_might(),
-			"damage": u.damage,
-		}
-	for u in me.get_units_at_base():
-		units[u.instance_id] = {
-			"owner": u.owner_index, "location": "base",
-			"might": u.get_current_might(), "damage": u.damage,
-		}
-	for u in opp.get_units_at_base():
-		units[u.instance_id] = {
-			"owner": u.owner_index, "location": "base",
-			"might": u.get_current_might(), "damage": u.damage,
-		}
-	return {
-		"my_score": me.score,
-		"opp_score": opp.score,
-		"my_hand": me.hand.size(),
-		"my_energy": me.rune_pool.energy,
-		"bf": bf,
-		"units": units,
-	}
+# Pick the prompt option whose fully-settled board scores highest. Each candidate
+# is evaluated on a throwaway clone (resolved to quiescence with the deterministic
+# first-valid policy for any nested choices) so the score reflects the option's
+# real consequences. Falls back to the first option if none resolve cleanly.
+func _best_choice(sc: GameController, valid: Array, choice_ranker: Callable) -> String:
+	var best_id := ""
+	var best_score := -INF
+	for v in valid:
+		var cid: String = v.instance_id if v is CardInstance else str(v)
+		var cand: GameController = build_sim_controller(sc.gs)
+		if cand == null:
+			continue
+		cand.submit_command(ai_index, "choose %s" % cid)
+		if not cand.last_command_error:
+			advance_to_quiescence(cand, "", [], [])
+			var score: float = choice_ranker.call(cand.gs)
+			if score > best_score:
+				best_score = score
+				best_id = cid
+		cand.free()
+	if best_id == "":
+		var v0 = valid[0]
+		best_id = v0.instance_id if v0 is CardInstance else str(v0)
+	return best_id
 
 
-func _build_delta(before: Dictionary, after: Dictionary, gs: GameState) -> Dictionary:
+func _describe_prompt(prompt: Dictionary, choice: String) -> String:
+	var ptype: String = prompt.get("type", "")
+	var src = prompt.get("source", null)
+	var src_name := ""
+	if src != null and src is CardInstance:
+		src_name = src.definition.name
+	match ptype:
+		"choose_target":
+			if src_name != "":
+				return "choose target '%s' for %s's ability" % [choice, src_name]
+			return "choose target '%s' for a triggered ability" % choice
+		"choose_battlefield":
+			return "choose battlefield '%s' to resolve its scoring" % choice
+		"choose_discard":
+			if src_name != "":
+				return "discard '%s' (required by %s)" % [choice, src_name]
+			return "discard '%s'" % choice
+		"choose_optional":
+			if src_name != "":
+				return "accept %s's optional ability" % src_name
+			return "accept an optional ability"
+		_:
+			return "resolve choice: choose '%s'" % choice
+
+
+func _describe_ai_pass(gs: GameState) -> String:
+	if gs.is_closed_chain_state():
+		return "pass priority — let the chain resolve"
+	if gs.current_state == TurnStateMachine.State.SHOWDOWN_OPEN:
+		return "pass showdown focus — let the showdown resolve"
+	return "pass"
+
+
+# ── State delta ───────────────────────────────────────────────────────────────
+
+
+func build_delta(before: Dictionary, after: Dictionary, gs: GameState) -> Dictionary:
 	var delta: Dictionary = {}
 
 	# ── headline: win condition ──
-	delta["wins_game"] = gs.game_over and gs.winner_index == _ai_index
+	delta["wins_game"] = gs.game_over and gs.winner_index == ai_index
 	delta["my_score_after"] = after["my_score"]
 	delta["opp_score_after"] = after["opp_score"]
 
@@ -242,7 +332,7 @@ func _build_delta(before: Dictionary, after: Dictionary, gs: GameState) -> Dicti
 				"controller_before": _ctrl_label(before_ctrl),
 				"controller_after": _ctrl_label(after_ctrl),
 			}
-			if after_ctrl == _ai_index:
+			if after_ctrl == ai_index:
 				conquer = true
 	delta["conquer"] = conquer
 	if not bf_changes.is_empty():
@@ -261,7 +351,7 @@ func _build_delta(before: Dictionary, after: Dictionary, gs: GameState) -> Dicti
 			var bu: Dictionary = before["units"][inst_id]
 			if au["damage"] > bu["damage"]:
 				damaged.append({"id": inst_id, "damage": au["damage"]})
-		if au["owner"] == _ai_index and au["location"] != "base":
+		if au["owner"] == ai_index and au["location"] != "base":
 			my_surviving.append(inst_id)
 	if not killed.is_empty():
 		delta["units_killed"] = killed
@@ -287,9 +377,9 @@ func _build_delta(before: Dictionary, after: Dictionary, gs: GameState) -> Dicti
 
 
 func _ctrl_label(idx: int) -> String:
-	if idx == _ai_index:
+	if idx == ai_index:
 		return "me"
-	if idx == 1 - _ai_index:
+	if idx == 1 - ai_index:
 		return "opponent"
 	return "neutral"
 
@@ -302,7 +392,7 @@ func _trade_string(before: Dictionary, after: Dictionary, killed: Array) -> Stri
 	for inst_id in killed:
 		var u: Dictionary = before["units"][inst_id]
 		var label := "%s (%d might)" % [inst_id, u["might"]]
-		if u["owner"] == _ai_index:
+		if u["owner"] == ai_index:
 			mine.append(label)
 		else:
 			theirs.append(label)
@@ -321,8 +411,8 @@ func _trade_string(before: Dictionary, after: Dictionary, killed: Array) -> Stri
 func _next_decision(gs: GameState) -> String:
 	if gs.game_over:
 		return "game over"
-	if gs.can_player_act(_ai_index):
-		if gs.turn_player_index == _ai_index and gs.current_state == TurnStateMachine.State.NEUTRAL_OPEN:
+	if gs.can_player_act(ai_index):
+		if gs.turn_player_index == ai_index and gs.current_state == TurnStateMachine.State.NEUTRAL_OPEN:
 			return "your main phase"
 		return "your decision"
 	return "opponent's turn"

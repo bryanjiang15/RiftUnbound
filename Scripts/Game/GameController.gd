@@ -16,6 +16,10 @@ var ability_resolver: AbilityResolver = AbilityResolver.new()
 var trigger_dispatcher: TriggerDispatcher = TriggerDispatcherScript.new()
 
 var skip_auto_start: bool = false
+# When true, _log() suppresses console echo of routine game-log lines (errors
+# are still printed). The self-play driver sets this so its own pretty progress
+# output isn't drowned out by per-move logging.
+var quiet_logs: bool = false
 var log_lines: Array[String] = []
 
 var _ai_player_index: int = 1  # which player is AI (-1 = human vs human)
@@ -43,6 +47,7 @@ func start_game_from_config(config: Dictionary) -> void:
 
 	if config.has("seed"):
 		seed(int(config["seed"]))
+		gs.rng_seed = str(config["seed"])
 
 	var p1_path = config.get("p1_deck", P1_DECK)
 	var p2_path = config.get("p2_deck", P2_DECK)
@@ -1986,7 +1991,8 @@ func _log(text: String) -> void:
 	if text.begins_with("[ERROR]"):
 		last_command_error = true
 	game_log_message.emit(text)
-	print(text)
+	if not quiet_logs or text.begins_with("[ERROR]"):
+		print(text)
 
 
 func _maybe_trigger_ai() -> void:

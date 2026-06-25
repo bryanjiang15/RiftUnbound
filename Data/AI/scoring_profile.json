@@ -1,0 +1,41 @@
+{
+  "schema_version": "2.0",
+  "win_game": 1000.0,
+  "state_weights": {
+    "score_diff": 10.0,
+    "battlefield_control": 5.0,
+    "unit_might_on_board": 0.5,
+    "cards_in_hand": 0.3,
+    "runes_available": -0.1,
+    "reactive_potential": 1.0,
+    "unusable_runes": -0.15
+  },
+  "action_weights": {
+    "card_played": 1.0,
+    "unit_moved": 0.2,
+    "card_discarded": -0.5,
+    "enemy_unit_killed": 1.5,
+    "own_unit_lost": -1.5,
+    "battlefield_conquered": 4.0,
+    "point_scored": 8.0,
+    "card_drawn": 0.4,
+    "power_used": -0.05
+  },
+  "keyword_weights": {
+    "assault": 0.4,
+    "shield": 0.4,
+    "tank": 0.6,
+    "ganking": 0.3,
+    "deflect": 0.3,
+    "deathknell": 0.2
+  },
+  "battlefield_weights": { "battlefield-a": 1.5, "battlefield-b": 1.0 },
+  "end_of_turn": { "hand_size_target": 3, "hand_size_weight": 0.3, "rune_weight": 0.2 },
+  "mulligan": {
+    "max_set_aside": 2,
+    "keep_threshold": 3.0,
+    "cost_prior": { "0": 3.0, "1": 4.0, "2": 7.0, "3": 5.0, "4": 2.0, "5": 1.0, "default": 0.5 },
+    "low_cost_unit_prior": 10.0,
+    "low_cost_unit_max_cost": 2
+  }
+}

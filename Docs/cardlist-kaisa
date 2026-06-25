@@ -1,0 +1,436 @@
+OGN-247 Kai'Sa - Daughter of the Void
+Effect
+rb_exhaust: Reaction — Add rb_rune_rainbow. Use only to play spells. (Abilities that add resources can't be reacted to.)
+Title
+Kai'Sa - Daughter of the Void
+Set
+OGN - Origins
+Card Number
+247
+Rarity
+Rare
+Promo
+No
+Legality
+Legal
+Tags
+Kai'Sa
+Card type
+Legend
+Color
+Fury
+Mind
+
+OGN-004 Cleave
+Effect
+Action (Play on your turn or in showdowns.)
+Give a unit Assault 3 this turn. (+3 rb_might while it's an attacker.)
+Flavor
+Nobody ever won a war without attacking.
+Title
+Cleave
+Set
+OGN - Origins
+Card Number
+004
+Rarity
+Common
+Cost
+1
+Promo
+No
+Legality
+Legal
+Card type
+Spell
+Color
+Fury
+
+OGN-009 Hextech Ray
+Effect
+Action (Play on your turn or in showdowns.)
+Deal 3 to a unit at a battlefield.
+Flavor
+“Destroy. Then improve.”
+Title
+Hextech Ray
+Set
+OGN - Origins
+Card Number
+009
+Rarity
+Common
+Cost
+1
+Promo
+No
+Legality
+Legal
+Card type
+Spell
+Color
+Fury
+
+OGN-013 Pouty Poro
+Effect
+Deflect (Opponents must pay rb_rune_rainbow to choose me with a spell or ability.)
+Flavor
+“Braum takes medicine too, see?” — Braum
+Title
+Pouty Poro
+Set
+OGN - Origins
+Card Number
+013
+Rarity
+Common
+Might
+2
+Cost
+2
+Promo
+No
+Legality
+Legal
+Tags
+Poro
+Card type
+Unit
+Color
+Fury
+
+OGN-029 Falling Star
+Effect
+Deal 3 to a unit.
+Deal 3 to a unit.
+Errata
+Deal 3 to a unit.
+Deal 3 to a unit.
+Title
+Falling Star
+Set
+OGN - Origins
+Card Number
+029
+Rarity
+Rare
+Cost
+2
+Promo
+No
+Legality
+Legal
+Card type
+Spell
+Color
+Fury
+
+OGN-012 Noxus Hopeful
+Effect
+Legion — I cost rb_energy_2 less. (Get the effect if you've played another card this turn.)
+Flavor
+First to the front, first to glory.
+Title
+Noxus Hopeful
+Set
+OGN - Origins
+Card Number
+012
+Rarity
+Common
+Might
+4
+Cost
+4
+Promo
+No
+Legality
+Legal
+Tags
+Trifarian
+Noxus
+Card type
+Unit
+Color
+Fury
+
+OGN-027 Darius - Trifarian
+Effect
+When you play your second card in a turn, give me +2 rb_might this turn and ready me.
+Flavor
+“With overwhelming force.”
+Title
+Darius - Trifarian
+Set
+OGN - Origins
+Card Number
+027
+Rarity
+Rare
+Might
+5
+Cost
+5
+Promo
+No
+Legality
+Legal
+Tags
+Trifarian
+Darius
+Noxus
+Card type
+Unit
+Super type
+Champion
+Color
+Fury
+
+OGN-104 Retreat
+Effect
+Reaction (Play any time, even before spells and abilities resolve.)
+Return a friendly unit to its owner's hand. Its owner channels 1 rune exhausted.
+Flavor
+There’s always tomorrow.
+Title
+Retreat
+Set
+OGN - Origins
+Card Number
+104
+Rarity
+Uncommon
+Cost
+1
+Promo
+No
+Legality
+Legal
+Card type
+Spell
+Color
+Mind
+
+OGN-095 Stupefy
+Effect
+Reaction (Play any time, even before spells and abilities resolve.)
+Give a unit -1 rb_might this turn, to a minimum of 1 rb_might. Draw 1.
+Flavor
+It’s easier to outsmart an opponent with a concussion.
+Title
+Stupefy
+Set
+OGN - Origins
+Card Number
+095
+Rarity
+Common
+Cost
+1
+Promo
+No
+Legality
+Legal
+Card type
+Spell
+Color
+Mind
+
+OGN-103 Ravenbloom Student
+Effect
+When you play a spell, give me +1 rb_might this turn.
+Flavor
+A little knowledge is a dangerous thing. A lot of knowledge is awesome.
+Title
+Ravenbloom Student
+Set
+OGN - Origins
+Card Number
+103
+Rarity
+Uncommon
+Might
+2
+Cost
+2
+Promo
+No
+Legality
+Legal
+Tags
+Noxus
+Card type
+Unit
+Color
+Mind
+
+OGN-096 Watchful Sentry
+Effect
+Deathknell — Draw 1. (When I die, get the effect.)
+Flavor
+He may never see home again. But because of him, that home still stands.
+Title
+Watchful Sentry
+Set
+OGN - Origins
+Card Number
+096
+Rarity
+Common
+Might
+1
+Cost
+2
+Promo
+No
+Legality
+Legal
+Tags
+Freljord
+Card type
+Unit
+Color
+Mind
+
+OGN-093 Smoke Screen
+Effect
+Reaction (Play any time, even before spells and abilities resolve.)
+Give a unit -4 rb_might this turn, to a minimum of 1 rb_might.
+Flavor
+“Well, well, well. What have we here?”
+Title
+Smoke Screen
+Set
+OGN - Origins
+Card Number
+093
+Rarity
+Common
+Cost
+2
+Promo
+No
+Legality
+Legal
+Card type
+Spell
+Color
+Mind
+
+OGN-087 Lecturing Yordle
+Effect
+Tank (I must be assigned combat damage first.)
+When you play me, draw 1.
+Flavor
+"... poisonous, but I didn't know that at the time. You see ..."
+Title
+Lecturing Yordle
+Set
+OGN - Origins
+Card Number
+087
+Rarity
+Common
+Might
+2
+Cost
+3
+Promo
+No
+Legality
+Legal
+Tags
+Yordle
+Bandle City
+Card type
+Unit
+Color
+
+OGN-106 Sprite Mother
+Effect
+When you play me, play a ready 3 rb_might Sprite unit token with Temporary here. (Kill it at the start of its controller's Beginning Phase, before scoring.)
+Flavor
+“Come, little ones.”
+Title
+Sprite Mother
+Set
+OGN - Origins
+Card Number
+106
+Rarity
+Uncommon
+Might
+3
+Cost
+4
+Promo
+No
+Legality
+Legal
+Tags
+Fae
+Card type
+Unit
+Color
+Mind
+
+OGN-116 Thousand-Tailed Watcher
+Effect
+Accelerate (You may pay rb_energy_1rb_rune_mind as an additional cost to have me enter ready.)
+When you play me, give enemy units -3 rb_might this turn, to a minimum of 1 rb_might.
+Flavor
+You will know when you've pushed the wilds too far.
+Title
+Thousand-Tailed Watcher
+Set
+OGN - Origins
+Card Number
+116
+Rarity
+Rare
+Might
+7
+Cost
+7
+Promo
+No
+Legality
+Legal
+Tags
+Ionia
+Card type
+Unit
+Color
+Mind
+
+OGN-109 Dr. Mundo - Expert
+Effect
+My Might is increased by the number of cards in your trash.
+At the start of your Beginning Phase, recycle 3 from your trash.
+Flavor
+“This not hurt a bit!”
+Title
+Dr. Mundo - Expert
+Set
+OGN - Origins
+Card Number
+109
+Rarity
+Rare
+Might
+6
+Cost
+8
+Promo
+No
+Legality
+Legal
+Tags
+Dr. Mundo
+Zaun
+Card type
+Unit
+Super type
+Champion
+Color
+Mind

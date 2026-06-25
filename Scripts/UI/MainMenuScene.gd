@@ -110,6 +110,16 @@ func _build_ui() -> void:
 	pvai_entry.get_node("Button").pressed.connect(_on_pvai_pressed)
 	vbox.add_child(pvai_entry)
 
+	# AI vs AI — both seats controlled by the AI, for human analysis/observation.
+	var aivai_entry := _make_entry(
+		"AI vs AI",
+		"Both seats are AI — watch them play (3s per move)",
+		Color(0.22, 0.44, 0.30),
+		Color(0.30, 0.58, 0.40)
+	)
+	aivai_entry.get_node("Button").pressed.connect(_on_aivai_pressed)
+	vbox.add_child(aivai_entry)
+
 	# Footer
 	var footer := Label.new()
 	footer.text = "v0.1 — Riftbound Simulation"
@@ -259,6 +269,13 @@ func _on_pvp_pressed() -> void:
 
 func _on_pvai_pressed() -> void:
 	Engine.set_meta("game_mode", "pvai")
+	_apply_deck_overrides()
+	_apply_eval_override()
+	get_tree().change_scene_to_file("res://Scenes/GameScene.tscn")
+
+
+func _on_aivai_pressed() -> void:
+	Engine.set_meta("game_mode", "aivai")
 	_apply_deck_overrides()
 	_apply_eval_override()
 	get_tree().change_scene_to_file("res://Scenes/GameScene.tscn")

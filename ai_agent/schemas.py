@@ -170,6 +170,7 @@ class ResponseWindow(BaseModel):
     opponent_may_respond: bool = True
     legal_response_classes: list[str] = Field(default_factory=list)
     opponent_unknown_cards: int = 0
+    opponent_potential_energy: int = 0
     note: str = ""
 
 
@@ -401,6 +402,38 @@ class Move(BaseModel):
             return "pass"
 
 
+class ScoringProfile(BaseModel):
+    schema_version: str = "2.0"
+    win_game: float = 1000.0
+    state_weights: dict[str, float] = Field(default_factory=dict)
+    action_weights: dict[str, float] = Field(default_factory=dict)
+    keyword_weights: dict[str, float] = Field(default_factory=dict)
+    battlefield_weights: dict[str, float] = Field(default_factory=dict)
+    end_of_turn: dict[str, Any] = Field(default_factory=dict)
+
+
+class CandidateLine(BaseModel):
+    line_id: str
+    moves: list[Union[Move, str]] = Field(default_factory=list)
+    move_contexts: list[dict[str, Any]] = Field(default_factory=list)
+    score: float = 0.0
+    score_breakdown: dict[str, Any] = Field(default_factory=dict)
+    features: dict[str, Any] = Field(default_factory=dict)
+    resolved_state: dict[str, Any] = Field(default_factory=dict)
+    opponent_windows: list[ResponseWindow] = Field(default_factory=list)
+
+
+class SearchStats(BaseModel):
+    mode: str = "main"
+    nodes_explored: int = 0
+    branches_expanded: int = 0
+    transposition_hits: int = 0
+    max_depth_reached: int = 0
+    beam_width: int = 0
+    elapsed_ms: int = 0
+    stopped_reason: str = ""
+
+
 # ── Decision ──────────────────────────────────────────────────────────────────
 
 
@@ -409,6 +442,8 @@ class Decision(BaseModel):
     move: Move
     confidence: Optional[str] = None
     alternatives_considered: Optional[Union[str, list]] = None
+    chosen_line_id: Optional[str] = None
+    selector_source: Optional[str] = None  # 'llm' | 'fallback' | 'argmax'
 
     @field_validator("alternatives_considered", mode="before")
     @classmethod
@@ -432,3 +467,5 @@ class DecisionRequest(BaseModel):
     brief_state: BriefState
     game_id: str
     rejection_context: Optional[RejectionContext] = None
+    candidate_lines: Optional[list[CandidateLine]] = None
+    search_stats: Optional[SearchStats] = None

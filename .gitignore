@@ -5,9 +5,14 @@
 
 # AI agent runtime files
 ai_agent/agent_memory.db
+ai_agent/selfplay.db
+ai_agent/*.db
 ai_agent/agent_decisions.log
 ai_agent/agent_inputs.log
 ai_agent/agent_plans.log
+ai_agent/agent_search.log
+ai_agent/agent_game_state.log
+ai_agent/agent_tools.log
 __pycache__/
 *.pyc
 .env

@@ -15,23 +15,47 @@ signal ai_move_completed(description: String, turn: int, move_seq: int)
 
 var controller: GameController
 var player_index: int = 1
+var _think_delay: float = THINK_DELAY
 
 const AGENT_PORT := 8765
-const THINK_DELAY := 0.5       # seconds before each decision
+const THINK_DELAY := 0.5       # seconds before each decision (default; override
+							   # per-instance via RIFTBOUND_AI_THINK_DELAY env)
 const HTTP_TIMEOUT := 30.0     # seconds before falling back to heuristic
 							   # (the agent may make several sequential LLM
 							   # calls per decision; 8s was far too short)
 const MAX_RETRIES := 3         # max rejection retry attempts
+const TurnSearchScript = preload("res://Scripts/Game/TurnSearch.gd")
+const ScoringProfileScript = preload("res://Scripts/Game/ScoringProfile.gd")
+const MulliganHeuristicScript = preload("res://Scripts/AI/MulliganHeuristic.gd")
 
 # Resolved in setup() so it can differ per OS (see _agent_base_url()).
 var AGENT_URL := ""
 
+# Mulligan keep/set-aside priors, loaded from scoring_profile.json["mulligan"].
+# Handled locally by MulliganHeuristic instead of deferring to the agent server.
+var _mulligan_config: Dictionary = {}
+
+# Whether to run the engine-side turn search and ship candidate lines to the
+# agent. The agent service is the single source of truth (it reads RIFTBOUND_SEARCH
+# from its own environment); the engine and agent are separate processes that do
+# not share an environment, so the engine fetches the flag from the service's
+# /health endpoint at setup. The RIFTBOUND_SEARCH env var, if present in the
+# engine's own environment, is used as the pre-handshake default.
+var _search_mode: bool = false
+
 var _http: HTTPRequest = null
+# Dedicated request for the one-shot search-config handshake (HTTPRequest handles
+# a single request at a time, so it cannot share _http).
+var _config_http: HTTPRequest = null
 var _pending_brief_state: Dictionary = {}
 var _retry_count: int = 0
 var _last_rejected_move: Dictionary = {}
 var _last_rejection_reason: String = ""
 var _waiting_for_http: bool = false
+var _candidate_lines: Array = []
+var _search_stats: Dictionary = {}
+var _committed_line: Dictionary = {}
+var _committed_line_index: int = 0
 
 # Eval (reliability track): wall-clock start of the in-flight decision request,
 # used to report engine-observed latency back to the agent service.
@@ -48,14 +72,50 @@ var _move_seq: int = 0
 func setup(gc: GameController, pi: int) -> void:
 	controller = gc
 	player_index = pi
+	# Pre-handshake default from the engine's own env (usually unset); the agent
+	# service's /health response is authoritative and overrides this below.
+	_search_mode = _env_flag("RIFTBOUND_SEARCH")
+	var delay_override := OS.get_environment("RIFTBOUND_AI_THINK_DELAY").strip_edges()
+	if delay_override != "":
+		_think_delay = maxf(0.0, float(delay_override))
+	_mulligan_config = ScoringProfileScript.load_profile().get("mulligan", {})
 	AGENT_URL = _agent_base_url() + "/decision"
 	_http = HTTPRequest.new()
 	_http.timeout = HTTP_TIMEOUT
 	add_child(_http)
 	_http.request_completed.connect(_on_request_completed)
+	_config_http = HTTPRequest.new()
+	_config_http.timeout = HTTP_TIMEOUT
+	add_child(_config_http)
+	_config_http.request_completed.connect(_on_config_completed)
+	_fetch_search_config()
 	# Phase 1: detect game-over and opponent actions
 	controller.board_updated.connect(_on_board_updated)
 	controller.game_log_message.connect(_on_game_log_message)
+
+
+# Ask the agent service whether search mode is enabled, so the engine matches the
+# service's RIFTBOUND_SEARCH setting without relying on a shared environment.
+func _fetch_search_config() -> void:
+	var url := _agent_base_url() + "/health"
+	var err := _config_http.request(url)
+	if err != OK:
+		push_warning("AIPlayer: search config fetch failed to start (err=%d); using env default." % err)
+
+
+func _on_config_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
+		push_warning("AIPlayer: search config fetch failed (result=%d, code=%d); using env default." % [result, response_code])
+		return
+	var parsed = JSON.parse_string(body.get_string_from_utf8())
+	if parsed is Dictionary and parsed.has("search_enabled"):
+		_search_mode = bool(parsed["search_enabled"])
+
+
+# Mirror the Python agent's truthy-env parsing so both sides agree on whether
+# search mode is enabled.
+func _env_flag(name: String) -> bool:
+	return OS.get_environment(name).strip_edges().to_lower() in ["1", "true", "yes", "on"]
 
 
 func _agent_base_url() -> String:
@@ -64,7 +124,11 @@ func _agent_base_url() -> String:
 	# Use the explicit IPv4 loopback on Windows; "localhost" works elsewhere
 	# (macOS/Linux) where resolution doesn't incur that stall.
 	var host := "127.0.0.1" if OS.get_name() == "Windows" else "localhost"
-	return "http://%s:%d" % [host, AGENT_PORT]
+	var port := AGENT_PORT
+	var port_override := OS.get_environment("RIFTBOUND_AGENT_PORT").strip_edges()
+	if port_override != "" and int(port_override) > 0:
+		port = int(port_override)
+	return "http://%s:%d" % [host, port]
 
 
 func take_turn() -> void:
@@ -82,7 +146,7 @@ func take_turn() -> void:
 		return
 
 	# Delay slightly so the game log is readable
-	await get_tree().create_timer(THINK_DELAY).timeout
+	await get_tree().create_timer(_think_delay).timeout
 	if gs.game_over:
 		return
 
@@ -90,6 +154,19 @@ func take_turn() -> void:
 		return
 	if _legal_moves_for(gs).is_empty():
 		return
+
+	# Mulligan is decided by a local cost/type heuristic (priors from
+	# scoring_profile.json["mulligan"]) rather than a round-trip to the agent.
+	if gs.mulligan_phase and not gs.mulligan_done[player_index]:
+		_submit(MulliganHeuristicScript.choose_command(gs, player_index, _mulligan_config))
+		return
+
+	if _search_mode and not _committed_line.is_empty():
+		if _play_committed_step(gs):
+			return
+		# The committed line is finished or diverged — fall through to a fresh
+		# decision so anything after the planned turn (e.g. an opponent-initiated
+		# showdown where the AI must pass) is still handled instead of hanging.
 
 	_retry_count = 0
 	_last_rejected_move = {}
@@ -102,6 +179,18 @@ func take_turn() -> void:
 func _request_decision(gs: GameState) -> void:
 	_pending_brief_state = BriefStateSerializer.serialize(gs, player_index)
 	_on_session_changed(_pending_brief_state.get("game_id", ""))
+	_candidate_lines = []
+	_search_stats = {}
+	if _search_mode and _should_run_search(gs):
+		var searcher: TurnSearch = TurnSearchScript.new()
+		var result: Dictionary = searcher.search(gs, player_index, {"mode": "main"})
+		_candidate_lines = result.get("candidate_lines", [])
+		_search_stats = result.get("search_stats", {})
+	elif _search_mode and _should_run_reactive_search(gs):
+		var reactive: TurnSearch = TurnSearchScript.new()
+		var rresult: Dictionary = reactive.search(gs, player_index, {"mode": "reactive"})
+		_candidate_lines = rresult.get("candidate_lines", [])
+		_search_stats = rresult.get("search_stats", {})
 
 	var payload := JSON.stringify(_build_request_payload())
 	var headers := PackedStringArray(["Content-Type: application/json"])
@@ -127,6 +216,9 @@ func _build_request_payload() -> Dictionary:
 			"rejected_move": _last_rejected_move,
 			"rejection_reason": _last_rejection_reason,
 		}
+	if _search_mode and not _candidate_lines.is_empty():
+		payload["candidate_lines"] = _candidate_lines
+		payload["search_stats"] = _search_stats
 	return payload
 
 
@@ -167,15 +259,24 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 
 	# Store decision for potential rejection context on next call
 	_last_rejected_move = move_dict
+	if _search_mode and decision.has("chosen_line_id"):
+		_commit_chosen_line(str(decision.get("chosen_line_id", "")))
 
 	# Submit the command.  submit_command sets controller.last_command_error if it
 	# produced an [ERROR] log, letting us distinguish real rejections from normal
 	# "still my turn" situations.
 	_submit(cmd)
+	if _search_mode and not _committed_line.is_empty():
+		# The first command (decision.move) is step 0 of the committed line; it
+		# was just submitted above. Remaining steps are replayed by take_turn via
+		# _play_committed_step. No pre-hash check on step 0 — we are at the root
+		# state the search planned from.
+		_committed_line_index = 1
 
 	# Rejection detected: retry immediately (synchronously, before any deferred
 	# _trigger_ai_turn fires) so _waiting_for_http is set before the next take_turn().
 	if controller.last_command_error:
+		_drop_committed_line()
 		_last_rejection_reason = "Game engine rejected the command."
 		_report_outcome(false, _last_rejection_reason)
 		if _retry_count < MAX_RETRIES:
@@ -311,9 +412,9 @@ func _heuristic_fallback(gs: GameState) -> void:
 	if legal.is_empty():
 		return
 
-	# Mulligan: always keep
+	# Mulligan: use the local cost/type heuristic (same as the main path)
 	if gs.mulligan_phase and not gs.mulligan_done[player_index]:
-		_submit("mulligan keep")
+		_submit(MulliganHeuristicScript.choose_command(gs, player_index, _mulligan_config))
 		return
 
 	# Pending prompt: pick first option
@@ -430,6 +531,89 @@ func _get_ready_units_at_base(gs: GameState) -> Array:
 	return result
 
 
+# ── Search line execution ──────────────────────────────────────────────────────
+
+func _should_run_search(gs: GameState) -> bool:
+	return _search_mode \
+		and _committed_line.is_empty() \
+		and _last_rejected_move.is_empty() \
+		and gs.turn_player_index == player_index \
+		and gs.current_phase == TurnStateMachine.Phase.MAIN \
+		and gs.current_state == TurnStateMachine.State.NEUTRAL_OPEN
+
+
+# Reactive search fires when the AI holds a response window in a chain or
+# showdown — on EITHER player's turn. This covers two cases the user asked for:
+#   1. The opponent interferes mid-line (their reaction opens a chain / contests
+#      a showdown): the committed line diverges, take_turn falls through here,
+#      and we search the AI's responses until the window resolves.
+#   2. It is the opponent's turn and the AI gets a chance to interfere: same
+#      window, same reactive search.
+# It deliberately does NOT require the AI's own turn. pending_choice / mulligan /
+# combat_assignment are left to the staged agent (not chain/showdown windows).
+func _should_run_reactive_search(gs: GameState) -> bool:
+	if not _search_mode or not _committed_line.is_empty() or not _last_rejected_move.is_empty():
+		return false
+	if not gs.pending_prompt.is_empty() or gs.combat_assignment_active:
+		return false
+	if gs.is_closed_chain_state() and gs.priority_player_index == player_index:
+		return true
+	if gs.current_state == TurnStateMachine.State.SHOWDOWN_OPEN and gs.focus_player_index == player_index:
+		return true
+	return false
+
+
+func _commit_chosen_line(line_id: String) -> void:
+	_committed_line = {}
+	_committed_line_index = 0
+	for line in _candidate_lines:
+		if str(line.get("line_id", "")) == line_id:
+			_committed_line = line
+			return
+
+
+# Play the next step of the committed line. Each step carries the state hash
+# the search expected to see at this point (pre_hash). If the live state no
+# longer matches — the opponent interacted, or anything diverged from the
+# simulated "if-unanswered" line — the line is abandoned.
+# Intermediate steps (the AI's own target choices / showdown-focus passes) are
+# regular steps here, so the line carries across them without a fresh search.
+#
+# Returns true if a committed step was submitted (the line is still in control);
+# false if the line is finished or diverged and the caller should request a
+# fresh decision. Returning false instead of dead-ending is what prevents the AI
+# from hanging once its planned turn is exhausted but it is later asked to act
+# again (e.g. passing an opponent-initiated showdown).
+func _play_committed_step(gs: GameState) -> bool:
+	var moves: Array = _committed_line.get("moves", [])
+	if _committed_line_index >= moves.size():
+		_drop_committed_line()
+		return false
+	var hashes: Array = _committed_line.get("expected_pre_hashes", [])
+	var idx := _committed_line_index
+	if idx < hashes.size():
+		var expected := str(hashes[idx])
+		if expected != "" and _live_hash(gs) != expected:
+			_drop_committed_line()
+			return false
+	var cmd := str(moves[idx])
+	_submit(cmd)
+	_committed_line_index += 1
+	if controller.last_command_error:
+		_drop_committed_line()
+		return false
+	return true
+
+
+func _drop_committed_line() -> void:
+	_committed_line = {}
+	_committed_line_index = 0
+
+
+func _live_hash(gs: GameState) -> String:
+	return ScoreModel.structural_hash(ScoreModel.snapshot(gs, player_index))
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 func _can_act_now(gs: GameState) -> bool:
@@ -459,6 +643,7 @@ func _on_session_changed(new_id: String) -> void:
 	_last_rejected_move = {}
 	_last_rejection_reason = ""
 	_move_seq = 0
+	_drop_committed_line()
 
 
 func _active_game_id(gs: GameState) -> String:
@@ -554,6 +739,9 @@ func _on_board_updated() -> void:
 		return
 	_game_over_reported = true
 	var game_id := _active_game_id(gs)
+	var first_player := -1
+	if controller and controller.has_method("_determine_first_player"):
+		first_player = controller._determine_first_player()
 	var body := {
 		"game_id": game_id,
 		"winner_index": gs.winner_index,
@@ -561,6 +749,8 @@ func _on_board_updated() -> void:
 		"my_score": gs.players[player_index].score,
 		"opp_score": gs.players[1 - player_index].score,
 		"total_turns": gs.turn_number,
+		"first_player_index": first_player,
+		"seed": gs.rng_seed,
 	}
 	_fire_and_forget(AGENT_URL.replace("/decision", "/game_over"), body)
 
