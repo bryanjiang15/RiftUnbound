@@ -81,6 +81,17 @@ var _game_over_reported: bool = false
 var _move_seq: int = 0
 
 
+# ── Offline self-play capture ─────────────────────────────────────────────────
+# When RIFTBOUND_SELFPLAY_CAPTURE is set, the engine bypasses the Python agent
+# server entirely: it computes the argmax decision locally and appends every
+# server-bound payload (decision / outcome / metrics / card / opponent /
+# game_over) to a JSONL log via SelfPlayCaptureLog. ai_agent/import_selfplay_logs
+# .py replays the log into SQLite after the run, writing identical rows. This
+# removes all per-decision HTTP from bulk self-play.
+const SelfPlayCaptureLogScript = preload("res://Scripts/AI/SelfPlayCaptureLog.gd")
+var _capture_mode: bool = false
+
+
 func setup(gc: GameController, pi: int, scoring_profile_path: String = "") -> void:
 	controller = gc
 	player_index = pi
@@ -88,6 +99,16 @@ func setup(gc: GameController, pi: int, scoring_profile_path: String = "") -> vo
 	# Pre-handshake default from the engine's own env (usually unset); the agent
 	# service's /health response is authoritative and overrides this below.
 	_search_mode = _env_flag("RIFTBOUND_SEARCH")
+	# Offline capture: no server round-trips. Search mode is forced on (the whole
+	# point is to capture the searched tuning dataset) and the /health handshake
+	# is skipped.
+	var capture_path := OS.get_environment("RIFTBOUND_SELFPLAY_CAPTURE").strip_edges()
+	_capture_mode = capture_path != ""
+	if _capture_mode:
+		_search_mode = true
+		if capture_path == "1" or capture_path.to_lower() == "on" or capture_path.to_lower() == "true":
+			capture_path = SelfPlayCaptureLogScript.DEFAULT_PATH
+		SelfPlayCaptureLogScript.open_log(capture_path)
 	var delay_override := OS.get_environment("RIFTBOUND_AI_THINK_DELAY").strip_edges()
 	if delay_override != "":
 		_think_delay = maxf(0.0, float(delay_override))
@@ -106,7 +127,9 @@ func setup(gc: GameController, pi: int, scoring_profile_path: String = "") -> vo
 	_config_http.timeout = HTTP_TIMEOUT
 	add_child(_config_http)
 	_config_http.request_completed.connect(_on_config_completed)
-	_fetch_search_config()
+	# In capture mode the server isn't running, so skip the /health handshake.
+	if not _capture_mode:
+		_fetch_search_config()
 	# Phase 1: detect game-over and opponent actions
 	controller.board_updated.connect(_on_board_updated)
 	controller.game_log_message.connect(_on_game_log_message)
@@ -215,6 +238,13 @@ func _request_decision(gs: GameState) -> void:
 	var payload := JSON.stringify(_build_request_payload())
 	var headers := PackedStringArray(["Content-Type: application/json"])
 
+	# Offline capture: resolve the decision locally (argmax) and apply it without
+	# any HTTP round-trip. The full request payload + chosen line are logged for
+	# the post-run importer.
+	if _capture_mode:
+		_decide_offline(gs)
+		return
+
 	var err = _http.request(AGENT_URL, headers, HTTPClient.METHOD_POST, payload)
 	if err != OK:
 		push_warning("AIPlayer: HTTPRequest failed to start (err=%d). Using heuristic." % err)
@@ -242,6 +272,68 @@ func _build_request_payload() -> Dictionary:
 		if _scoring_profile_json != "":
 			payload["scoring_profile_json"] = _scoring_profile_json
 	return payload
+
+
+# ── Offline decision (no server) ──────────────────────────────────────────────
+
+# Reproduce the server's argmax selection locally and apply it, with no HTTP.
+# Mirrors the accepted path of _on_request_completed. Every searched decision
+# carries candidate lines, so this fully replaces the server for self-play.
+func _decide_offline(gs: GameState) -> void:
+	_decision_start_ms = Time.get_ticks_msec()
+	var chosen := _argmax_local(_candidate_lines)
+	var chosen_line_id := ""
+	var selector_source = null  # null mirrors the server's pass-fallback (_PASS_DECISION)
+	var cmd := "pass"
+	if not chosen.is_empty():
+		chosen_line_id = str(chosen.get("line_id", ""))
+		selector_source = "argmax"
+		var moves: Array = chosen.get("moves", [])
+		if not moves.is_empty():
+			cmd = str(moves[0])
+
+	# Log the decision record (full request payload + the engine's choice) so the
+	# importer can recompute identical SQL rows and parity-check the selection.
+	var decision_rec := {
+		"request": _build_request_payload(),
+		"chosen_line_id": (chosen_line_id if chosen_line_id != "" else null),
+		"selector_source": selector_source,
+	}
+	SelfPlayCaptureLogScript.append("decision", decision_rec)
+
+	# Apply the move (mirror _on_request_completed accepted path).
+	if not chosen_line_id.is_empty():
+		_commit_chosen_line(chosen_line_id)
+	_submit(cmd)
+	if not _committed_line.is_empty():
+		_committed_line_index = 1
+
+	if controller.last_command_error:
+		# Searched step-0 commands are legal by construction; a rejection here is
+		# unexpected. Match the live exhausted-retry behavior: report + heuristic.
+		_drop_committed_line()
+		_last_rejection_reason = "Game engine rejected the command."
+		_report_outcome(false, _last_rejection_reason)
+		_report_decision_metrics(true, false)
+		_heuristic_fallback(gs)
+	else:
+		_report_decision_metrics(false, true)
+		_report_outcome(true)
+
+
+# Engine-side equivalent of the server's _argmax_line: among candidate lines
+# (already score-descending from TurnSearch), return the first with a non-empty
+# first command. Empty-move lines are unplayable, so the caller falls back to
+# pass — exactly as _PASS_DECISION does server-side. Returns {} when none qualify.
+func _argmax_local(lines: Array) -> Dictionary:
+	for line in lines:
+		var moves: Array = line.get("moves", [])
+		if moves.is_empty():
+			continue
+		if str(moves[0]).strip_edges() == "":
+			continue
+		return line
+	return {}
 
 
 func _on_request_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
@@ -875,8 +967,33 @@ func _target_suffix(tokens: Array) -> String:
 
 
 func _fire_and_forget(url: String, body: Dictionary) -> void:
+	# Offline capture: append to the JSONL log instead of POSTing. The kind is
+	# derived from the endpoint path. /game_state_event writes no SQL server-side
+	# (it only feeds the human-readable input log), so it is dropped here.
+	if _capture_mode:
+		var kind := _capture_kind_for_url(url)
+		if kind != "":
+			SelfPlayCaptureLogScript.append(kind, body)
+		return
 	var http := HTTPRequest.new()
 	add_child(http)
 	http.request_completed.connect(func(_r, _c, _h, _b): http.queue_free())
 	http.request(url, ["Content-Type: application/json"],
 		HTTPClient.METHOD_POST, JSON.stringify(body))
+
+
+# Map an agent endpoint URL to its capture-log record kind. Returns "" for
+# endpoints that produce no SQL (so they are skipped in offline capture).
+func _capture_kind_for_url(url: String) -> String:
+	if url.ends_with("/outcome"):
+		return "outcome"
+	if url.ends_with("/decision_metrics"):
+		return "decision_metrics"
+	if url.ends_with("/game_over"):
+		return "game_over"
+	if url.ends_with("/card_event"):
+		return "card_event"
+	if url.ends_with("/opponent_action"):
+		return "opponent_action"
+	# /game_state_event → no SQL; drop.
+	return ""

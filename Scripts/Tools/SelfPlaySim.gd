@@ -2,11 +2,20 @@ extends SceneTree
 
 # Headless AI-vs-AI self-play driver for bulk tuning-data generation.
 #
-# Both seats run TurnSearch + ScoringProfile and select via the agent server's
-# argmax short-circuit (no LLM round-trip), so the existing server-side capture
-# (search_decisions / candidate_lines / decision_snapshots + /game_over backfill)
-# records every decision. The agent server must already be running with:
-#   RIFTBOUND_SEARCH=on RIFTBOUND_SEARCH_ARGMAX=on RIFTBOUND_DATA_ORIGIN=self_play
+# Both seats run TurnSearch + ScoringProfile and select the top-scored line via
+# argmax (no LLM round-trip). Two modes capture the resulting dataset
+# (search_decisions / candidate_lines / decision_snapshots + /game_over backfill):
+#
+#   ONLINE  — the agent server must be running with:
+#       RIFTBOUND_SEARCH=on RIFTBOUND_SEARCH_ARGMAX=on RIFTBOUND_DATA_ORIGIN=self_play
+#     Point the engine at it with RIFTBOUND_AGENT_PORT. The server picks the
+#     argmax line and writes SQL.
+#
+#   OFFLINE — set RIFTBOUND_SELFPLAY_CAPTURE=<log path> (or 1). No server runs:
+#     each seat computes argmax locally and appends every server-bound payload to
+#     a JSONL log. Replay it into SQLite afterward with:
+#       python -m ai_agent.import_selfplay_logs <log> --db ai_agent/selfplay.db
+#     This removes all per-decision HTTP and is the fast path for bulk runs.
 #
 # Usage (from repo root):
 #   <godot> --headless --script res://Scripts/Tools/SelfPlaySim.gd -- \
@@ -17,8 +26,7 @@ extends SceneTree
 # (omit for the live default). Use this to A/B a tuned candidate against the
 # baseline: the win-rate over many games gates whether to commit the candidate.
 #
-# Point the engine at the server with RIFTBOUND_AGENT_PORT, and set
-# RIFTBOUND_AI_THINK_DELAY=0 to remove the per-move readability delay.
+# Set RIFTBOUND_AI_THINK_DELAY=0 to remove the per-move readability delay.
 
 const AIPlayerScript = preload("res://Scripts/AI/AIPlayer.gd")
 
@@ -39,6 +47,15 @@ var _controller: GameController = null
 var _ai0 = null
 var _ai1 = null
 var _driving: bool = false
+
+# Tally of suppressed engine [ERROR]/[WARNING] log lines, normalized to a type
+# (variable parts collapsed) -> count. Printed once at the end instead of letting
+# the per-move spam drown the progress output.
+var _problem_counts: Dictionary = {}
+var _problem_total: int = 0
+var _problem_regexes_ready: bool = false
+var _re_quoted: RegEx = null
+var _re_number: RegEx = null
 
 
 func _initialize() -> void:
@@ -108,14 +125,20 @@ func _server_reachable() -> bool:
 	return res[0] == HTTPRequest.RESULT_SUCCESS and int(res[1]) == 200
 
 
+const SelfPlayCaptureLogScript = preload("res://Scripts/AI/SelfPlayCaptureLog.gd")
+
 func _run() -> void:
-	if not await _server_reachable():
+	# Offline capture mode bypasses the agent server entirely: each seat computes
+	# the argmax decision locally and logs every server-bound payload for the
+	# post-run importer. Skip the /health gate when capturing.
+	var capture_mode := OS.get_environment("RIFTBOUND_SELFPLAY_CAPTURE").strip_edges() != ""
+	if not capture_mode and not await _server_reachable():
 		printerr("[SELFPLAY] ERROR: agent server not reachable at %s/health. " % _base_url()
 			+ "Start it with RIFTBOUND_SEARCH=on RIFTBOUND_SEARCH_ARGMAX=on and set "
 			+ "RIFTBOUND_AGENT_PORT to match. Aborting.")
 		quit(1)
 		return
-	_print_header()
+	_print_header(capture_mode)
 	var wins := [0, 0]      # wins[0] = P1, wins[1] = P2
 	var unfinished := 0     # games that hit the turn cap without a winner
 	for g in range(_games):
@@ -130,16 +153,26 @@ func _run() -> void:
 		_print_progress(g + 1, wins, unfinished, s, finished, winner, int(result["turns"]))
 	print("")  # end the in-place progress line
 	_print_summary(wins, unfinished)
+	_print_problem_summary()
+	if capture_mode and SelfPlayCaptureLogScript.is_open():
+		SelfPlayCaptureLogScript.close_log()
+		print(" Capture log: %s (%d records)" % [
+			SelfPlayCaptureLogScript.path(), SelfPlayCaptureLogScript.count()])
+		print(" Import with: python -m ai_agent.import_selfplay_logs %s --db <db>" % SelfPlayCaptureLogScript.path())
+		print("============================================================")
 	quit(0)
 
 
 # --- Pretty console output -------------------------------------------------
 
-func _print_header() -> void:
+func _print_header(capture_mode: bool = false) -> void:
 	print("")
 	print("============================================================")
 	print(" RiftBound Self-Play  |  %d games  |  seed base %d" % [_games, _seed_base])
-	print(" server %s" % _base_url())
+	if capture_mode:
+		print(" mode: OFFLINE CAPTURE (no server)")
+	else:
+		print(" server %s" % _base_url())
 	print(" P1 profile: %s" % _profile_label(_p1_profile))
 	print(" P2 profile: %s" % _profile_label(_p2_profile))
 	print("============================================================")
@@ -186,11 +219,56 @@ func _pct(n: int, total: int) -> String:
 	return "%.1f%%" % (float(n) / float(total) * 100.0)
 
 
+# Tally suppressed engine [ERROR]/[WARNING] lines by normalized type. The lines
+# are muted from the console (quiet_errors) so they don't drown the progress bar;
+# this records them for the end-of-run summary.
+func _on_game_log_for_problems(text: String) -> void:
+	if not (text.begins_with("[ERROR]") or text.begins_with("[WARNING]")):
+		return
+	var key := _normalize_problem(text)
+	_problem_counts[key] = int(_problem_counts.get(key, 0)) + 1
+	_problem_total += 1
+
+
+# Collapse the variable parts of a log line so different instances of the same
+# error fold into one "type": quoted tokens → '…' and digit runs → N. Keeps the
+# [ERROR]/[WARNING] severity prefix so the two are not merged.
+func _normalize_problem(text: String) -> String:
+	if not _problem_regexes_ready:
+		_re_quoted = RegEx.new()
+		_re_quoted.compile("'[^']*'")
+		_re_number = RegEx.new()
+		_re_number.compile("[0-9]+")
+		_problem_regexes_ready = true
+	var s := _re_quoted.sub(text, "'…'", true)
+	s = _re_number.sub(s, "N", true)
+	return s
+
+
+func _print_problem_summary() -> void:
+	print("")
+	print("============================================================")
+	if _problem_total == 0:
+		print(" Errors/warnings: none")
+		print("============================================================")
+		return
+	print(" Errors/warnings: %d total, %d type(s) (suppressed above)" % [
+		_problem_total, _problem_counts.size()])
+	print("------------------------------------------------------------")
+	# Sort types by descending count for a readable scoreboard.
+	var keys := _problem_counts.keys()
+	keys.sort_custom(func(a, b): return int(_problem_counts[a]) > int(_problem_counts[b]))
+	for k in keys:
+		print("   %6d  %s" % [int(_problem_counts[k]), k])
+	print("============================================================")
+
+
 func _run_one_game(s: int) -> Dictionary:
 	_controller = GameController.new()
 	_controller.name = "GameController"
 	_controller.skip_auto_start = true
 	_controller.quiet_logs = true
+	_controller.quiet_errors = true  # mute error spam; we tally + report at the end
 	_controller._ai_player_index = -1  # disable the built-in single-seat trigger
 	get_root().add_child(_controller)
 	await process_frame  # let the controller settle into the tree
@@ -211,6 +289,7 @@ func _run_one_game(s: int) -> Dictionary:
 
 	_driving = false
 	_controller.board_updated.connect(_on_board_updated_drive)
+	_controller.game_log_message.connect(_on_game_log_for_problems)
 
 	var cfg := {
 		"seed": s,
@@ -243,6 +322,7 @@ func _run_one_game(s: int) -> Dictionary:
 	await create_timer(1.5).timeout
 
 	_controller.board_updated.disconnect(_on_board_updated_drive)
+	_controller.game_log_message.disconnect(_on_game_log_for_problems)
 	get_root().remove_child(_controller)
 	_controller.free()
 	_controller = null

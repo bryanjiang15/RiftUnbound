@@ -24,6 +24,11 @@ var skip_auto_start: bool = false
 # are still printed). The self-play driver sets this so its own pretty progress
 # output isn't drowned out by per-move logging.
 var quiet_logs: bool = false
+# When true, also suppress the [ERROR]/[WARNING] lines that quiet_logs normally
+# still prints. The lines are still emitted via game_log_message (so a driver can
+# tally them) and still set last_command_error — only the console print is muted.
+# The self-play driver sets this so error spam doesn't drown its progress output.
+var quiet_errors: bool = false
 var log_lines: Array[String] = []
 
 var _ai_player_index: int = 1  # which player is AI (-1 = human vs human)
@@ -2009,7 +2014,10 @@ func _log(text: String) -> void:
 	if text.begins_with("[ERROR]"):
 		last_command_error = true
 	game_log_message.emit(text)
-	if not quiet_logs or text.begins_with("[ERROR]"):
+	var is_problem := text.begins_with("[ERROR]") or text.begins_with("[WARNING]")
+	if not quiet_logs:
+		print(text)
+	elif is_problem and not quiet_errors:
 		print(text)
 
 

@@ -13,6 +13,8 @@ ai_agent/agent_plans.log
 ai_agent/agent_search.log
 ai_agent/agent_game_state.log
 ai_agent/agent_tools.log
+# Offline self-play capture logs (regenerated each run)
+out/selfplay_capture*.jsonl
 __pycache__/
 *.pyc
 .env

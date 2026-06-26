@@ -198,6 +198,36 @@ RIFTBOUND_SEARCH=on RIFTBOUND_AGENT_PORT=8766 RIFTBOUND_AI_THINK_DELAY=0 \
     --games 50 --seed 1000 --turn-cap 200
 ```
 
+#### Offline capture (no server) — faster bulk runs
+
+In argmax self-play the server does **no LLM work**: it only picks the
+highest-scoring searched line (a pure function of scores the engine already
+computed) and writes SQL. The per-decision HTTP round-trip is therefore pure
+overhead. Set `RIFTBOUND_SELFPLAY_CAPTURE` to a log path and the engine computes
+the argmax decision locally and appends every server-bound payload to a JSONL
+file — **no server needs to be running**. After the run, replay the log into
+SQLite with `ai_agent/import_selfplay_logs.py`, which writes identical rows via
+the same `ai_agent/capture.py` helpers the live `/decision` endpoint uses.
+
+```bash
+# 1. Run N games with NO server. RIFTBOUND_SELFPLAY_CAPTURE points at the log
+#    (use "1" for the default res://out/selfplay_capture.jsonl). Search mode is
+#    forced on; the /health handshake is skipped.
+RIFTBOUND_SELFPLAY_CAPTURE=res://out/selfplay_capture.jsonl RIFTBOUND_AI_THINK_DELAY=0 \
+  <godot> --headless --path . --script res://Scripts/Tools/SelfPlaySim.gd -- \
+    --games 50 --seed 1000 --turn-cap 200
+
+# 2. Import the captured log into the tuning DB (origin defaults to self_play).
+python -m ai_agent.import_selfplay_logs out/selfplay_capture.jsonl \
+    --db ai_agent/selfplay.db --origin self_play [--capture-seat 0]
+```
+
+The importer reproduces the server's selection with the same `_argmax_line`, and
+parity-checks the engine's recorded choice against it (warns on any mismatch).
+`--p1-profile` / `--p2-profile` and `RIFTBOUND_CAPTURE_SEAT` behave exactly as in
+the live path. This removes **all** per-decision HTTP (≈the entire server-comms
+cost of a run); the wall-clock becomes dominated by `TurnSearch` itself.
+
 #### A/B-testing two scoring profiles
 
 Pass `--p1-profile` / `--p2-profile` to give each seat its own scoring-profile
@@ -264,3 +294,4 @@ Engine-side env vars consumed by `Scripts/AI/AIPlayer.gd`:
 | `RIFTBOUND_AGENT_PORT` | `8765` | Agent server port the engine connects to. |
 | `RIFTBOUND_AI_THINK_DELAY` | `0.5` | Per-decision delay (seconds); set `0` for bulk runs. |
 | `RIFTBOUND_SEARCH` | `off` | Pre-handshake search default (the server's `/health` is authoritative). |
+| `RIFTBOUND_SELFPLAY_CAPTURE` | (unset) | When set (a log path, or `1`/`on` for the default `res://out/selfplay_capture.jsonl`), run fully offline: compute argmax locally, skip the server, and append every server-bound payload to the JSONL log for `import_selfplay_logs.py`. Forces search mode on. |

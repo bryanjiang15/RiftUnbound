@@ -103,7 +103,9 @@ func build_sim_controller(live_gs: GameState) -> GameController:
 	sc._ai_player_index = -1
 	# Simulation controllers replay hypothetical lines (search / brief-state
 	# windows); their log output is internal and must never echo to the console.
+	# Suppress errors too — illegal probes during simulation are expected noise.
 	sc.quiet_logs = true
+	sc.quiet_errors = true
 	sc.trigger_dispatcher = TriggerDispatcherScript.new()
 	sc.log_lines.clear()
 	sc.gs = clone
