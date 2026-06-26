@@ -7,6 +7,10 @@ const ConditionEvaluatorScript = preload("res://Scripts/Game/ConditionEvaluator.
 
 signal board_updated
 signal game_log_message(text: String)
+# Emitted on each card lifecycle event so the AI agent can record per-card
+# statistics (storage doc §3). The base definition id is read agent-side from
+# card.definition.id — never reverse-engineered from instance_id.
+signal card_event(event: String, card: CardInstance, energy_spent: int, player_index: int)
 
 const P1_DECK = "res://Data/Decks/starter-deck-p1.json"
 const P2_DECK = "res://Data/Decks/starter-deck-p2.json"
@@ -100,6 +104,7 @@ func start_game_from_config(config: Dictionary) -> void:
 		for _i in range(4):
 			var drawn = ps.draw_card()
 			if drawn:
+				_emit_card_event("in_opening_hand", drawn)
 				_log("> [P%d] Drew %s" % [ps.player_index + 1, drawn.display_name()])
 
 	gs.mulligan_phase = true
@@ -240,8 +245,10 @@ func _cmd_mulligan(player_index: int, args: Array) -> void:
 		_mulligan_set_aside[player_index] = to_set
 		for card in to_set:
 			ps.hand.erase(card)
+			_emit_card_event("mulliganed", card)
 			var drawn = ps.draw_card()
 			if drawn:
+				_emit_card_event("drawn", drawn)
 				_log("> P%d drew %s" % [player_index + 1, drawn.display_name()])
 		# Recycle set-aside cards to bottom of deck
 		for card in to_set:
@@ -342,6 +349,7 @@ func _execute_start_of_turn() -> void:
 	gs.current_phase = TurnStateMachine.Phase.DRAW
 	var drawn = ps.draw_card()
 	if drawn:
+		_emit_card_event("drawn", drawn)
 		_log("> P%d drew %s" % [turn_pi + 1, drawn.display_name()])
 	else:
 		_log("[INFO] P%d's deck is empty!" % (turn_pi + 1))
@@ -961,6 +969,7 @@ func _complete_play(
 		ps.champion_zone = null
 
 	_log("> [P%d] Played %s" % [player_index + 1, card.definition.name])
+	_emit_card_event("played", card, int(cost.get("energy", 0)))
 
 	match card.definition.card_type:
 		"unit":
@@ -1241,6 +1250,7 @@ func _cmd_react(player_index: int, args: Array) -> void:
 		return
 	ps.hand.erase(card)
 	ps.cards_played_this_turn += 1
+	_emit_card_event("played", card, int(cost.get("energy", 0)))
 
 	if target == null and not target_id.is_empty():
 		target = gs.find_instance_anywhere(target_id)
@@ -1522,6 +1532,7 @@ func _handle_choose_discard(player_index: int, choice: String) -> void:
 	ps.move_to_trash(card)
 	ps.cards_discarded_count += 1
 	ps.discarded_this_turn.append(card)
+	_emit_card_event("discarded", card)
 	_log("> P%d discarded %s" % [player_index + 1, card.display_name()])
 	for line in trigger_dispatcher.emit("on_discard", {
 		"discarded_card": card,
@@ -1817,6 +1828,13 @@ func _check_can_act(player_index: int) -> bool:
 		_log("[ERROR] Not your turn to act — waiting for P%d" % (gs.priority_player_index + 1))
 		return false
 	return true
+
+
+func _emit_card_event(event: String, card: CardInstance, energy_spent: int = 0) -> void:
+	# Fire-and-forget per-card lifecycle event for statistics capture.
+	if card == null or card.definition == null:
+		return
+	card_event.emit(event, card, energy_spent, card.owner_index)
 
 
 func _find_player_permanent(player_index: int, inst_id: String) -> CardInstance:

@@ -11,6 +11,10 @@ static func run(gs: GameState, ability_resolver: AbilityResolver, controller: Ga
 	if winner >= 0:
 		gs.game_over = true
 		gs.winner_index = winner
+		if controller != null:
+			for ps in gs.players:
+				for held in ps.hand:
+					controller._emit_card_event("left_in_hand_at_end", held)
 		log_lines.append("> GAME OVER — P%d wins with %d points!" % [
 			winner + 1, gs.players[winner].score
 		])
@@ -130,6 +134,8 @@ static func _process_deaths(gs: GameState, ability_resolver: AbilityResolver, co
 		gs.board.remove_unit_from_battlefield(u)
 		var owner_ps: PlayerState = gs.players[u.owner_index]
 		owner_ps.move_to_trash(u)
+		if controller != null:
+			controller._emit_card_event("died", u)
 
 	return log_lines
 

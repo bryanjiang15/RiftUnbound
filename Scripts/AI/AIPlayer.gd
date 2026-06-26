@@ -92,6 +92,8 @@ func setup(gc: GameController, pi: int) -> void:
 	# Phase 1: detect game-over and opponent actions
 	controller.board_updated.connect(_on_board_updated)
 	controller.game_log_message.connect(_on_game_log_message)
+	# Phase 3: per-card statistics
+	controller.card_event.connect(_on_card_event)
 
 
 # Ask the agent service whether search mode is enabled, so the engine matches the
@@ -753,6 +755,29 @@ func _on_board_updated() -> void:
 		"seed": gs.rng_seed,
 	}
 	_fire_and_forget(AGENT_URL.replace("/decision", "/game_over"), body)
+
+
+func _on_card_event(event: String, card: CardInstance, energy_spent: int, owner_index: int) -> void:
+	# Forward this seat's own card lifecycle events to the agent for per-card
+	# statistics. Only own-seat cards are reported so two-seat self-play (both
+	# AIPlayers on one controller) doesn't double-count, and seats stay separable.
+	if owner_index != player_index:
+		return
+	if card == null or card.definition == null:
+		return
+	var gs: GameState = controller.gs if controller else null
+	var game_id := _active_game_id(gs)
+	if game_id.is_empty():
+		return
+	_fire_and_forget(AGENT_URL.replace("/decision", "/card_event"), {
+		"game_id": game_id,
+		"turn": gs.turn_number if gs != null else 0,
+		"card_def_id": card.definition.id,
+		"instance_id": card.instance_id,
+		"event": event,
+		"my_player_index": player_index,
+		"energy_spent": energy_spent,
+	})
 
 
 func _on_game_log_message(text: String) -> void:

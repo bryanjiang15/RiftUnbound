@@ -237,6 +237,27 @@ CREATE TABLE IF NOT EXISTS weight_versions (
     git_sha      TEXT,
     created_at   TEXT NOT NULL
 );
+
+-- ── Per-card statistics (storage doc §3) ────────────────────────────────────
+-- One row per card lifecycle event. The aggregation key is the BASE
+-- definition_id (`card_def_id`), stamped directly from the allocator/instance —
+-- never reverse-engineered from instance_id (see doc §3 join-key note).
+CREATE TABLE IF NOT EXISTS card_events (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id              TEXT    NOT NULL,
+    turn                 INTEGER NOT NULL,
+    my_player_index      INTEGER,     -- reporting seat (self-play separation)
+    card_def_id          TEXT    NOT NULL,  -- base definition_id (aggregation key)
+    instance_id          TEXT,             -- per-copy id, e.g. 'garen-2'
+    event                TEXT    NOT NULL,  -- drawn|played|discarded|died|
+                                            -- mulliganed|scored|left_in_hand_at_end|
+                                            -- in_opening_hand
+    energy_spent         INTEGER NOT NULL DEFAULT 0,
+    breakdown_delta_json TEXT,             -- optional score_breakdown contribution
+    timestamp            TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_card_events_game ON card_events (game_id, turn);
+CREATE INDEX IF NOT EXISTS idx_card_events_def ON card_events (card_def_id, event);
 """
 
 # Maximum number of recent events (own decisions + opponent actions, merged) to inject into context
@@ -386,6 +407,55 @@ class Memory:
             conn.execute(
                 "INSERT INTO opponent_actions (game_id, turn, action, timestamp) VALUES (?,?,?,?)",
                 (game_id, turn, action, now),
+            )
+
+    # ── Per-card statistics writes (storage doc §3) ─────────────────────────────
+
+    _CARD_EVENTS = {
+        "drawn", "played", "discarded", "died", "mulliganed", "scored",
+        "left_in_hand_at_end", "in_opening_hand",
+    }
+
+    def record_card_event(
+        self,
+        *,
+        game_id: str,
+        turn: int,
+        card_def_id: str,
+        event: str,
+        instance_id: Optional[str] = None,
+        my_player_index: Optional[int] = None,
+        energy_spent: int = 0,
+        breakdown_delta: Optional[dict] = None,
+    ) -> None:
+        """Append one card lifecycle event. Called via /card_event.
+
+        ``card_def_id`` is the BASE definition_id, stamped directly from the
+        instance's definition (never derived from instance_id — see doc §3).
+        """
+        if event not in self._CARD_EVENTS:
+            raise ValueError(f"unknown card event: {event!r}")
+        now = datetime.now(timezone.utc).isoformat()
+        breakdown_json = json.dumps(breakdown_delta) if breakdown_delta else None
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO card_events
+                  (game_id, turn, my_player_index, card_def_id, instance_id,
+                   event, energy_spent, breakdown_delta_json, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    game_id,
+                    turn,
+                    my_player_index,
+                    card_def_id,
+                    instance_id,
+                    event,
+                    energy_spent,
+                    breakdown_json,
+                    now,
+                ),
             )
 
     def record_game_outcome(
@@ -1001,8 +1071,111 @@ class Memory:
             },
         }
 
-    # ── Helpers ───────────────────────────────────────────────────────────────
+    def card_stats_report(self, *, min_plays: int = 20) -> dict:
+        """Per-card aggregate statistics (storage doc §3 derived view).
 
+        Aggregation key is the base ``card_def_id``. WPA is intentionally
+        omitted (needs turn_snapshots, not yet implemented). Cards below
+        ``min_plays`` are returned in ``low_sample`` rather than ``cards`` so the
+        sample-size caveat is explicit, not silently mixed in.
+        """
+        with self._connect() as conn:
+            games_total = conn.execute(
+                "SELECT COUNT(*) AS n FROM games"
+            ).fetchone()["n"] or 0
+            base_win_rate = None
+            if games_total:
+                wins = conn.execute(
+                    "SELECT COUNT(*) AS n FROM games WHERE outcome='win'"
+                ).fetchone()["n"] or 0
+                base_win_rate = round(wins / games_total, 3)
+
+            rows = conn.execute(
+                """
+                SELECT
+                    card_def_id,
+                    COUNT(DISTINCT CASE WHEN event IN ('drawn','in_opening_hand')
+                          THEN game_id END)                                  AS games_seen,
+                    COUNT(DISTINCT CASE WHEN event='played' THEN game_id END) AS games_played,
+                    SUM(CASE WHEN event='drawn' THEN 1 ELSE 0 END)           AS drawn,
+                    SUM(CASE WHEN event='in_opening_hand' THEN 1 ELSE 0 END) AS opening_hand,
+                    SUM(CASE WHEN event='played' THEN 1 ELSE 0 END)          AS played,
+                    SUM(CASE WHEN event='discarded' THEN 1 ELSE 0 END)       AS discarded,
+                    SUM(CASE WHEN event='mulliganed' THEN 1 ELSE 0 END)      AS mulliganed,
+                    SUM(CASE WHEN event='scored' THEN 1 ELSE 0 END)          AS scored,
+                    SUM(CASE WHEN event='died' THEN 1 ELSE 0 END)            AS died,
+                    SUM(CASE WHEN event='left_in_hand_at_end' THEN 1 ELSE 0 END) AS stuck,
+                    AVG(CASE WHEN event='played' THEN turn END)             AS avg_turn_played,
+                    AVG(CASE WHEN event='played' THEN energy_spent END)    AS avg_energy_spent
+                FROM card_events
+                GROUP BY card_def_id
+                """
+            ).fetchall()
+
+            # Win-rate-when-played: distinct (card, game) played, joined to outcome.
+            wr_rows = conn.execute(
+                """
+                SELECT ce.card_def_id AS card_def_id,
+                       COUNT(*) AS played_games,
+                       SUM(CASE WHEN g.outcome='win' THEN 1 ELSE 0 END) AS played_wins
+                FROM (
+                    SELECT DISTINCT card_def_id, game_id
+                    FROM card_events WHERE event='played'
+                ) ce
+                JOIN games g ON g.game_id = ce.game_id
+                WHERE g.outcome IS NOT NULL
+                GROUP BY ce.card_def_id
+                """
+            ).fetchall()
+            wr_by_card = {
+                r["card_def_id"]: (r["played_games"], r["played_wins"])
+                for r in wr_rows
+            }
+
+        cards: list[dict] = []
+        low_sample: list[dict] = []
+        for r in rows:
+            drawn = r["drawn"] or 0
+            played = r["played"] or 0
+            played_games, played_wins = wr_by_card.get(r["card_def_id"], (0, 0))
+            win_rate_when_played = (
+                round(played_wins / played_games, 3) if played_games else None
+            )
+            stat = {
+                "card_def_id": r["card_def_id"],
+                "games_seen": r["games_seen"] or 0,
+                "games_played": r["games_played"] or 0,
+                # frequency / tempo
+                "draw_rate": round((r["games_seen"] or 0) / games_total, 3) if games_total else None,
+                "play_rate": round((r["games_played"] or 0) / games_total, 3) if games_total else None,
+                "play_when_drawn_rate": round(played / drawn, 3) if drawn else None,
+                "mulligan_rate": round((r["mulliganed"] or 0) / drawn, 3) if drawn else None,
+                "stuck_in_hand_rate": round((r["stuck"] or 0) / drawn, 3) if drawn else None,
+                "avg_turn_played": round(r["avg_turn_played"], 2) if r["avg_turn_played"] is not None else None,
+                "avg_energy_spent": round(r["avg_energy_spent"], 2) if r["avg_energy_spent"] is not None else None,
+                # raw counts
+                "drawn": drawn,
+                "played": played,
+                "discarded": r["discarded"] or 0,
+                "scored": r["scored"] or 0,
+                "deaths": r["died"] or 0,
+                # impact (survivorship-biased — see caveat)
+                "win_rate_when_played": win_rate_when_played,
+            }
+            (cards if played >= min_plays else low_sample).append(stat)
+
+        cards.sort(key=lambda c: c["played"], reverse=True)
+        low_sample.sort(key=lambda c: c["played"], reverse=True)
+        return {
+            "games_total": games_total,
+            "base_win_rate": base_win_rate,
+            "min_plays": min_plays,
+            "cards": cards,
+            "low_sample": low_sample,
+            "note": "WPA omitted (requires turn_snapshots). win_rate_when_played is survivorship-biased.",
+        }
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
     def _next_decision_index(self, game_id: str) -> int:
         idx = self._decision_counters.get(game_id, 0)
         self._decision_counters[game_id] = idx + 1

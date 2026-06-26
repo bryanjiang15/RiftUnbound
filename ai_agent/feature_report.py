@@ -21,6 +21,14 @@ Usage:
     python ai_agent/feature_report.py --db ai_agent/selfplay.db
     python ai_agent/feature_report.py --sort frequency # sort by in-play %
     python ai_agent/feature_report.py --origin self_play --selector argmax
+
+Filtering (all combine with AND):
+    --turn 3              only decisions on turn 3
+    --min-turn 2 --max-turn 5   turns 2-5 inclusive
+    --outcome win         only decisions from games the seat won
+    --seat 0              only seat-0 (player index) decisions
+    --went-first 1        only decisions where the seat went first
+    --mode main|reactive  --game-id <id>  --weight-version <n>
 """
 from __future__ import annotations
 
@@ -31,6 +39,13 @@ import sys
 from pathlib import Path
 
 DEFAULT_DB_PATH = Path(__file__).parent / "agent_memory.db"
+
+# Force UTF-8 so the bar glyphs / symbols survive a non-UTF-8 console (e.g. the
+# Windows cp1252 default) when output is redirected or piped.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+except (AttributeError, ValueError):
+    pass
 
 # Breakdown keys that are metadata / aggregates, not per-feature contributions.
 _NON_FEATURE_KEYS = {"total", "points_to_win", "shaping_clamped"}
@@ -66,19 +81,25 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def gather(conn: sqlite3.Connection, *, origin: str | None, selector: str | None,
-           mode: str | None) -> dict:
+def gather(conn: sqlite3.Connection, *, filters: dict) -> dict:
     where = ["chosen_breakdown_json IS NOT NULL"]
     params: list = []
-    if origin:
-        where.append("origin = ?")
-        params.append(origin)
-    if selector:
-        where.append("selector_source = ?")
-        params.append(selector)
-    if mode:
-        where.append("mode = ?")
-        params.append(mode)
+    # Simple equality filters.
+    for col, key in (("origin", "origin"), ("selector_source", "selector"),
+                     ("mode", "mode"), ("game_outcome", "outcome"),
+                     ("my_player_index", "seat"), ("went_first", "went_first"),
+                     ("game_id", "game_id"), ("weight_version_id", "weight_version")):
+        val = filters.get(key)
+        if val is not None:
+            where.append(f"{col} = ?")
+            params.append(val)
+    # Turn range.
+    if filters.get("min_turn") is not None:
+        where.append("turn >= ?")
+        params.append(filters["min_turn"])
+    if filters.get("max_turn") is not None:
+        where.append("turn <= ?")
+        params.append(filters["max_turn"])
     sql = "SELECT chosen_breakdown_json FROM search_decisions WHERE " + " AND ".join(where)
     rows = conn.execute(sql, params).fetchall()
 
@@ -103,14 +124,37 @@ def gather(conn: sqlite3.Connection, *, origin: str | None, selector: str | None
             if val != 0.0:
                 s["active"] += 1
                 s["active_abs"] += abs(val)
-    return {"total": total, "stats": stats}
+    return {"total": total, "stats": stats, "filters": filters}
+
+
+def _filter_summary(filters: dict) -> str:
+    parts = []
+    simple = {
+        "origin": "origin", "selector": "selector", "mode": "mode",
+        "outcome": "outcome", "seat": "seat", "went_first": "went_first",
+        "game_id": "game", "weight_version": "weight_v",
+    }
+    for key, label in simple.items():
+        v = filters.get(key)
+        if v is not None:
+            parts.append(f"{label}={v}")
+    mn, mx = filters.get("min_turn"), filters.get("max_turn")
+    if mn is not None and mx is not None:
+        parts.append(f"turn {mn}" if mn == mx else f"turn {mn}-{mx}")
+    elif mn is not None:
+        parts.append(f"turn>={mn}")
+    elif mx is not None:
+        parts.append(f"turn<={mx}")
+    return ", ".join(parts) if parts else "no filters"
 
 
 def render(data: dict, sort_key: str) -> str:
     total = data["total"]
     stats = data["stats"]
+    filt = _filter_summary(data.get("filters", {}))
     if total == 0:
-        return "No searched decisions found (is the DB populated / filters too strict?)."
+        return (f"No searched decisions match [{filt}] "
+                "(is the DB populated / filters too strict?).")
 
     rows = []
     for feat, s in stats.items():
@@ -137,6 +181,7 @@ def render(data: dict, sort_key: str) -> str:
     out: list[str] = []
     out.append("")
     out.append(_bold(f"  Feature impact & frequency — {total} searched decisions"))
+    out.append(_dim(f"  filters: {filt}"))
     out.append(_dim(f"  sorted by {'in-play %' if sort_key == 'frequency' else 'average |impact|'}"))
     out.append("")
     header = (f"  {'Feature':<{name_w}}  {'In-play':>8}  {'Avg|impact|':>12}  "
@@ -181,11 +226,39 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--origin", help="Filter by origin (self_play|vs_human|vs_heuristic)")
     parser.add_argument("--selector", help="Filter by selector_source (argmax|llm|fallback)")
     parser.add_argument("--mode", help="Filter by search mode (main|reactive)")
+    parser.add_argument("--outcome", help="Filter by game_outcome (win|loss|draw)")
+    parser.add_argument("--seat", type=int, help="Filter by deciding seat (my_player_index, 0 or 1)")
+    parser.add_argument("--went-first", type=int, choices=[0, 1], dest="went_first",
+                        help="Filter by whether the seat went first (1) or not (0)")
+    parser.add_argument("--game-id", dest="game_id", help="Filter to a single game_id")
+    parser.add_argument("--weight-version", type=int, dest="weight_version",
+                        help="Filter by weight_version_id")
+    parser.add_argument("--min-turn", type=int, dest="min_turn", help="Only decisions on turn >= N")
+    parser.add_argument("--max-turn", type=int, dest="max_turn", help="Only decisions on turn <= N")
+    parser.add_argument("--turn", type=int, help="Only decisions on exactly turn N (shortcut)")
     args = parser.parse_args(argv)
+
+    min_turn = args.min_turn
+    max_turn = args.max_turn
+    if args.turn is not None:
+        min_turn = max_turn = args.turn
+
+    filters = {
+        "origin": args.origin,
+        "selector": args.selector,
+        "mode": args.mode,
+        "outcome": args.outcome,
+        "seat": args.seat,
+        "went_first": args.went_first,
+        "game_id": args.game_id,
+        "weight_version": args.weight_version,
+        "min_turn": min_turn,
+        "max_turn": max_turn,
+    }
 
     conn = _connect(args.db)
     try:
-        data = gather(conn, origin=args.origin, selector=args.selector, mode=args.mode)
+        data = gather(conn, filters=filters)
     finally:
         conn.close()
     print(render(data, args.sort))

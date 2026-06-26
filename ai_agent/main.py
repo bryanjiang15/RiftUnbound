@@ -559,6 +559,18 @@ class OpponentActionRequest(BaseModel):
     action: str
 
 
+class CardEventRequest(BaseModel):
+    game_id: str
+    turn: int = 0
+    card_def_id: str              # base definition_id (aggregation key)
+    event: str                    # drawn|played|discarded|died|mulliganed|
+                                  # scored|left_in_hand_at_end|in_opening_hand
+    instance_id: str | None = None
+    my_player_index: int | None = None
+    energy_spent: int = 0
+    breakdown_delta: dict[str, Any] | None = None
+
+
 class GameStateEventRequest(BaseModel):
     game_id: str
     turn: int = 0
@@ -753,6 +765,14 @@ async def eval_report_endpoint() -> dict:
     return _memory.eval_report()
 
 
+@app.get("/card_stats")
+async def card_stats_endpoint(min_plays: int = 20) -> dict:
+    """Per-card aggregate statistics (storage doc §3). WPA omitted for now."""
+    if _memory is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    return _memory.card_stats_report(min_plays=min_plays)
+
+
 @app.post("/opponent_action")
 async def opponent_action_endpoint(body: OpponentActionRequest) -> dict:
     """
@@ -770,6 +790,35 @@ async def opponent_action_endpoint(body: OpponentActionRequest) -> dict:
     except Exception as exc:
         logger.warning("Opponent action record failed: %s", exc)
     logger.debug("Opponent action: game=%s turn=%d action=%s", body.game_id, body.turn, body.action)
+    return {"status": "ok"}
+
+
+@app.post("/card_event")
+async def card_event_endpoint(body: CardEventRequest) -> dict:
+    """
+    Godot calls this on each card lifecycle event (drawn/played/discarded/died/
+    mulliganed/scored/left_in_hand_at_end/in_opening_hand). The base
+    definition_id is stamped engine-side onto every event (doc §3 join-key note);
+    it is never reverse-engineered from instance_id here.
+    """
+    if _memory is None:
+        return {"status": "no-op"}
+    try:
+        _memory.record_card_event(
+            game_id=body.game_id,
+            turn=body.turn,
+            card_def_id=body.card_def_id,
+            event=body.event,
+            instance_id=body.instance_id,
+            my_player_index=body.my_player_index,
+            energy_spent=body.energy_spent,
+            breakdown_delta=body.breakdown_delta,
+        )
+    except ValueError as exc:
+        logger.warning("Card event rejected: %s", exc)
+        return {"status": "rejected", "reason": str(exc)}
+    except Exception as exc:
+        logger.warning("Card event record failed: %s", exc)
     return {"status": "ok"}
 
 
