@@ -134,6 +134,18 @@ mis-weighted terms.
 python ai_agent/feature_report.py --db ai_agent/selfplay.db --sort impact
 ```
 
+## Tuning weights from outcomes — `ai_agent/texel_tune.py`
+Texel's method (logistic regression): fits the weights above so that
+`sigmoid(K · eval)` predicts each logged position's final `game_outcome`. Reads
+`chosen_features_json` + `game_outcome` from `search_decisions`, excludes terminal
+positions, ridge-regularizes (correlated features), and writes a **candidate**
+profile plus a sign-flip / dead-weight diagnosis. Proposer only — validate via
+self-play win-rate before committing. See `Score_Tuning_And_Evolution.md` §2.1.
+
+```
+python ai_agent/texel_tune.py --db ai_agent/selfplay.db --out candidate_profile.json
+```
+
 ---
 
 ## File map
@@ -143,6 +155,7 @@ python ai_agent/feature_report.py --db ai_agent/selfplay.db --sort impact
 | Scoring weights application + clamp | `Scripts/Game/ScoringProfile.gd` |
 | Live weights | `Data/AI/scoring_profile.json` |
 | Feature impact report CLI | `ai_agent/feature_report.py` |
+| Texel weight tuner (proposes new weights) | `ai_agent/texel_tune.py` |
 
 Related: per-card outcome statistics are documented separately in
 `Card_Statistics_Reference.md`.

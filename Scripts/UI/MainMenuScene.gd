@@ -4,15 +4,26 @@ const DECKS_DIR := "res://Data/Decks/"
 const DEFAULT_P1_DECK := "res://Data/Decks/master-yi-calm-body.json"
 const DEFAULT_P2_DECK := "res://Data/Decks/starter-deck-p2.json"
 
+const PROFILES_DIR := "res://Data/AI/"
+const DEFAULT_PROFILE := "res://Data/AI/scoring_profile.json"
+
 # Discovered decks: array of { "label": String, "path": String }
 var _decks: Array = []
 var _p1_picker: OptionButton
 var _p2_picker: OptionButton
 var _human_eval_check: CheckBox
 
+# Discovered scoring profiles (the weights each AI seat searches under): array of
+# { "label": String, "path": String }. Chosen here, threaded through GameScene to
+# AIPlayer.setup() so a match can pit one weight set against another.
+var _profiles: Array = []
+var _p1_profile_picker: OptionButton
+var _p2_profile_picker: OptionButton
+
 
 func _ready() -> void:
 	_load_deck_list()
+	_load_profile_list()
 	_build_ui()
 
 
@@ -41,6 +52,35 @@ func _deck_label_for(path: String, fallback: String) -> String:
 		if typeof(parsed) == TYPE_DICTIONARY and parsed.has("player_label"):
 			return str(parsed["player_label"])
 	return fallback.get_basename()
+
+
+# Discover scoring-profile JSONs in Data/AI/. A file qualifies if it parses as a
+# dict carrying weight data (state_weights / win_game), so non-profile JSON that
+# may live alongside it is ignored. The live default is always listed first.
+func _load_profile_list() -> void:
+	_profiles.clear()
+	var dir := DirAccess.open(PROFILES_DIR)
+	if dir == null:
+		push_warning("MainMenuScene: could not open %s" % PROFILES_DIR)
+		return
+	var file_names := dir.get_files()
+	file_names.sort()
+	for file_name in file_names:
+		if not file_name.ends_with(".json"):
+			continue
+		var path := PROFILES_DIR + file_name
+		if not _is_profile(path):
+			continue
+		_profiles.append({"label": file_name.get_basename(), "path": path})
+
+
+func _is_profile(path: String) -> bool:
+	var text := FileAccess.get_file_as_string(path)
+	if text == "":
+		return false
+	var parsed = JSON.parse_string(text)
+	return typeof(parsed) == TYPE_DICTIONARY \
+		and (parsed.has("state_weights") or parsed.has("win_game"))
 
 
 func _build_ui() -> void:
@@ -85,6 +125,10 @@ func _build_ui() -> void:
 	# Deck selection — choose which deck each player pilots
 	var deck_panel := _make_deck_selectors()
 	vbox.add_child(deck_panel)
+
+	# AI profile selection — choose the scoring weights each AI seat plays under.
+	var profile_panel := _make_profile_selectors()
+	vbox.add_child(profile_panel)
 
 	# Eval option — when on, a feedback panel is shown after a Player vs AI game.
 	var eval_panel := _make_eval_toggle()
@@ -190,6 +234,33 @@ func _make_deck_selectors() -> VBoxContainer:
 	return wrapper
 
 
+func _make_profile_selectors() -> VBoxContainer:
+	var wrapper := VBoxContainer.new()
+	wrapper.add_theme_constant_override("separation", 10)
+
+	var heading := Label.new()
+	heading.text = "AI Scoring Profile"
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	heading.add_theme_font_size_override("font_size", 18)
+	heading.add_theme_color_override("font_color", Color(0.70, 0.74, 0.85))
+	wrapper.add_child(heading)
+
+	_p1_profile_picker = _make_profile_picker("Player 1 AI Profile", DEFAULT_PROFILE)
+	wrapper.add_child(_p1_profile_picker.get_parent())
+
+	_p2_profile_picker = _make_profile_picker("Player 2 AI Profile", DEFAULT_PROFILE)
+	wrapper.add_child(_p2_profile_picker.get_parent())
+
+	var note := Label.new()
+	note.text = "Applies to AI seats only (P2 in Player vs AI; both in AI vs AI)"
+	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	note.add_theme_font_size_override("font_size", 13)
+	note.add_theme_color_override("font_color", Color(0.48, 0.52, 0.64))
+	wrapper.add_child(note)
+
+	return wrapper
+
+
 func _make_eval_toggle() -> VBoxContainer:
 	var wrapper := VBoxContainer.new()
 	wrapper.add_theme_constant_override("separation", 4)
@@ -250,9 +321,48 @@ func _selected_deck_path(picker: OptionButton, fallback: String) -> String:
 	return str(_decks[idx]["path"])
 
 
+func _make_profile_picker(label_text: String, default_path: String) -> OptionButton:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+
+	var label := Label.new()
+	label.text = label_text
+	label.custom_minimum_size = Vector2(160, 0)
+	label.add_theme_font_size_override("font_size", 16)
+	label.add_theme_color_override("font_color", Color(0.58, 0.63, 0.76))
+	row.add_child(label)
+
+	var picker := OptionButton.new()
+	picker.custom_minimum_size = Vector2(360, 40)
+	picker.add_theme_font_size_override("font_size", 16)
+	for i in _profiles.size():
+		var profile: Dictionary = _profiles[i]
+		picker.add_item(str(profile["label"]), i)
+		if str(profile["path"]) == default_path:
+			picker.select(i)
+	row.add_child(picker)
+
+	return picker
+
+
+func _selected_profile_path(picker: OptionButton, fallback: String) -> String:
+	if picker == null:
+		return fallback
+	var idx := picker.get_selected_id()
+	if idx < 0 or idx >= _profiles.size():
+		return fallback
+	return str(_profiles[idx]["path"])
+
+
 func _apply_deck_overrides() -> void:
 	Engine.set_meta("p1_deck", _selected_deck_path(_p1_picker, DEFAULT_P1_DECK))
 	Engine.set_meta("p2_deck", _selected_deck_path(_p2_picker, DEFAULT_P2_DECK))
+
+
+func _apply_profile_overrides() -> void:
+	Engine.set_meta("p1_profile", _selected_profile_path(_p1_profile_picker, DEFAULT_PROFILE))
+	Engine.set_meta("p2_profile", _selected_profile_path(_p2_profile_picker, DEFAULT_PROFILE))
 
 
 func _apply_eval_override() -> void:
@@ -263,6 +373,7 @@ func _apply_eval_override() -> void:
 func _on_pvp_pressed() -> void:
 	Engine.set_meta("game_mode", "pvp")
 	_apply_deck_overrides()
+	_apply_profile_overrides()
 	_apply_eval_override()
 	get_tree().change_scene_to_file("res://Scenes/GameScene.tscn")
 
@@ -270,6 +381,7 @@ func _on_pvp_pressed() -> void:
 func _on_pvai_pressed() -> void:
 	Engine.set_meta("game_mode", "pvai")
 	_apply_deck_overrides()
+	_apply_profile_overrides()
 	_apply_eval_override()
 	get_tree().change_scene_to_file("res://Scenes/GameScene.tscn")
 
@@ -277,5 +389,6 @@ func _on_pvai_pressed() -> void:
 func _on_aivai_pressed() -> void:
 	Engine.set_meta("game_mode", "aivai")
 	_apply_deck_overrides()
+	_apply_profile_overrides()
 	_apply_eval_override()
 	get_tree().change_scene_to_file("res://Scenes/GameScene.tscn")

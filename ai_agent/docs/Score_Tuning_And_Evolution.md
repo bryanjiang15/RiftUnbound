@@ -113,6 +113,24 @@ SPSA — chessprogramming.org/SPSA; LOCM evolved eval — Miernik & Kowalski, IC
   −) means it's actively miscalibrated.
 - Cheap (one pass over logged data), uses data you already collect. No new games.
 
+**Implementation:** `ai_agent/texel_tune.py` (Phase-1 proposer). Reads
+`search_decisions` with the same AND filters as `feature_report.py`, maps each
+`chosen_features_json` to the per-weight feature vector (mirroring
+`ScoringProfile` term math), and fits standardized logistic weights via
+ridge-regularized gradient descent. Outputs a **candidate** `scoring_profile.json`
+(`--out`, never overwrites the live profile) plus the two-way diagnosis below.
+Terminal positions (`game_over`) are excluded so the `win_game` term can't swamp
+the shaping signal; `battlefield_weights`, `end_of_turn`, and `mulligan` are held
+fixed in this phase. Run:
+
+```
+python ai_agent/texel_tune.py --db ai_agent/selfplay.db --out candidate_profile.json
+python ai_agent/texel_tune.py --dry-run --lambda 1.0   # diagnose only
+```
+
+Tests: `ai_agent/tests/test_texel_tune.py` (synthetic sign recovery, sign-flip
+detection, zero-variance handling, ridge stability on correlated features).
+
 **Caveats specific to this game:**
 - **Noisy labels** (shuffle/hidden info) → need many games.
 - **Correlated features** (`cards_in_hand`↔`card_drawn`,
@@ -281,7 +299,8 @@ cannot fill — always validated by a self-play win-rate gate.
 
 ## 7. Build order
 1. Add delayed-value features to `ScoringProfile` (§1.2) — biggest immediate win.
-2. Texel fitter over logged data (§2.1); diagnose zero/sign-flip weights.
+2. Texel fitter over logged data (§2.1; `ai_agent/texel_tune.py`) — diagnose
+   zero/sign-flip weights. **Done.**
 3. AI-vs-AI + argmax harness (storage doc) to enable win-rate evaluation.
 4. SPRT gate + `weight_versions` / `tuning_runs` (storage doc).
 5. CMA-ES refiner (§2.2) over self-play win-rate.

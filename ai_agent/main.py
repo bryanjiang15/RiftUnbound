@@ -60,7 +60,40 @@ _search_enabled: bool = False
 _argmax_enabled: bool = False
 _weight_version_id: int | None = None
 _data_origin: str = "vs_human"
+# When set (0 or 1), only persist the tuning dataset (search_decisions /
+# candidate_lines / decision_snapshots) for that seat's decisions. Lets a
+# self-play run pit two profiles against each other while storing data from only
+# one of them (put the profile-under-test on this seat). None = capture both.
+_capture_seat: int | None = None
 _SEARCH_LOG_PATH = os.path.join(os.path.dirname(__file__), "agent_search.log")
+
+# Cache of profile-JSON text -> weight_versions.id, so a per-request profile is
+# registered/looked up once instead of hitting the DB on every decision.
+_weight_version_cache: dict[str, int] = {}
+
+
+def _resolve_weight_version(profile_json: str | None) -> int | None:
+    """Map a request's scoring-profile JSON to its weight_versions id.
+
+    Per-seat attribution: the engine sends the seat's actual profile, so two
+    profiles in one self-play run get their own ids instead of both collapsing
+    onto the single file the server read at startup. Falls back to that startup
+    id when the request carries no profile (e.g. live play / older engines).
+    """
+    if not profile_json:
+        return _weight_version_id
+    cached = _weight_version_cache.get(profile_json)
+    if cached is not None:
+        return cached
+    try:
+        wv = _memory.record_weight_version(
+            profile_json=profile_json, git_sha=_current_git_sha()
+        )
+    except Exception as exc:
+        logger.warning("Per-request weight version resolve failed: %s", exc)
+        return _weight_version_id
+    _weight_version_cache[profile_json] = wv
+    return wv
 
 
 def _load_scoring_profile() -> str | None:
@@ -96,7 +129,7 @@ def _current_git_sha() -> str | None:
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     global _memory, _decision_logger, _pipeline_mode, _search_enabled
-    global _argmax_enabled, _weight_version_id, _data_origin
+    global _argmax_enabled, _weight_version_id, _data_origin, _capture_seat
     db_path_override = os.environ.get("RIFTBOUND_DB_PATH", "").strip()
     if db_path_override:
         from pathlib import Path
@@ -129,6 +162,17 @@ async def _lifespan(app: FastAPI):
     # 'self_play', or 'vs_heuristic'. The self-play harness sets this so the two
     # state distributions are never silently mixed in tuning.
     _data_origin = os.environ.get("RIFTBOUND_DATA_ORIGIN", "vs_human").strip() or "vs_human"
+    # Optional capture filter: persist tuning rows for only one seat's decisions.
+    capture_seat_raw = os.environ.get("RIFTBOUND_CAPTURE_SEAT", "").strip()
+    if capture_seat_raw in ("0", "1"):
+        _capture_seat = int(capture_seat_raw)
+    else:
+        _capture_seat = None
+        if capture_seat_raw:
+            logger.warning(
+                "Ignoring invalid RIFTBOUND_CAPTURE_SEAT=%r (expected 0 or 1)",
+                capture_seat_raw,
+            )
     # Record the active scoring profile so every captured decision is attributable
     # to the exact weights that produced it (A/B + tuning provenance).
     profile_json = _load_scoring_profile()
@@ -167,6 +211,10 @@ async def _lifespan(app: FastAPI):
     logger.info("Search mode: %s", "ENABLED" if _search_enabled else "disabled")
     logger.info("Argmax-only selection: %s", "ENABLED" if _argmax_enabled else "disabled")
     logger.info("Weight version id: %s", _weight_version_id)
+    logger.info(
+        "Capture seat filter: %s",
+        "both seats" if _capture_seat is None else "seat %d only" % _capture_seat,
+    )
     yield
     logger.info("Riftbound AI agent service shutting down.")
 
@@ -379,6 +427,9 @@ def _capture_search_decision(
     turn = brief_state.get("turn_number", 0)
     decision_type = brief_state.get("decision_type", "unknown")
     mode = request.search_stats.mode if request.search_stats else "main"
+    # Attribute this row to the seat's actual profile (per-seat), not the single
+    # profile the server read at startup.
+    weight_version_id = _resolve_weight_version(request.scoring_profile_json)
 
     _memory.record_search_decision(
         game_id=game_id,
@@ -399,7 +450,7 @@ def _capture_search_decision(
         selector_source=decision.selector_source,
         selector_reasoning=decision.reasoning,
         origin=_data_origin,
-        weight_version_id=_weight_version_id,
+        weight_version_id=weight_version_id,
         candidates=cand_rows,
     )
     _memory.record_decision_snapshot(
@@ -498,8 +549,11 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
         logger.warning("Decision metrics record failed: %s", exc)
 
     # Capture the tuning dataset row (search_decisions + candidate_lines +
-    # decision_snapshots) when this decision came from the engine search.
-    if _search_enabled and request.candidate_lines:
+    # decision_snapshots) when this decision came from the engine search. When a
+    # capture-seat filter is active, store only that seat's decisions so a
+    # two-profile self-play run yields a single-profile dataset.
+    capture_ok = _capture_seat is None or brief_state.get("my_player_index") == _capture_seat
+    if _search_enabled and request.candidate_lines and capture_ok:
         try:
             decision_index = (
                 _memory._decision_counters.get(game_id, 0) - 1 if _memory else 0

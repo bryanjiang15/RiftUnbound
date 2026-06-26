@@ -35,6 +35,18 @@ var AGENT_URL := ""
 # Handled locally by MulliganHeuristic instead of deferring to the agent server.
 var _mulligan_config: Dictionary = {}
 
+# Path to this seat's scoring profile JSON. Empty = the live default profile.
+# Set per-instance (e.g. by SelfPlaySim) so two seats can search under different
+# weights for A/B self-play; threaded into every TurnSearch this seat creates and
+# into the local mulligan config load.
+var _scoring_profile_path: String = "res://Data/AI/candidate_profile.json"
+
+# Raw JSON text of this seat's scoring profile, sent with each search decision so
+# the server can attribute the captured row to the EXACT weights that produced it
+# (per-seat). Without this the server would stamp every row with the single
+# profile it read at startup, mislabelling two-profile self-play runs.
+var _scoring_profile_json: String = ""
+
 # Whether to run the engine-side turn search and ship candidate lines to the
 # agent. The agent service is the single source of truth (it reads RIFTBOUND_SEARCH
 # from its own environment); the engine and agent are separate processes that do
@@ -69,16 +81,22 @@ var _game_over_reported: bool = false
 var _move_seq: int = 0
 
 
-func setup(gc: GameController, pi: int) -> void:
+func setup(gc: GameController, pi: int, scoring_profile_path: String = "") -> void:
 	controller = gc
 	player_index = pi
+	_scoring_profile_path = scoring_profile_path
 	# Pre-handshake default from the engine's own env (usually unset); the agent
 	# service's /health response is authoritative and overrides this below.
 	_search_mode = _env_flag("RIFTBOUND_SEARCH")
 	var delay_override := OS.get_environment("RIFTBOUND_AI_THINK_DELAY").strip_edges()
 	if delay_override != "":
 		_think_delay = maxf(0.0, float(delay_override))
-	_mulligan_config = ScoringProfileScript.load_profile().get("mulligan", {})
+	var mulligan_profile_path := _scoring_profile_path if _scoring_profile_path != "" else ScoringProfileScript.DEFAULT_PROFILE_PATH
+	_mulligan_config = ScoringProfileScript.load_profile(mulligan_profile_path).get("mulligan", {})
+	# Raw profile text for server-side weight-version attribution. Read the same
+	# file the search scores under; hashing the raw text keeps it consistent with
+	# the server's own startup registration of an identical file.
+	_scoring_profile_json = FileAccess.get_file_as_string(mulligan_profile_path)
 	AGENT_URL = _agent_base_url() + "/decision"
 	_http = HTTPRequest.new()
 	_http.timeout = HTTP_TIMEOUT
@@ -184,12 +202,12 @@ func _request_decision(gs: GameState) -> void:
 	_candidate_lines = []
 	_search_stats = {}
 	if _search_mode and _should_run_search(gs):
-		var searcher: TurnSearch = TurnSearchScript.new()
+		var searcher: TurnSearch = TurnSearchScript.new(_scoring_profile_path)
 		var result: Dictionary = searcher.search(gs, player_index, {"mode": "main"})
 		_candidate_lines = result.get("candidate_lines", [])
 		_search_stats = result.get("search_stats", {})
 	elif _search_mode and _should_run_reactive_search(gs):
-		var reactive: TurnSearch = TurnSearchScript.new()
+		var reactive: TurnSearch = TurnSearchScript.new(_scoring_profile_path)
 		var rresult: Dictionary = reactive.search(gs, player_index, {"mode": "reactive"})
 		_candidate_lines = rresult.get("candidate_lines", [])
 		_search_stats = rresult.get("search_stats", {})
@@ -221,6 +239,8 @@ func _build_request_payload() -> Dictionary:
 	if _search_mode and not _candidate_lines.is_empty():
 		payload["candidate_lines"] = _candidate_lines
 		payload["search_stats"] = _search_stats
+		if _scoring_profile_json != "":
+			payload["scoring_profile_json"] = _scoring_profile_json
 	return payload
 
 

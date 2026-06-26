@@ -35,6 +35,7 @@ uvicorn ai_agent.main:app --port 8765 --reload
 | `RIFTBOUND_SEARCH` | `off` | No | Enables engine search mode. When on, Godot runs `TurnSearch` and posts candidate lines; the server selects a line (via `choose_line`) and captures the tuning dataset (`search_decisions` / `candidate_lines` / `decision_snapshots`). |
 | `RIFTBOUND_SEARCH_ARGMAX` | `off` | No | When on (with search enabled), skips the LLM line-selector round-trip and returns the top-scored line directly. Decisions are tagged `selector_source='argmax'`. Use for bulk data generation / weight tuning. |
 | `RIFTBOUND_DATA_ORIGIN` | `vs_human` | No | Provenance tag stamped on captured `search_decisions` rows: `vs_human`, `self_play`, or `vs_heuristic`. Keeps state distributions separable so they are never silently mixed in tuning. |
+| `RIFTBOUND_CAPTURE_SEAT` | (unset) | No | When `0` or `1`, persist the tuning dataset (`search_decisions` / `candidate_lines` / `decision_snapshots`) for **only that seat's** decisions. Use in two-profile self-play to store data from just the profile under test (put it on this seat). Unset/invalid = capture both seats. |
 | `RIFTBOUND_DB_PATH` | (default `ai_agent/agent_memory.db`) | No | Override the SQLite database path. Useful to write self-play data to a dedicated file (e.g. `ai_agent/selfplay.db`) instead of the live-play DB. |
 
 
@@ -196,6 +197,65 @@ RIFTBOUND_SEARCH=on RIFTBOUND_AGENT_PORT=8766 RIFTBOUND_AI_THINK_DELAY=0 \
   <godot> --headless --path . --script res://Scripts/Tools/SelfPlaySim.gd -- \
     --games 50 --seed 1000 --turn-cap 200
 ```
+
+#### A/B-testing two scoring profiles
+
+Pass `--p1-profile` / `--p2-profile` to give each seat its own scoring-profile
+JSON (omit a flag to use the live default `Data/AI/scoring_profile.json`). This
+pits a tuned candidate (e.g. from `ai_agent/texel_tune.py`) against the baseline;
+the per-seat win-rate is the gate that decides whether to commit the candidate.
+Each `TurnSearch` scores under its seat's profile, and argmax selection uses those
+engine-computed scores, so the two seats genuinely play different weights.
+
+```bash
+RIFTBOUND_SEARCH=on RIFTBOUND_AGENT_PORT=8766 RIFTBOUND_AI_THINK_DELAY=0 \
+  <godot> --headless --path . --script res://Scripts/Tools/SelfPlaySim.gd -- \
+    --games 50 --seed 1000 \
+    --p1-profile res://Data/AI/candidate_profile.json \
+    --p2-profile res://Data/AI/scoring_profile.json
+```
+
+Paths may be `res://…` or absolute OS paths. Alternate which seat gets the
+candidate across runs (or randomise `--seed`/first player) to cancel
+first-player advantage.
+
+#### Storing data from only one profile
+
+Both seats POST to the same server, so by default **both** seats' decisions are
+captured (tell them apart via the `my_player_index` column, or
+`feature_report.py --seat` / `texel_tune.py --seat`). To store **only** the
+profile-under-test, set `RIFTBOUND_CAPTURE_SEAT` to that seat on the server and
+put the test profile on the matching seat:
+
+```bash
+# Server: capture ONLY seat 0's decisions.
+RIFTBOUND_SEARCH=on RIFTBOUND_SEARCH_ARGMAX=on \
+RIFTBOUND_DATA_ORIGIN=self_play RIFTBOUND_DB_PATH=ai_agent/selfplay.db \
+RIFTBOUND_CAPTURE_SEAT=0 \
+  uvicorn ai_agent.main:app --port 8766
+
+# Engine: seat 0 = candidate (captured), seat 1 = baseline (not captured).
+RIFTBOUND_SEARCH=on RIFTBOUND_AGENT_PORT=8766 RIFTBOUND_AI_THINK_DELAY=0 \
+  <godot> --headless --path . --script res://Scripts/Tools/SelfPlaySim.gd -- \
+    --games 50 --seed 1000 \
+    --p1-profile res://Data/AI/candidate_profile.json \
+    --p2-profile res://Data/AI/scoring_profile.json
+```
+
+The unkept seat still plays (providing a real opponent) but writes no tuning
+rows, and `/game_over` backfill is seat-scoped so the kept seat's labels stay
+correct.
+
+> **Per-seat weight-version attribution:** the engine sends each seat's actual
+> scoring profile with every search decision, so a captured row's
+> `weight_version_id` reflects the **exact weights that produced it** — even when
+> the two seats run different `--pN-profile` files. Each distinct profile is
+> registered as its own `weight_versions` row on first sight. (Live play / older
+> engines that send no profile fall back to the one the server read at startup
+> from `Data/AI/scoring_profile.json`.) So you can train on just the profile under
+> test with `texel_tune.py --weight-version <id>` — look the id up via the
+> `weight_versions` table (optionally by a `profile_id` field embedded in the
+> profile JSON).
 
 Engine-side env vars consumed by `Scripts/AI/AIPlayer.gd`:
 

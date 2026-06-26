@@ -161,7 +161,8 @@ static func build_score_features(root_snap: Dictionary, leaf_snap: Dictionary, s
 	# ── state diffs (me vs opponent at the leaf) ──
 	features["score_diff"] = int(leaf_snap.get("my_score", 0)) - int(leaf_snap.get("opp_score", 0))
 	features["unit_might_diff"] = int(leaf_snap.get("my_unit_might", 0)) - int(leaf_snap.get("opp_unit_might", 0))
-	features["cards_in_hand_diff"] = int(leaf_snap.get("my_hand", 0)) - int(leaf_snap.get("opp_hand", 0))
+	features["cards_in_hand_self"] = int(leaf_snap.get("my_hand", 0))
+	# features["cards_in_hand_opponent"] = int(leaf_snap.get("opp_hand", 0))
 	features["runes_available_diff"] = int(leaf_snap.get("my_ready_runes", 0)) - int(leaf_snap.get("opp_ready_runes", 0))
 	features["keyword_net"] = _keyword_net(leaf_snap, ai_index)
 	# How many Action/Reaction cards in hand the AI can actually afford to play on

@@ -133,24 +133,26 @@ func _setup_ai() -> void:
 	_ai = AIPlayer.new()
 	_ai.name = "AIPlayer"
 	_controller.add_child(_ai)
-	_ai.setup(_controller, 1)
+	# P2 is the AI seat in Player vs AI; it searches under the P2 profile.
+	_ai.setup(_controller, 1, str(Engine.get_meta("p2_profile", "")))
 	if _human_eval_enabled:
 		_setup_move_feedback_box()
 
 
 func _setup_ai_vs_ai() -> void:
 	# Two AI seats. Both run the same TurnSearch + agent pipeline as Player vs AI;
-	# a per-move delay keeps the play watchable for human analysis.
+	# a per-move delay keeps the play watchable for human analysis. Each seat can
+	# search under its own scoring profile (chosen on the Main Menu).
 	_ai0 = AIPlayer.new()
 	_ai0.name = "AIPlayer0"
 	_controller.add_child(_ai0)
-	_ai0.setup(_controller, 0)
+	_ai0.setup(_controller, 0, str(Engine.get_meta("p1_profile", "")))
 	_ai0._think_delay = AI_VS_AI_MOVE_DELAY
 
 	_ai1 = AIPlayer.new()
 	_ai1.name = "AIPlayer1"
 	_controller.add_child(_ai1)
-	_ai1.setup(_controller, 1)
+	_ai1.setup(_controller, 1, str(Engine.get_meta("p2_profile", "")))
 	_ai1._think_delay = AI_VS_AI_MOVE_DELAY
 
 	# Kick the driver once the scene is wired (deferred so it never runs inside a

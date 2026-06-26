@@ -50,7 +50,7 @@ func score_with_breakdown(features: Dictionary) -> Dictionary:
 	breakdown["score_diff"] = float(features.get("score_diff", 0)) * _w(state_w, "score_diff")
 	breakdown["battlefield_control"] = _battlefield_control(features, ai_index, bf_w) * _w(state_w, "battlefield_control")
 	breakdown["unit_might_on_board"] = float(features.get("unit_might_diff", 0)) * _w(state_w, "unit_might_on_board")
-	breakdown["cards_in_hand"] = float(features.get("cards_in_hand_diff", 0)) * _w(state_w, "cards_in_hand")
+	breakdown["cards_in_hand"] = float(features.get("cards_in_hand_self", 0)) * _w(state_w, "cards_in_hand")
 	breakdown["runes_available"] = float(features.get("runes_available_diff", 0)) * _w(state_w, "runes_available")
 	breakdown["reactive_potential"] = float(features.get("reactive_potential", 0)) * _w(state_w, "reactive_potential")
 	breakdown["unusable_runes"] = float(features.get("unusable_runes", 0)) * _w(state_w, "unusable_runes")

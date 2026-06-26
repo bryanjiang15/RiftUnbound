@@ -469,3 +469,7 @@ class DecisionRequest(BaseModel):
     rejection_context: Optional[RejectionContext] = None
     candidate_lines: Optional[list[CandidateLine]] = None
     search_stats: Optional[SearchStats] = None
+    # Raw JSON of the deciding seat's scoring profile. Sent by the engine so the
+    # server attributes each captured row to the exact weights that produced it
+    # (per-seat). Absent for live play → server falls back to its startup profile.
+    scoring_profile_json: Optional[str] = None

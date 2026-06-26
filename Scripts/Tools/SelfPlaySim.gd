@@ -10,7 +10,12 @@ extends SceneTree
 #
 # Usage (from repo root):
 #   <godot> --headless --script res://Scripts/Tools/SelfPlaySim.gd -- \
-#       --games 10 --seed 1000 [--p1 res://Data/Decks/...] [--p2 ...] [--turn-cap 200]
+#       --games 10 --seed 1000 [--p1 res://Data/Decks/...] [--p2 ...] [--turn-cap 200] \
+#       [--p1-profile res://Data/AI/candidate.json] [--p2-profile res://Data/AI/scoring_profile.json]
+#
+# --p1-profile / --p2-profile point a seat at a specific scoring-profile JSON
+# (omit for the live default). Use this to A/B a tuned candidate against the
+# baseline: the win-rate over many games gates whether to commit the candidate.
 #
 # Point the engine at the server with RIFTBOUND_AGENT_PORT, and set
 # RIFTBOUND_AI_THINK_DELAY=0 to remove the per-move readability delay.
@@ -22,6 +27,11 @@ var _seed_base: int = 1000
 var _p1_deck: String = "res://Data/Decks/starter-deck-p2.json"
 var _p2_deck: String = "res://Data/Decks/starter-deck-p2.json"
 var _turn_cap: int = 200
+# Optional per-seat scoring profile JSON. Empty = the live default profile. Lets
+# a run pit one weight set against another (e.g. a Texel candidate vs baseline)
+# so win-rate gates a tuning proposal.
+var _p1_profile: String = "res://Data/AI/scoring_profile.json"
+var _p2_profile: String = "res://Data/AI/scoring_profile.json"
 
 # Per-game node state (members so the deferred driver can reach them safely
 # without capturing them in a signal-emitted lambda).
@@ -61,6 +71,14 @@ func _parse_args(args: PackedStringArray) -> void:
 				i += 1
 				if i < args.size():
 					_turn_cap = maxi(1, int(args[i]))
+			"--p1-profile":
+				i += 1
+				if i < args.size():
+					_p1_profile = args[i]
+			"--p2-profile":
+				i += 1
+				if i < args.size():
+					_p2_profile = args[i]
 		i += 1
 
 
@@ -122,7 +140,13 @@ func _print_header() -> void:
 	print("============================================================")
 	print(" RiftBound Self-Play  |  %d games  |  seed base %d" % [_games, _seed_base])
 	print(" server %s" % _base_url())
+	print(" P1 profile: %s" % _profile_label(_p1_profile))
+	print(" P2 profile: %s" % _profile_label(_p2_profile))
 	print("============================================================")
+
+
+func _profile_label(path: String) -> String:
+	return path if path != "" else "(default scoring_profile.json)"
 
 
 func _print_progress(done: int, wins: Array, unfinished: int, seed_used: int,
@@ -181,8 +205,8 @@ func _run_one_game(s: int) -> Dictionary:
 	# setup) must be fully inside the tree before setup() calls request(); calling
 	# setup() in the same frame as add_child() triggers !is_inside_tree() errors.
 	await process_frame
-	_ai0.setup(_controller, 0)
-	_ai1.setup(_controller, 1)
+	_ai0.setup(_controller, 0, _p1_profile)
+	_ai1.setup(_controller, 1, _p2_profile)
 	await process_frame  # let setup's HTTPRequest children + health probe settle
 
 	_driving = false
