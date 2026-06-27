@@ -301,9 +301,18 @@ func _decide_offline(gs: GameState) -> void:
 	}
 	SelfPlayCaptureLogScript.append("decision", decision_rec)
 
+	# No searched line covers this state (e.g. a pending_choice prompt, which
+	# neither main nor reactive search expands). The default cmd here is "pass",
+	# but a bare "pass" is rejected while a prompt is pending and silently no-ops
+	# — leaving the prompt unresolved and hanging self-play forever. Route to the
+	# heuristic, which knows how to resolve prompts / showdown passes / combat.
+	if chosen_line_id.is_empty():
+		_report_decision_metrics(true, null)
+		_heuristic_fallback(gs)
+		return
+
 	# Apply the move (mirror _on_request_completed accepted path).
-	if not chosen_line_id.is_empty():
-		_commit_chosen_line(chosen_line_id)
+	_commit_chosen_line(chosen_line_id)
 	_submit(cmd)
 	if not _committed_line.is_empty():
 		_committed_line_index = 1
@@ -531,11 +540,20 @@ func _heuristic_fallback(gs: GameState) -> void:
 		_submit(MulliganHeuristicScript.choose_command(gs, player_index, _mulligan_config))
 		return
 
-	# Pending prompt: pick first option
+	# Pending prompt: pick first valid option. valid_choices may hold either
+	# plain ids (e.g. "yes"/"no" for choose_optional) or CardInstances (discard /
+	# target prompts) — extract the instance_id in the latter case so the emitted
+	# `choose <id>` is actually legal and resolves the prompt (a malformed choose
+	# would be rejected, leaving the prompt pending and hanging self-play).
 	if not gs.pending_prompt.is_empty() and \
 	   gs.pending_prompt.get("player_index", -1) == player_index:
 		var choices = gs.pending_prompt.get("valid_choices", [])
-		_submit("choose %s" % choices[0] if not choices.is_empty() else "choose none")
+		if choices.is_empty():
+			_submit("choose none")
+		else:
+			var first = choices[0]
+			var choice_id: String = first.instance_id if first is CardInstance else str(first)
+			_submit("choose %s" % choice_id)
 		return
 
 	# Showdown / chain: pass

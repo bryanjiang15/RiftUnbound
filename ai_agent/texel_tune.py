@@ -40,6 +40,7 @@ from typing import Optional
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB_PATH = Path(__file__).parent / "agent_memory.db"
 DEFAULT_PROFILE_PATH = REPO_ROOT / "Data" / "AI" / "scoring_profile.json"
+DEFAULT_MANIFEST_PATH = REPO_ROOT / "Data" / "AI" / "feature_registry.json"
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
@@ -48,33 +49,40 @@ except (AttributeError, ValueError):
 
 # ── Tunable weight → feature mapping (mirrors ScoringProfile.score_with_breakdown).
 # Each tunable weight w multiplies exactly one feature value x; the eval term is
-# w * x. These maps let us rebuild x from the raw build_score_features dict so we
-# can regress the weights. Held FIXED in phase 1 (not regressed):
-#   win_game (terminal), battlefield_weights, end_of_turn, mulligan.
+# w * x. The mapping is DERIVED from the feature manifest exported by GDScript
+# (Data/AI/feature_registry.json via Scripts/Tools/ExportFeatureRegistry.gd) so it
+# can never drift from the engine's scorer — adding a feature in GDScript and
+# regenerating the manifest makes Texel regress it automatically. Held FIXED in
+# phase 1 (not regressed): win_game (terminal), battlefield_weights, end_of_turn,
+# mulligan, and any 'situational' group weights.
 
-# weight key (under state_weights) -> feature key in the raw feature dict.
-STATE_FEATURE_MAP = {
-    "score_diff": "score_diff",
-    "unit_might_on_board": "unit_might_diff",
-    "cards_in_hand": "cards_in_hand_self",
-    "runes_available": "runes_available_diff",
-    "reactive_potential": "reactive_potential",
-    "unusable_runes": "unusable_runes",
+_GROUP_BLOCK = {
+    "state": "state_weights",
+    "action": "action_weights",
+    "situational": "situational_weights",
 }
-# weight key (under action_weights) -> feature key in the raw feature dict.
-ACTION_FEATURE_MAP = {
-    "card_played": "cards_played",
-    "unit_moved": "units_moved",
-    "card_discarded": "cards_discarded",
-    "enemy_unit_killed": "enemy_units_killed",
-    "own_unit_lost": "own_units_lost",
-    "battlefield_conquered": "battlefields_conquered",
-    "point_scored": "points_scored",
-    "card_drawn": "cards_drawn",
-    "power_used": "power_used",
-}
-# state_weights.battlefield_control is special: its feature value is a derived
-# scalar over the bf-control dict weighted by battlefield_weights (held fixed).
+
+
+def _group_block(group: str) -> str:
+    return _GROUP_BLOCK.get(group, f"{group}_weights")
+
+
+def load_specs(manifest_path: Path = DEFAULT_MANIFEST_PATH) -> "list[dict]":
+    """Load the core feature specs from the exported manifest.
+
+    Falls back to an empty list if the manifest is missing; callers should
+    regenerate it with ExportFeatureRegistry.gd. Situational specs are excluded
+    here (held fixed in phase-1 tuning).
+    """
+    try:
+        data = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return list(data.get("specs", []))
+
+
+# Cached at import; tests can pass an explicit specs list to the extractors.
+SPECS = load_specs()
 
 _OUTCOME_LABEL = {"win": 1.0, "loss": 0.0, "draw": 0.5}
 
@@ -82,45 +90,61 @@ _OUTCOME_LABEL = {"win": 1.0, "loss": 0.0, "draw": 0.5}
 # ── Term extraction ──────────────────────────────────────────────────────────
 
 
-def _battlefield_control_value(features: dict, bf_weights: dict) -> float:
-    """Mirror of ScoringProfile._battlefield_control: signed weighted bf control.
-
-    +bf_weight per battlefield the AI controls, -bf_weight per opponent-controlled
-    one. battlefield_weights are held fixed in phase 1, so this collapses to a
-    single scalar feature multiplied by the tunable battlefield_control weight.
+def _dict_weighted_value(features: dict, spec: dict, sub_weights: dict) -> float:
+    """Derived scalar x for a dict_weighted spec with a tunable group weight_key:
+    Σ features[feature_key][k] * sub_weights[k]. Mirrors ScoringProfile._term.
+    sub_weights (battlefield_weights) are held fixed in phase 1, so the whole sum
+    collapses to a single feature value multiplied by the tunable weight.
     """
-    ai_index = int(features.get("ai_index", 0))
+    default = 1.0 if spec.get("subweights") == "battlefield_weights" else 0.0
+    values = features.get(spec.get("feature_key", ""), {}) or {}
     total = 0.0
-    controls = features.get("bf", {}) or {}
-    for bf_id, ctrl in controls.items():
-        weight = float(bf_weights.get(str(bf_id), 1.0))
-        ctrl = int(ctrl)
-        if ctrl == ai_index:
-            total += weight
-        elif ctrl >= 0:
-            total -= weight
+    for k, v in values.items():
+        total += float(v or 0) * float(sub_weights.get(str(k), default))
     return total
 
 
-def extract_terms(features: dict, profile: dict) -> "dict[tuple[str, str], float]":
-    """Raw feature dict -> {(group, weight_key): feature_value} for tunable weights.
-
-    The returned values are exactly the x in ``term = weight * x`` for every
-    weight Texel will regress. Keyword weights expand per-keyword from keyword_net.
+def _battlefield_control_value(features: dict, bf_weights: dict) -> float:
+    """Signed weighted battlefield control from the bf_control_net feature
+    ({bf_id: +1 mine / -1 opp / 0}). Kept as a named helper for clarity/tests.
     """
-    bf_weights = profile.get("battlefield_weights", {}) or {}
-    keyword_net = features.get("keyword_net", {}) or {}
-    out: dict[tuple[str, str], float] = {}
+    values = features.get("bf_control_net", {}) or {}
+    total = 0.0
+    for bf_id, net in values.items():
+        total += float(net or 0) * float(bf_weights.get(str(bf_id), 1.0))
+    return total
 
-    for wkey, fkey in STATE_FEATURE_MAP.items():
-        out[("state_weights", wkey)] = float(features.get(fkey, 0) or 0)
-    out[("state_weights", "battlefield_control")] = _battlefield_control_value(
-        features, bf_weights
-    )
-    for wkey, fkey in ACTION_FEATURE_MAP.items():
-        out[("action_weights", wkey)] = float(features.get(fkey, 0) or 0)
-    for kw in profile.get("keyword_weights", {}) or {}:
-        out[("keyword_weights", kw)] = float(keyword_net.get(kw, 0) or 0)
+
+def extract_terms(
+    features: dict, profile: dict, specs: "list[dict] | None" = None
+) -> "dict[tuple[str, str], float]":
+    """Raw feature dict -> {(group_block, weight_key): feature_value} for every
+    tunable weight, derived from the feature manifest (single source of truth).
+
+    The returned values are exactly the x in ``term = weight * x`` Texel regresses:
+      * scalar specs            -> x = features[feature_key]
+      * dict_weighted + weight_key (battlefield terms) -> x = Σ value*sub_weight
+      * dict_weighted, no weight_key (keywords) -> expand one weight per sub-key
+    """
+    specs = SPECS if specs is None else specs
+    out: dict[tuple[str, str], float] = {}
+    for spec in specs:
+        group_block = _group_block(spec.get("group", "state"))
+        if spec.get("kind") == "dict_weighted":
+            sub_block = spec.get("subweights", "")
+            sub_weights = profile.get(sub_block, {}) or {}
+            if "weight_key" in spec:
+                out[(group_block, spec["weight_key"])] = _dict_weighted_value(
+                    features, spec, sub_weights
+                )
+            else:
+                values = features.get(spec.get("feature_key", ""), {}) or {}
+                for sub_key in sub_weights:
+                    out[(sub_block, sub_key)] = float(values.get(sub_key, 0) or 0)
+        else:
+            out[(group_block, spec.get("weight_key", ""))] = float(
+                features.get(spec.get("feature_key", ""), 0) or 0
+            )
     return out
 
 
@@ -219,16 +243,24 @@ def load_dataset(conn: sqlite3.Connection, *, profile: dict, filters: dict) -> d
     }
 
 
-def ordered_weight_keys(profile: dict) -> "list[tuple[str, str]]":
-    """Stable ordering of the tunable (group, key) weights present in the profile."""
+def ordered_weight_keys(
+    profile: dict, specs: "list[dict] | None" = None
+) -> "list[tuple[str, str]]":
+    """Stable ordering of the tunable (group_block, key) weights, derived from the
+    feature manifest in the same iteration order extract_terms uses."""
+    specs = SPECS if specs is None else specs
     keys: list[tuple[str, str]] = []
-    for wkey in STATE_FEATURE_MAP:
-        keys.append(("state_weights", wkey))
-    keys.append(("state_weights", "battlefield_control"))
-    for wkey in ACTION_FEATURE_MAP:
-        keys.append(("action_weights", wkey))
-    for kw in profile.get("keyword_weights", {}) or {}:
-        keys.append(("keyword_weights", kw))
+    for spec in specs:
+        group_block = _group_block(spec.get("group", "state"))
+        if spec.get("kind") == "dict_weighted":
+            if "weight_key" in spec:
+                keys.append((group_block, spec["weight_key"]))
+            else:
+                sub_block = spec.get("subweights", "")
+                for sub_key in profile.get(sub_block, {}) or {}:
+                    keys.append((sub_block, sub_key))
+        else:
+            keys.append((group_block, spec.get("weight_key", "")))
     return keys
 
 

@@ -4,6 +4,7 @@ const TcgAssertions = preload("res://Scripts/Tests/Tcg/TcgAssertions.gd")
 const RuleSetupTests = preload("res://Scripts/Tests/Tcg/suites/RuleSetupTests.gd")
 const RuleTurnStructureTests = preload("res://Scripts/Tests/Tcg/suites/RuleTurnStructureTests.gd")
 const RuleScoringTests = preload("res://Scripts/Tests/Tcg/suites/RuleScoringTests.gd")
+const RuleScoreFeaturesTests = preload("res://Scripts/Tests/Tcg/suites/RuleScoreFeaturesTests.gd")
 const RuleMovementTests = preload("res://Scripts/Tests/Tcg/suites/RuleMovementTests.gd")
 const RuleCombatTests = preload("res://Scripts/Tests/Tcg/suites/RuleCombatTests.gd")
 const RuleShowdownTests = preload("res://Scripts/Tests/Tcg/suites/RuleShowdownTests.gd")
@@ -19,6 +20,7 @@ const SUITE_ORDER: Array[String] = [
 	"RuleSetup",
 	"RuleTurnStructure",
 	"RuleScoring",
+	"RuleScoreFeatures",
 	"RuleMovement",
 	"RuleCombat",
 	"RuleShowdown",
@@ -35,6 +37,7 @@ const SUITES := {
 	"RuleSetup": RuleSetupTests,
 	"RuleTurnStructure": RuleTurnStructureTests,
 	"RuleScoring": RuleScoringTests,
+	"RuleScoreFeatures": RuleScoreFeaturesTests,
 	"RuleMovement": RuleMovementTests,
 	"RuleCombat": RuleCombatTests,
 	"RuleShowdown": RuleShowdownTests,

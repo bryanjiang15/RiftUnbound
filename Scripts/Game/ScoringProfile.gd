@@ -9,6 +9,7 @@ extends RefCounted
 # board keyword presence), and returns a weighted sum plus a per-term breakdown.
 
 const DEFAULT_PROFILE_PATH := "res://Data/AI/scoring_profile.json"
+const FeatureRegistryScript = preload("res://Scripts/Game/FeatureRegistry.gd")
 
 var profile: Dictionary = {}
 
@@ -31,41 +32,22 @@ static func load_profile(path: String = DEFAULT_PROFILE_PATH) -> Dictionary:
 
 func score_with_breakdown(features: Dictionary) -> Dictionary:
 	var p := profile if not profile.is_empty() else _default_profile()
-	var state_w: Dictionary = p.get("state_weights", {})
-	var action_w: Dictionary = p.get("action_weights", {})
-	var keyword_w: Dictionary = p.get("keyword_weights", {})
-	var bf_w: Dictionary = p.get("battlefield_weights", {})
 	var eot: Dictionary = p.get("end_of_turn", {})
 	var ai_index := int(features.get("ai_index", 0))
 	var my_score := int(features.get("my_score", 0))
 	var breakdown: Dictionary = {}
 
-	# ── terminal ──
+	# ── terminal (special: dominating, not registry-driven) ──
 	breakdown["win_game"] = 0.0
 	if bool(features.get("game_over", false)):
 		var win_w := float(p.get("win_game", 0.0))
 		breakdown["win_game"] = win_w if int(features.get("winner_index", -1)) == ai_index else -win_w
 
-	# ── state terms (positional, me vs opponent) ──
-	breakdown["score_diff"] = float(features.get("score_diff", 0)) * _w(state_w, "score_diff")
-	breakdown["battlefield_control"] = _battlefield_control(features, ai_index, bf_w) * _w(state_w, "battlefield_control")
-	breakdown["unit_might_on_board"] = float(features.get("unit_might_diff", 0)) * _w(state_w, "unit_might_on_board")
-	breakdown["cards_in_hand"] = float(features.get("cards_in_hand_self", 0)) * _w(state_w, "cards_in_hand")
-	breakdown["runes_available"] = float(features.get("runes_available_diff", 0)) * _w(state_w, "runes_available")
-	breakdown["reactive_potential"] = float(features.get("reactive_potential", 0)) * _w(state_w, "reactive_potential")
-	breakdown["unusable_runes"] = float(features.get("unusable_runes", 0)) * _w(state_w, "unusable_runes")
-	breakdown["keywords"] = _keyword_score(features.get("keyword_net", {}), keyword_w)
+	# ── registry-driven terms (generic: one loop over every spec) ──
+	for spec in FeatureRegistryScript.specs():
+		breakdown[spec["id"]] = _term(features, p, spec)
 
-	# ── action / outcome terms (what the line did) ──
-	breakdown["card_played"] = float(features.get("cards_played", 0)) * _w(action_w, "card_played")
-	breakdown["unit_moved"] = float(features.get("units_moved", 0)) * _w(action_w, "unit_moved")
-	breakdown["card_discarded"] = float(features.get("cards_discarded", 0)) * _w(action_w, "card_discarded")
-	breakdown["enemy_unit_killed"] = float(features.get("enemy_units_killed", 0)) * _w(action_w, "enemy_unit_killed")
-	breakdown["own_unit_lost"] = float(features.get("own_units_lost", 0)) * _w(action_w, "own_unit_lost")
-	breakdown["battlefield_conquered"] = float(features.get("battlefields_conquered", 0)) * _w(action_w, "battlefield_conquered")
-	breakdown["point_scored"] = float(features.get("points_scored", 0)) * _w(action_w, "point_scored")
-	breakdown["card_drawn"] = float(features.get("cards_drawn", 0)) * _w(action_w, "card_drawn")
-	breakdown["power_used"] = float(features.get("power_used", 0)) * _w(action_w, "power_used")
+	# ── end-of-turn (special: composite shaping term) ──
 	breakdown["end_of_turn"] = _end_of_turn(features, eot)
 
 	var shaping := 0.0
@@ -85,24 +67,27 @@ func score_with_breakdown(features: Dictionary) -> Dictionary:
 	return {"score": score, "breakdown": breakdown}
 
 
-static func _battlefield_control(features: Dictionary, ai_index: int, bf_weights: Dictionary) -> float:
-	var total := 0.0
-	var controls: Dictionary = features.get("bf", {})
-	for bf_id in controls:
-		var weight := float(bf_weights.get(str(bf_id), 1.0))
-		var ctrl := int(controls[bf_id])
-		if ctrl == ai_index:
-			total += weight
-		elif ctrl >= 0:
-			total -= weight
-	return total
-
-
-static func _keyword_score(keyword_net: Dictionary, keyword_weights: Dictionary) -> float:
-	var total := 0.0
-	for kw_id in keyword_net:
-		total += float(keyword_net[kw_id]) * float(keyword_weights.get(str(kw_id), 0.0))
-	return total
+# Evaluate one feature spec into its weighted term value. Scalar specs multiply the
+# raw feature by its group weight; dict_weighted specs dot a sub-dict feature with a
+# named sub-weight block (battlefield_weights / keyword_weights).
+static func _term(features: Dictionary, p: Dictionary, spec: Dictionary) -> float:
+	var kind := str(spec.get("kind", "scalar"))
+	if kind == "dict_weighted":
+		var sub: Dictionary = p.get(str(spec.get("subweights", "")), {})
+		var sub_default := 1.0 if str(spec.get("subweights", "")) == "battlefield_weights" else 0.0
+		var values: Dictionary = features.get(str(spec.get("feature_key", "")), {})
+		var total := 0.0
+		for k in values:
+			total += float(values[k]) * float(sub.get(str(k), sub_default))
+		# Optional group-weight multiplier (battlefield terms have one; keywords don't).
+		if spec.has("weight_key"):
+			var gw: Dictionary = p.get(FeatureRegistryScript.group_weights_key(str(spec.get("group", "state"))), {})
+			total *= float(gw.get(str(spec["weight_key"]), 0.0))
+		return total
+	# scalar
+	var wblock: Dictionary = p.get(FeatureRegistryScript.group_weights_key(str(spec.get("group", "state"))), {})
+	var w := float(wblock.get(str(spec.get("weight_key", "")), 0.0))
+	return float(features.get(str(spec.get("feature_key", "")), 0)) * w
 
 
 static func _end_of_turn(features: Dictionary, eot: Dictionary) -> float:
@@ -112,20 +97,23 @@ static func _end_of_turn(features: Dictionary, eot: Dictionary) -> float:
 	return -absf(float(features.get("my_hand", 0) - hand_target)) * hand_weight + float(features.get("my_ready_runes", 0)) * rune_weight
 
 
-static func _w(weights: Dictionary, key: String) -> float:
-	return float(weights.get(key, 0.0))
-
-
 static func _default_profile() -> Dictionary:
 	return {
-		"schema_version": "2.0",
+		"schema_version": "3.0",
 		"win_game": 1000.0,
 		"state_weights": {
 			"score_diff": 10.0,
+			"win_proximity": 12.0,
+			"hold_income": 3.0,
 			"battlefield_control": 5.0,
-			"unit_might_on_board": 0.5,
+			"battlefield_might_margin": 0.4,
+			"control_fragility": 1.5,
+			"unit_might_on_board": 0.15,
+			"ready_unit_might": 0.3,
+			"idle_base_might": -0.1,
+			"damage_fragility": 1.0,
 			"cards_in_hand": 0.3,
-			"runes_available": -0.1,
+			"rune_development": 0.3,
 			"reactive_potential": 1.0,
 			"unusable_runes": -0.15,
 		},
@@ -148,6 +136,7 @@ static func _default_profile() -> Dictionary:
 			"deflect": 0.3,
 			"deathknell": 0.2,
 		},
+		"situational_weights": {},
 		"battlefield_weights": {"battlefield-a": 1.5, "battlefield-b": 1.0},
 		"end_of_turn": {"hand_size_target": 3, "hand_size_weight": 0.3, "rune_weight": 0.5},
 	}

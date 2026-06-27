@@ -1,0 +1,5 @@
+{
+  "schema_version": "1.0",
+  "_doc": "Config-driven situational/specialized scoring features (combos, turn-specific plays). SCAFFOLD ONLY — no active terms yet. Each entry becomes a 'situational' group term: term = value(snapshot) * situational_weights[id]. predicate/value are restricted safe expressions over snapshot fields (NOT raw GDScript). The future LLM feature-invention loop proposes entries here; a human reviews the predicate; the SPRT win-rate gate decides whether the weight is kept. See ai_agent/docs/Scoring_Features_Reference.md.",
+  "features": []
+}

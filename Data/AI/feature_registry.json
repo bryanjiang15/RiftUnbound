@@ -1,0 +1,224 @@
+{
+  "schema_version": "3.0",
+  "situational": [],
+  "specs": [
+    {
+      "doc": "my points − opp points",
+      "feature_key": "score_diff",
+      "group": "state",
+      "id": "score_diff",
+      "kind": "scalar",
+      "sign_hint": 1,
+      "weight_key": "score_diff"
+    },
+    {
+      "doc": "convex closeness to victory: (my/victory)^2 − (opp/victory)^2",
+      "feature_key": "win_proximity",
+      "group": "state",
+      "id": "win_proximity",
+      "kind": "scalar",
+      "sign_hint": 1,
+      "weight_key": "win_proximity"
+    },
+    {
+      "doc": "battlefields I control not yet scored this turn (future Hold points)",
+      "feature_key": "hold_income",
+      "group": "state",
+      "id": "hold_income",
+      "kind": "scalar",
+      "sign_hint": 1,
+      "weight_key": "hold_income"
+    },
+    {
+      "doc": "net battlefield control, weighted per battlefield",
+      "feature_key": "bf_control_net",
+      "group": "state",
+      "id": "battlefield_control",
+      "kind": "dict_weighted",
+      "sign_hint": 1,
+      "subweights": "battlefield_weights",
+      "weight_key": "battlefield_control"
+    },
+    {
+      "doc": "per-battlefield (my − opp) Might, weighted per battlefield (local, not global)",
+      "feature_key": "bf_might_margin",
+      "group": "state",
+      "id": "battlefield_might_margin",
+      "kind": "dict_weighted",
+      "sign_hint": 1,
+      "subweights": "battlefield_weights",
+      "weight_key": "battlefield_might_margin"
+    },
+    {
+      "doc": "my threats on opp battlefields − opp threats on mine (flippability)",
+      "feature_key": "control_fragility",
+      "group": "state",
+      "id": "control_fragility",
+      "kind": "scalar",
+      "sign_hint": 1,
+      "weight_key": "control_fragility"
+    },
+    {
+      "doc": "global (my − opp) Might; weak fallback",
+      "feature_key": "unit_might_diff",
+      "group": "state",
+      "id": "unit_might_on_board",
+      "kind": "scalar",
+      "sign_hint": 1,
+      "weight_key": "unit_might_on_board"
+    },
+    {
+      "doc": "(my − opp) Might of un-exhausted units deployed to battlefields (tempo)",
+      "feature_key": "ready_unit_might_diff",
+      "group": "state",
+      "id": "ready_unit_might",
+      "kind": "scalar",
+      "sign_hint": 1,
+      "weight_key": "ready_unit_might"
+    },
+    {
+      "doc": "(my − opp) Might sitting at Base, off-objective",
+      "feature_key": "idle_base_might_diff",
+      "group": "state",
+      "id": "idle_base_might",
+      "kind": "scalar",
+      "sign_hint": -1,
+      "weight_key": "idle_base_might"
+    },
+    {
+      "doc": "enemy damage-progress toward death − my damage-progress (closer enemy deaths good)",
+      "feature_key": "damage_fragility",
+      "group": "state",
+      "id": "damage_fragility",
+      "kind": "scalar",
+      "sign_hint": 1,
+      "weight_key": "damage_fragility"
+    },
+    {
+      "doc": "per-keyword net presence (mine − opp), weighted per keyword",
+      "feature_key": "keyword_net",
+      "group": "state",
+      "id": "keywords",
+      "kind": "dict_weighted",
+      "sign_hint": 1,
+      "subweights": "keyword_weights"
+    },
+    {
+      "doc": "my hand − k·opp hand (asymmetric card advantage; k baked into feature)",
+      "feature_key": "cards_in_hand_net",
+      "group": "state",
+      "id": "cards_in_hand",
+      "kind": "scalar",
+      "sign_hint": 1,
+      "weight_key": "cards_in_hand"
+    },
+    {
+      "doc": "(my − opp) channeled runes (persistent ramp)",
+      "feature_key": "rune_development_diff",
+      "group": "state",
+      "id": "rune_development",
+      "kind": "scalar",
+      "sign_hint": 1,
+      "weight_key": "rune_development"
+    },
+    {
+      "doc": "A/R cards in hand payable with leftover ready runes",
+      "feature_key": "reactive_potential",
+      "group": "state",
+      "id": "reactive_potential",
+      "kind": "scalar",
+      "sign_hint": 1,
+      "weight_key": "reactive_potential"
+    },
+    {
+      "doc": "ready runes no reactive card could consume (dead weight)",
+      "feature_key": "unusable_runes",
+      "group": "state",
+      "id": "unusable_runes",
+      "kind": "scalar",
+      "sign_hint": -1,
+      "weight_key": "unusable_runes"
+    },
+    {
+      "doc": "cards I played this line",
+      "feature_key": "cards_played",
+      "group": "action",
+      "id": "card_played",
+      "kind": "scalar",
+      "sign_hint": 1,
+      "weight_key": "card_played"
+    },
+    {
+      "doc": "scripted move steps in the line",
+      "feature_key": "units_moved",
+      "group": "action",
+      "id": "unit_moved",
+      "kind": "scalar",
+      "sign_hint": 1,
+      "weight_key": "unit_moved"
+    },
+    {
+      "doc": "cards I discarded this line",
+      "feature_key": "cards_discarded",
+      "group": "action",
+      "id": "card_discarded",
+      "kind": "scalar",
+      "sign_hint": -1,
+      "weight_key": "card_discarded"
+    },
+    {
+      "doc": "enemy units removed root→leaf",
+      "feature_key": "enemy_units_killed",
+      "group": "action",
+      "id": "enemy_unit_killed",
+      "kind": "scalar",
+      "sign_hint": 1,
+      "weight_key": "enemy_unit_killed"
+    },
+    {
+      "doc": "own units lost root→leaf",
+      "feature_key": "own_units_lost",
+      "group": "action",
+      "id": "own_unit_lost",
+      "kind": "scalar",
+      "sign_hint": -1,
+      "weight_key": "own_unit_lost"
+    },
+    {
+      "doc": "battlefields newly controlled and scored this turn",
+      "feature_key": "battlefields_conquered",
+      "group": "action",
+      "id": "battlefield_conquered",
+      "kind": "scalar",
+      "sign_hint": 1,
+      "weight_key": "battlefield_conquered"
+    },
+    {
+      "doc": "points gained root→leaf",
+      "feature_key": "points_scored",
+      "group": "action",
+      "id": "point_scored",
+      "kind": "scalar",
+      "sign_hint": 1,
+      "weight_key": "point_scored"
+    },
+    {
+      "doc": "non-negative hand increase root→leaf",
+      "feature_key": "cards_drawn",
+      "group": "action",
+      "id": "card_drawn",
+      "kind": "scalar",
+      "sign_hint": 1,
+      "weight_key": "card_drawn"
+    },
+    {
+      "doc": "domain power spent root→leaf (small tempo cost)",
+      "feature_key": "power_used",
+      "group": "action",
+      "id": "power_used",
+      "kind": "scalar",
+      "sign_hint": -1,
+      "weight_key": "power_used"
+    }
+  ]
+}

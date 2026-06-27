@@ -75,6 +75,8 @@ static func snapshot(gs: GameState, ai_index: int) -> Dictionary:
 		"my_energy": me.rune_pool.energy,
 		"my_ready_runes": ready_runes(me),
 		"opp_ready_runes": ready_runes(opp),
+		"my_channeled_runes": me.channeled_runes.size(),
+		"opp_channeled_runes": opp.channeled_runes.size(),
 		"my_unit_might": my_might,
 		"opp_unit_might": opp_might,
 		"my_cards_played": me.cards_played_this_turn,
@@ -158,17 +160,40 @@ static func build_score_features(root_snap: Dictionary, leaf_snap: Dictionary, s
 	features["my_hand"] = int(leaf_snap.get("my_hand", 0))
 	features["my_ready_runes"] = int(leaf_snap.get("my_ready_runes", 0))
 
-	# ── state diffs (me vs opponent at the leaf) ──
-	features["score_diff"] = int(leaf_snap.get("my_score", 0)) - int(leaf_snap.get("opp_score", 0))
+	# ── state: win condition & race ──
+	var my_score := int(leaf_snap.get("my_score", 0))
+	var opp_score := int(leaf_snap.get("opp_score", 0))
+	var victory := maxi(1, int(leaf_snap.get("victory_score", 8)))
+	features["score_diff"] = my_score - opp_score
+	# Convex closeness to victory: being near the win line is worth disproportionately
+	# more than the same point gap far from it. Lives in the feature (not the weight)
+	# so the weight layer stays linear and per-term attribution stays exact.
+	var my_prox := float(my_score) / float(victory)
+	var opp_prox := float(opp_score) / float(victory)
+	features["win_proximity"] = my_prox * my_prox - opp_prox * opp_prox
+	features["hold_income"] = _hold_income(leaf_snap, ai_index)
+
+	# ── state: battlefield control & contestation (per-battlefield) ──
+	features["bf_control_net"] = _bf_control_net(leaf_snap, ai_index)
+	var pos := _positional(leaf_snap, ai_index)
+	features["bf_might_margin"] = pos["bf_might_margin"]
+	features["control_fragility"] = pos["control_fragility"]
+
+	# ── state: development & tempo ──
 	features["unit_might_diff"] = int(leaf_snap.get("my_unit_might", 0)) - int(leaf_snap.get("opp_unit_might", 0))
-	features["cards_in_hand_self"] = int(leaf_snap.get("my_hand", 0))
-	# features["cards_in_hand_opponent"] = int(leaf_snap.get("opp_hand", 0))
-	features["runes_available_diff"] = int(leaf_snap.get("my_ready_runes", 0)) - int(leaf_snap.get("opp_ready_runes", 0))
+	features["ready_unit_might_diff"] = pos["ready_unit_might_diff"]
+	features["idle_base_might_diff"] = pos["idle_base_might_diff"]
+	features["damage_fragility"] = pos["damage_fragility"]
 	features["keyword_net"] = _keyword_net(leaf_snap, ai_index)
+
+	# ── state: card & resource advantage ──
+	# Asymmetric card advantage (Forge: own cards worth more than denying theirs).
+	# k is baked into the feature so a single linear weight tunes its magnitude.
+	var k := 0.8
+	features["cards_in_hand_net"] = float(leaf_snap.get("my_hand", 0)) - k * float(leaf_snap.get("opp_hand", 0))
+	features["rune_development_diff"] = int(leaf_snap.get("my_channeled_runes", 0)) - int(leaf_snap.get("opp_channeled_runes", 0))
 	# How many Action/Reaction cards in hand the AI can actually afford to play on
-	# the opponent's turn with its leftover ready runes (a combination check when
-	# more than one is individually affordable). Rewards ending the turn with live
-	# reactive threats rather than a tapped-out board. unusable_runes counts ready
+	# the opponent's turn with its leftover ready runes. unusable_runes counts ready
 	# runes that no reactive card could ever consume — dead weight, slightly bad.
 	var reactive := _reactive_eval(leaf_snap)
 	features["reactive_potential"] = reactive["potential"]
@@ -195,6 +220,111 @@ static func build_score_features(root_snap: Dictionary, leaf_snap: Dictionary, s
 	# scored battlefield no longer inflates the score.
 	features["battlefields_conquered"] = _scoring_conquers(root_snap, leaf_snap, ai_index)
 	return features
+
+
+# ── Positional / per-battlefield feature math ─────────────────────────────────
+
+
+# Battlefields the AI controls that it has NOT yet scored this turn — the recurring
+# Hold income still available before its next Scoring Step. Distinct from current
+# control value and from one-shot conquers.
+static func _hold_income(snap: Dictionary, ai_index: int) -> int:
+	var bf: Dictionary = snap.get("bf", {})
+	var scored: Array = snap.get("bf_scored", [])
+	var count := 0
+	for bf_id in bf:
+		if int(bf[bf_id]) == ai_index and not (bf_id in scored):
+			count += 1
+	return count
+
+
+# Net control per battlefield: +1 mine, -1 opponent, 0 uncontrolled. The
+# battlefield_weights sub-weighting is applied at the scoring layer (dict_weighted).
+static func _bf_control_net(snap: Dictionary, ai_index: int) -> Dictionary:
+	var out: Dictionary = {}
+	var bf: Dictionary = snap.get("bf", {})
+	for bf_id in bf:
+		var ctrl := int(bf[bf_id])
+		if ctrl == ai_index:
+			out[bf_id] = 1
+		elif ctrl >= 0:
+			out[bf_id] = -1
+		else:
+			out[bf_id] = 0
+	return out
+
+
+# Bundle of unit-position features computed in one pass over the leaf units:
+#   bf_might_margin:        {bf_id: (my − opp) Might present at that battlefield}
+#   ready_unit_might_diff:  (my − opp) Might of un-exhausted units AT battlefields
+#   idle_base_might_diff:   (my − opp) Might sitting at Base (off-objective)
+#   damage_fragility:       Σ enemy damage/Might − Σ my damage/Might (progress to death)
+#   control_fragility:      my threats on opp battlefields − opp threats on mine,
+#                           where a "threat" is enough ready mobile Might (reserve at
+#                           Base) to overcome the defender's Might at a battlefield.
+static func _positional(snap: Dictionary, ai_index: int) -> Dictionary:
+	var units: Dictionary = snap.get("units", {})
+	var bf: Dictionary = snap.get("bf", {})
+	var my_at: Dictionary = {}     # bf_id -> my Might there
+	var opp_at: Dictionary = {}    # bf_id -> opp Might there
+	for bf_id in bf:
+		my_at[bf_id] = 0
+		opp_at[bf_id] = 0
+	var ready_field_diff := 0
+	var base_might_diff := 0
+	var my_base_ready := 0
+	var opp_base_ready := 0
+	var dmg_frag := 0.0
+	for inst_id in units:
+		var u: Dictionary = units[inst_id]
+		var mine := int(u.get("owner", -1)) == ai_index
+		var sign := 1 if mine else -1
+		var might := int(u.get("might", 0))
+		var loc := str(u.get("location", ""))
+		var exhausted := bool(u.get("exhausted", false))
+		var damage := int(u.get("damage", 0))
+		if loc == "base":
+			base_might_diff += sign * might
+			if not exhausted:
+				if mine:
+					my_base_ready += might
+				else:
+					opp_base_ready += might
+		else:
+			if mine:
+				my_at[loc] = int(my_at.get(loc, 0)) + might
+			else:
+				opp_at[loc] = int(opp_at.get(loc, 0)) + might
+			if not exhausted:
+				ready_field_diff += sign * might
+		if might > 0:
+			# Progress toward death: closer to lethal = more fragile. Enemy progress
+			# is good for the AI (+), own progress is bad (−).
+			var progress := float(mini(damage, might)) / float(might)
+			dmg_frag += (-sign) * progress
+	var margin: Dictionary = {}
+	for bf_id in bf:
+		margin[bf_id] = int(my_at.get(bf_id, 0)) - int(opp_at.get(bf_id, 0))
+	# Fragility: for each controlled battlefield, can the other side's mobile reserve
+	# (ready Might at Base) plus units already present overcome the holder's Might?
+	var ctrl_frag := 0.0
+	for bf_id in bf:
+		var ctrl := int(bf[bf_id])
+		var mine_might := int(my_at.get(bf_id, 0))
+		var opp_might := int(opp_at.get(bf_id, 0))
+		if ctrl == ai_index:
+			if opp_base_ready + opp_might > mine_might:
+				ctrl_frag -= 1.0   # my battlefield is flippable
+		elif ctrl >= 0:
+			if my_base_ready + mine_might > opp_might:
+				ctrl_frag += 1.0   # I threaten opponent's battlefield
+	return {
+		"bf_might_margin": margin,
+		"ready_unit_might_diff": ready_field_diff,
+		"idle_base_might_diff": base_might_diff,
+		"damage_fragility": dmg_frag,
+		"control_fragility": ctrl_frag,
+	}
 
 
 static func _keyword_net(snap: Dictionary, ai_index: int) -> Dictionary:
