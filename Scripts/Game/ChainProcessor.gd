@@ -109,6 +109,16 @@ static func _execute_chain_item(item: ChainItem, gs: GameState, ability_resolver
 				var cost = ab.get("cost", {})
 				if not cost.is_empty():
 					var computed = CostCalculator.compute_ability_cost(cost, card, target, gs)
+					var custom_cost := str(computed.get("custom", ""))
+					if custom_cost == "may_exhaust_friendly_unit" and controller != null:
+						log_lines.append_array(controller.begin_may_exhaust_friendly_unit_cost(owner_pi, {
+							"kind": "chain_after_custom_cost",
+							"chain_item": item,
+							"ability": ab,
+							"target": target,
+							"computed": computed,
+						}))
+						return log_lines
 					var discard_n = CostCalculator.discard_count(computed)
 					if discard_n > 0 and controller != null:
 						log_lines.append_array(controller.begin_discard(owner_pi, discard_n, {

@@ -3,6 +3,7 @@ extends RefCounted
 
 const MoveSimulatorScript = preload("res://Scripts/Game/MoveSimulator.gd")
 const ScoringProfileScript = preload("res://Scripts/Game/ScoringProfile.gd")
+const ScoreModelScript = preload("res://Scripts/Game/ScoreModel.gd")
 
 const DEFAULT_TOP_N := 5
 const DEFAULT_BEAM_WIDTH := 8
@@ -13,8 +14,8 @@ const DEFAULT_MAX_DEPTH := 6
 # depth bound than full-turn main search.
 const DEFAULT_REACTIVE_MAX_DEPTH := 4
 
-var _sim: MoveSimulator
-var _scorer: ScoringProfile
+var _sim: RefCounted
+var _scorer: RefCounted
 var _ai_index: int = 1
 # "main" = plan a whole turn from Neutral Open to end turn.
 # "reactive" = navigate a chain/showdown response window until it resolves.
@@ -56,14 +57,14 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 	if root_sc == null:
 		return {"candidate_lines": [], "search_stats": _stats(0, 0, 0, 0, beam_width, 0, "clone_failed")}
 	controllers.append(root_sc)
-	var root_snapshot := ScoreModel.snapshot(root_sc.gs, _ai_index)
-	var root_hash := ScoreModel.structural_hash(root_snapshot)
+	var root_snapshot := ScoreModelScript.snapshot(root_sc.gs, _ai_index)
+	var root_hash := ScoreModelScript.structural_hash(root_snapshot)
 	# Ranker for the AI's own forced sub-decisions (e.g. which card to discard):
 	# score the settled board of each option so quiescence can pick the best one
 	# inline, without spawning beam branches that would dilute move diversity.
 	var choice_ranker := func(cand_gs: GameState) -> float:
-		var snap := ScoreModel.snapshot(cand_gs, _ai_index)
-		var feats := ScoreModel.build_score_features(root_snapshot, snap, [])
+		var snap := ScoreModelScript.snapshot(cand_gs, _ai_index)
+		var feats := ScoreModelScript.build_score_features(root_snapshot, snap, [])
 		return float(_scorer.score_with_breakdown(feats)["score"])
 	var seen: Dictionary = {}
 	seen[root_hash] = true
@@ -98,7 +99,7 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 				# Hash of the parent state — the state the AI is in when it issues
 				# this scripted move. Recorded as the step's pre_hash so the live
 				# executor can verify the world still matches before replaying it.
-				var scripted_pre_hash := ScoreModel.structural_hash(ScoreModel.snapshot(sc.gs, _ai_index))
+				var scripted_pre_hash := ScoreModelScript.structural_hash(ScoreModelScript.snapshot(sc.gs, _ai_index))
 				var child: GameController = _sim.build_sim_controller(sc.gs)
 				if child == null:
 					continue
@@ -109,14 +110,14 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 				var child_windows: Array = []
 				var ai_steps: Array = []
 				_sim.advance_to_quiescence(child, cmd_str, child_windows, ai_steps, choice_ranker)
-				var snap := ScoreModel.snapshot(child.gs, _ai_index)
-				var hash := ScoreModel.structural_hash(snap)
+				var snap := ScoreModelScript.snapshot(child.gs, _ai_index)
+				var hash := ScoreModelScript.structural_hash(snap)
 				if seen.has(hash):
 					transposition_hits += 1
 					continue
 				seen[hash] = true
 				expanded_any = true
-				var resolved := _sim.build_delta(root_snapshot, snap, child.gs)
+				var resolved: Dictionary = _sim.build_delta(root_snapshot, snap, child.gs)
 				var steps: Array = node["steps"].duplicate(true)
 				steps.append({
 					"command": cmd_str, "context": "", "kind": "scripted",
@@ -125,8 +126,8 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 				# Any auto-resolved AI sub-decisions (target choices, showdown /
 				# chain passes) become explicit intermediate steps in the line.
 				steps.append_array(ai_steps)
-				var features := ScoreModel.build_score_features(root_snapshot, snap, steps)
-				var scored := _scorer.score_with_breakdown(features)
+				var features := ScoreModelScript.build_score_features(root_snapshot, snap, steps)
+				var scored: Dictionary = _scorer.score_with_breakdown(features)
 				var windows: Array = node["windows"].duplicate(true)
 				windows.append_array(child_windows)
 				var child_node := {"sc": child, "steps": steps, "windows": windows, "score": scored["score"], "breakdown": scored["breakdown"], "resolved_state": resolved}
@@ -152,9 +153,9 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 
 
 func _add_leaf(leaves: Array, node: Dictionary, sc: GameController, root_snapshot: Dictionary) -> void:
-	var snap := ScoreModel.snapshot(sc.gs, _ai_index)
-	var features := ScoreModel.build_score_features(root_snapshot, snap, node.get("steps", []))
-	var scored := _scorer.score_with_breakdown(features)
+	var snap := ScoreModelScript.snapshot(sc.gs, _ai_index)
+	var features := ScoreModelScript.build_score_features(root_snapshot, snap, node.get("steps", []))
+	var scored: Dictionary = _scorer.score_with_breakdown(features)
 	var leaf := node.duplicate(true)
 	leaf["score"] = scored["score"]
 	leaf["breakdown"] = scored["breakdown"]

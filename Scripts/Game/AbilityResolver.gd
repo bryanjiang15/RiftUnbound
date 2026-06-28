@@ -84,6 +84,8 @@ func resolve_ability(ability: Dictionary, source: Variant, target: CardInstance,
 			pass
 		"attach":
 			log_lines.append_array(_attach(card_source, target))
+		"death_replacement_recall":
+			log_lines.append_array(_death_replacement_recall(target, gs))
 		_:
 			log_lines.append("> [INFO] Unhandled effect type: %s" % effect_type)
 
@@ -447,29 +449,32 @@ func _enter_ready(source: CardInstance) -> Array:
 func _return_from_trash(params: Dictionary, gs: GameState, owner: int, ctx: Dictionary) -> Array:
 	var ps: PlayerState = gs.players[owner]
 	var target_type: String = params.get("target", "any")
-	for i in range(ps.trash.size() - 1, -1, -1):
-		var card = ps.trash[i]
+	var valid: Array[CardInstance] = []
+	var valid_ids: Array[String] = []
+	for card in ps.trash:
 		if target_type == "any" or card.definition.card_type == target_type:
-			ps.move_to_hand(card)
-			return ["> P%d returned %s from trash to hand" % [owner + 1, card.display_name()]]
+			valid.append(card)
+			valid_ids.append(card.instance_id)
+	if valid.size() > 1 and ctx.get("controller") != null:
+		gs.pending_prompt = {
+			"player_index": owner,
+			"type": "choose_trash_return",
+			"valid_choices": valid_ids,
+			"prompt": "[PROMPT] Choose a %s from trash — use: choose <%s>" % [
+				target_type, "|".join(valid_ids)
+			],
+		}
+		return [gs.pending_prompt["prompt"]]
+	if valid.size() == 1:
+		var card = valid[0]
+		ps.move_to_hand(card)
+		return ["> P%d returned %s from trash to hand" % [owner + 1, card.display_name()]]
 	return ["> P%d has no %s in trash to return" % [owner + 1, target_type]]
 
 
 func _other_friendly_enter_ready(source: CardInstance, gs: GameState) -> Array:
-	if source == null:
-		return []
-	var owner = source.owner_index
-	var ps = gs.players[owner]
-	var count = 0
-	for u in ps.get_units_at_base():
-		if u != source:
-			u.ready()
-			count += 1
-	for u in gs.board.get_all_units_on_board(owner):
-		if u != source:
-			u.ready()
-			count += 1
-	return ["> %d other friendly unit(s) enter Ready" % count]
+	# This passive is applied at placement time by GameController._place_unit.
+	return []
 
 
 func _gain_keywords(params: Dictionary, source: CardInstance) -> Array:
@@ -484,12 +489,28 @@ func _play_self(ability: Dictionary, source: CardInstance, gs: GameState, ctx: D
 	if source == null:
 		return []
 	var owner = source.owner_index
+	var controller: GameController = ctx.get("controller")
+	if controller != null:
+		controller.play_unit_from_effect(source, owner)
+		return ["> %s played itself from discard" % source.display_name()]
 	var ps = gs.players[owner]
 	ps.trash.erase(source)
 	source.location = "base"
 	source.is_exhausted = true
+	ps.cards_played_this_turn += 1
+	source.played_this_turn = true
 	ps.base_permanents.append(source)
 	return ["> %s played itself from discard" % source.display_name()]
+
+
+func _death_replacement_recall(target: CardInstance, gs: GameState) -> Array:
+	if target == null:
+		return ["[INFO] death_replacement_recall: no target provided"]
+	gs.death_replacement_recalls[target.instance_id] = {
+		"target": target,
+		"turn_number": gs.turn_number,
+	}
+	return ["> %s is protected from its next death this turn" % target.display_name()]
 
 
 func _deal_damage_discarded_cost(params: Dictionary, source: CardInstance, target: CardInstance, gs: GameState, owner: int, ctx: Dictionary) -> Array:

@@ -5,6 +5,7 @@ const TcgTestHarness = preload("res://Scripts/Tests/Tcg/TcgTestHarness.gd")
 const TurnSearchScript = preload("res://Scripts/Game/TurnSearch.gd")
 const MoveSimulatorScript = preload("res://Scripts/Game/MoveSimulator.gd")
 const ScoringProfileScript = preload("res://Scripts/Game/ScoringProfile.gd")
+const ScoreModelScript = preload("res://Scripts/Game/ScoreModel.gd")
 
 
 static func run(assertions) -> void:
@@ -49,13 +50,13 @@ static func _test_discard_picks_best_card(assertions) -> void:
 		"valid_choices": ["gust", "fading-memories"],
 		"prompt": "[PROMPT] Choose a card to discard",
 	}
-	var sim: MoveSimulator = MoveSimulatorScript.new()
+	var sim = MoveSimulatorScript.new()
 	sim.ai_index = 0
-	var root_snapshot := ScoreModel.snapshot(gs, 0)
+	var root_snapshot := ScoreModelScript.snapshot(gs, 0)
 	var ranker := func(cand_gs: GameState) -> float:
-		var snap := ScoreModel.snapshot(cand_gs, 0)
+		var snap := ScoreModelScript.snapshot(cand_gs, 0)
 		return float(ScoringProfileScript.new().score_with_breakdown(
-			ScoreModel.build_score_features(root_snapshot, snap, [])
+			ScoreModelScript.build_score_features(root_snapshot, snap, [])
 		)["score"])
 	var step := sim._resolve_ai_prompt(h.controller, ranker)
 	assertions.assert_eq(str(step.get("command", "")), "choose fading-memories",
@@ -67,13 +68,13 @@ static func _test_discard_picks_best_card(assertions) -> void:
 
 
 static func _hash(gs: GameState, player_index: int) -> String:
-	return ScoreModel.structural_hash(ScoreModel.snapshot(gs, player_index))
+	return ScoreModelScript.structural_hash(ScoreModelScript.snapshot(gs, player_index))
 
 
 static func _test_search_finds_winning_line(assertions) -> void:
 	var h = TcgTestHarness.new()
 	h.load_fixture("res://Scripts/Tests/Tcg/fixtures/search_winning_line.json")
-	var searcher: TurnSearch = TurnSearchScript.new()
+	var searcher = TurnSearchScript.new()
 	var result: Dictionary = searcher.search(h.gs(), 0, {"node_budget": 80, "time_budget_ms": 1000, "beam_width": 6})
 	var lines: Array = result.get("candidate_lines", [])
 	assertions.assert_true(not lines.is_empty(), "search returns at least one candidate line")
@@ -84,7 +85,7 @@ static func _test_search_finds_winning_line(assertions) -> void:
 static func _test_transposition_table_dedupes_reorderings(assertions) -> void:
 	var h = TcgTestHarness.new()
 	h.load_fixture("res://Scripts/Tests/Tcg/fixtures/search_reorderable.json")
-	var searcher: TurnSearch = TurnSearchScript.new()
+	var searcher = TurnSearchScript.new()
 	var result: Dictionary = searcher.search(h.gs(), 0, {"node_budget": 80, "time_budget_ms": 500, "beam_width": 12, "max_depth": 3})
 	var stats: Dictionary = result.get("search_stats", {})
 	assertions.assert_true(int(stats.get("transposition_hits", 0)) > 0, "search TT dedupes reordered move sequences")
@@ -94,7 +95,7 @@ static func _test_search_does_not_mutate_live(assertions) -> void:
 	var h = TcgTestHarness.new()
 	h.load_fixture("res://Scripts/Tests/Tcg/fixtures/movement_base_to_bf.json")
 	var before := _hash(h.gs(), 0)
-	var searcher: TurnSearch = TurnSearchScript.new()
+	var searcher = TurnSearchScript.new()
 	var _result: Dictionary = searcher.search(h.gs(), 0, {"node_budget": 40, "time_budget_ms": 500})
 	assertions.assert_eq(_hash(h.gs(), 0), before, "turn search leaves live state unchanged")
 
@@ -102,7 +103,7 @@ static func _test_search_does_not_mutate_live(assertions) -> void:
 static func _test_anytime_budget_returns_lines(assertions) -> void:
 	var h = TcgTestHarness.new()
 	h.load_fixture("res://Scripts/Tests/Tcg/fixtures/search_reorderable.json")
-	var searcher: TurnSearch = TurnSearchScript.new()
+	var searcher = TurnSearchScript.new()
 	var result: Dictionary = searcher.search(h.gs(), 0, {"node_budget": 1, "time_budget_ms": 500, "beam_width": 4})
 	assertions.assert_true(not result.get("candidate_lines", []).is_empty(), "anytime node budget still returns a candidate")
 	assertions.assert_eq(result.get("search_stats", {}).get("stopped_reason", ""), "node_budget", "budget stop reason is reported")
@@ -111,12 +112,12 @@ static func _test_anytime_budget_returns_lines(assertions) -> void:
 static func _test_scoring_breakdown(assertions) -> void:
 	var h = TcgTestHarness.new()
 	h.load_fixture("res://Scripts/Tests/Tcg/fixtures/search_winning_line.json")
-	var snapshot: Dictionary = ScoreModel.snapshot(h.gs(), 0)
+	var snapshot: Dictionary = ScoreModelScript.snapshot(h.gs(), 0)
 	snapshot["game_over"] = true
 	snapshot["winner_index"] = 0
 	snapshot["my_score"] = 8
-	var features: Dictionary = ScoreModel.build_score_features(snapshot, snapshot, [])
-	var scorer: ScoringProfile = ScoringProfileScript.new()
+	var features: Dictionary = ScoreModelScript.build_score_features(snapshot, snapshot, [])
+	var scorer = ScoringProfileScript.new()
 	var result: Dictionary = scorer.score_with_breakdown(features)
 	var breakdown: Dictionary = result.get("breakdown", {})
 	assertions.assert_true(breakdown.has("win_game"), "scoring includes win_game term")
@@ -129,7 +130,7 @@ static func _test_scoring_breakdown(assertions) -> void:
 static func _test_scoring_features_reward_outcomes(assertions) -> void:
 	# Generic action/outcome features should each move the score in the expected
 	# direction when fed hand-built root/leaf snapshots.
-	var scorer: ScoringProfile = ScoringProfileScript.new()
+	var scorer = ScoringProfileScript.new()
 
 	var root := _bare_snapshot(0)
 	root["units"] = {
@@ -145,7 +146,7 @@ static func _test_scoring_features_reward_outcomes(assertions) -> void:
 	leaf["bf_scored"] = ["battlefield-a"]
 	leaf["my_score"] = 1
 
-	var feats := ScoreModel.build_score_features(root, leaf, [])
+	var feats := ScoreModelScript.build_score_features(root, leaf, [])
 	assertions.assert_eq(int(feats.get("enemy_units_killed", -1)), 1, "kill of enemy unit detected")
 	assertions.assert_eq(int(feats.get("own_units_lost", -1)), 0, "own unit not counted as lost")
 	assertions.assert_eq(int(feats.get("battlefields_conquered", -1)), 1, "scoring conquer detected")
@@ -156,28 +157,28 @@ static func _test_scoring_features_reward_outcomes(assertions) -> void:
 	# holding fix means it must NOT count as a fresh scoring conquer.
 	var leaf2 := leaf.duplicate(true)
 	leaf2["bf_scored"] = []
-	var feats2 := ScoreModel.build_score_features(root, leaf2, [])
+	var feats2 := ScoreModelScript.build_score_features(root, leaf2, [])
 	assertions.assert_eq(int(feats2.get("battlefields_conquered", -1)), 0, "conquer of already-scored battlefield is not double-counted")
 
 	# A do-nothing leaf (no kills, no conquer) must score lower than the winning trade.
 	var idle := root.duplicate(true)
-	var idle_feats := ScoreModel.build_score_features(root, idle, [])
+	var idle_feats := ScoreModelScript.build_score_features(root, idle, [])
 	var idle_score := float(scorer.score_with_breakdown(idle_feats).get("score", 0.0))
 	assertions.assert_true(killed_score > idle_score, "killing + conquering scores higher than idling")
 
 
 static func _test_scoring_keywords_on_board(assertions) -> void:
 	# Board keyword presence (field/base) should be a net me-vs-opponent term.
-	var scorer: ScoringProfile = ScoringProfileScript.new()
+	var scorer = ScoringProfileScript.new()
 
 	var base := _bare_snapshot(0)
 	base["bf"] = {}
-	var feats_plain := ScoreModel.build_score_features(base, base, [])
+	var feats_plain := ScoreModelScript.build_score_features(base, base, [])
 	var plain_score := float(scorer.score_with_breakdown(feats_plain).get("score", 0.0))
 
 	var withkw := base.duplicate(true)
 	withkw["units"] = {"my-1": _unit(0, "battlefield-a", 3, ["tank", "shield"])}
-	var feats_kw := ScoreModel.build_score_features(withkw, withkw, [])
+	var feats_kw := ScoreModelScript.build_score_features(withkw, withkw, [])
 	assertions.assert_eq(int(feats_kw.get("keyword_net", {}).get("tank", 0)), 1, "tank keyword counted for my unit")
 	assertions.assert_eq(int(feats_kw.get("keyword_net", {}).get("shield", 0)), 1, "shield keyword counted for my unit")
 	var kw_score := float(scorer.score_with_breakdown(feats_kw).get("score", 0.0))
@@ -194,7 +195,7 @@ static func _test_reactive_potential(assertions) -> void:
 	var s := _bare_snapshot(0)
 	s["my_hand_reactive"] = [{"energy": 1, "power": []}]
 	s["my_ready_rune_domains"] = []
-	assertions.assert_eq(int(ScoreModel.build_score_features(s, s, []).get("reactive_potential", -1)), 0, "no ready runes means no reactive potential")
+	assertions.assert_eq(int(ScoreModelScript.build_score_features(s, s, []).get("reactive_potential", -1)), 0, "no ready runes means no reactive potential")
 
 	# One card costing 1 energy + 1 fury power; two fury runes pay it (recycle one
 	# for power, tap one for energy). Both runes are usable → none unusable.
@@ -202,7 +203,7 @@ static func _test_reactive_potential(assertions) -> void:
 	s2["my_hand_reactive"] = [{"energy": 1, "power": [{"domain": "fury", "amount": 1}]}]
 	s2["my_ready_rune_domains"] = ["fury", "fury"]
 	s2["my_ready_runes"] = 2
-	var f2 := ScoreModel.build_score_features(s2, s2, [])
+	var f2 := ScoreModelScript.build_score_features(s2, s2, [])
 	assertions.assert_eq(int(f2.get("reactive_potential", -1)), 1, "fury+energy card payable by two fury runes")
 	assertions.assert_eq(int(f2.get("unusable_runes", -1)), 0, "both runes consumed → none unusable")
 
@@ -212,7 +213,7 @@ static func _test_reactive_potential(assertions) -> void:
 	s3["my_hand_reactive"] = [{"energy": 0, "power": [{"domain": "fury", "amount": 1}]}]
 	s3["my_ready_rune_domains"] = ["calm", "calm"]
 	s3["my_ready_runes"] = 2
-	var f3 := ScoreModel.build_score_features(s3, s3, [])
+	var f3 := ScoreModelScript.build_score_features(s3, s3, [])
 	assertions.assert_eq(int(f3.get("reactive_potential", -1)), 0, "wrong-domain runes cannot pay a power cost")
 	assertions.assert_eq(int(f3.get("unusable_runes", -1)), 2, "unpayable runes are all unusable")
 
@@ -220,7 +221,7 @@ static func _test_reactive_potential(assertions) -> void:
 	var s4 := _bare_snapshot(0)
 	s4["my_hand_reactive"] = [{"energy": 1, "power": []}, {"energy": 1, "power": []}]
 	s4["my_ready_rune_domains"] = ["fury", "calm"]
-	assertions.assert_eq(int(ScoreModel.build_score_features(s4, s4, []).get("reactive_potential", -1)), 2, "two cheap cards both payable with two runes")
+	assertions.assert_eq(int(ScoreModelScript.build_score_features(s4, s4, []).get("reactive_potential", -1)), 2, "two cheap cards both payable with two runes")
 
 	# Combination check: two 2-energy cards, only two runes → just one at a time,
 	# but both runes are still consumable by that one card → none unusable.
@@ -228,7 +229,7 @@ static func _test_reactive_potential(assertions) -> void:
 	s5["my_hand_reactive"] = [{"energy": 2, "power": []}, {"energy": 2, "power": []}]
 	s5["my_ready_rune_domains"] = ["fury", "calm"]
 	s5["my_ready_runes"] = 2
-	var f5 := ScoreModel.build_score_features(s5, s5, [])
+	var f5 := ScoreModelScript.build_score_features(s5, s5, [])
 	assertions.assert_eq(int(f5.get("reactive_potential", -1)), 1, "only one of two pricey cards payable at once")
 	assertions.assert_eq(int(f5.get("unusable_runes", -1)), 0, "both runes consumable by the affordable card")
 
@@ -238,7 +239,7 @@ static func _test_reactive_potential(assertions) -> void:
 	s6["my_hand_reactive"] = [{"energy": 1, "power": []}]
 	s6["my_ready_rune_domains"] = ["fury", "calm", "body"]
 	s6["my_ready_runes"] = 3
-	var f6 := ScoreModel.build_score_features(s6, s6, [])
+	var f6 := ScoreModelScript.build_score_features(s6, s6, [])
 	assertions.assert_eq(int(f6.get("unusable_runes", -1)), 2, "runes beyond reactive need are unusable")
 
 
@@ -266,7 +267,7 @@ static func _unit(owner: int, location: String, might: int, keywords: Array) -> 
 static func _test_line_steps_parallel_and_labeled(assertions) -> void:
 	var h = TcgTestHarness.new()
 	h.load_fixture("res://Scripts/Tests/Tcg/fixtures/search_winning_line.json")
-	var searcher: TurnSearch = TurnSearchScript.new()
+	var searcher = TurnSearchScript.new()
 	var result: Dictionary = searcher.search(h.gs(), 0, {"node_budget": 80, "time_budget_ms": 1000, "beam_width": 6})
 	var lines: Array = result.get("candidate_lines", [])
 	assertions.assert_true(not lines.is_empty(), "search returns lines for step-structure check")
@@ -321,7 +322,7 @@ static func _test_reactive_search_in_showdown_window(assertions) -> void:
 	gs.focus_player_index = 0
 	gs.board.active_showdown_bf = 0
 	var before := _hash(gs, 0)
-	var searcher: TurnSearch = TurnSearchScript.new()
+	var searcher = TurnSearchScript.new()
 	var result: Dictionary = searcher.search(gs, 0, {"mode": "reactive", "node_budget": 40, "time_budget_ms": 1000, "beam_width": 6})
 	var stats: Dictionary = result.get("search_stats", {})
 	assertions.assert_eq(str(stats.get("mode", "")), "reactive", "search reports reactive mode")

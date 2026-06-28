@@ -8,6 +8,7 @@ extends RefCounted
 
 const ScoringProfileScript = preload("res://Scripts/Game/ScoringProfile.gd")
 const FeatureRegistryScript = preload("res://Scripts/Game/FeatureRegistry.gd")
+const ScoreModelScript = preload("res://Scripts/Game/ScoreModel.gd")
 
 
 static func run(assertions) -> void:
@@ -47,14 +48,14 @@ static func _unit(owner: int, location: String, might: int, exhausted: bool = fa
 
 
 static func _test_win_proximity_convex(assertions) -> void:
-	var near := ScoreModel.build_score_features(_snap({}), _snap({"my_score": 7}), [])
-	var far := ScoreModel.build_score_features(_snap({}), _snap({"my_score": 4}), [])
+	var near := ScoreModelScript.build_score_features(_snap({}), _snap({"my_score": 7}), [])
+	var far := ScoreModelScript.build_score_features(_snap({}), _snap({"my_score": 4}), [])
 	# (7/8)^2 = 0.765625 ; (4/8)^2 = 0.25
 	assertions.assert_true(absf(float(near["win_proximity"]) - 0.765625) < 1e-6,
 		"win_proximity at 7/8 = (7/8)^2")
 	# Convexity: gap 7→6 worth more than 4→3 near the win line.
-	var six := ScoreModel.build_score_features(_snap({}), _snap({"my_score": 6}), [])
-	var three := ScoreModel.build_score_features(_snap({}), _snap({"my_score": 3}), [])
+	var six := ScoreModelScript.build_score_features(_snap({}), _snap({"my_score": 6}), [])
+	var three := ScoreModelScript.build_score_features(_snap({}), _snap({"my_score": 3}), [])
 	var high_gap := float(near["win_proximity"]) - float(six["win_proximity"])
 	var low_gap := float(far["win_proximity"]) - float(three["win_proximity"])
 	assertions.assert_true(high_gap > low_gap,
@@ -67,7 +68,7 @@ static func _test_per_battlefield_might_margin(assertions) -> void:
 		"u1": _unit(0, "battlefield-a", 5),
 		"u2": _unit(1, "battlefield-b", 4),
 	}
-	var feats := ScoreModel.build_score_features(_snap({}), _snap({
+	var feats := ScoreModelScript.build_score_features(_snap({}), _snap({
 		"bf": {"battlefield-a": 0, "battlefield-b": 1}, "units": units,
 		"my_unit_might": 5, "opp_unit_might": 4,
 	}), [])
@@ -84,7 +85,7 @@ static func _test_per_battlefield_might_margin(assertions) -> void:
 
 static func _test_hold_income(assertions) -> void:
 	# I control two battlefields but have already scored one this turn.
-	var feats := ScoreModel.build_score_features(_snap({}), _snap({
+	var feats := ScoreModelScript.build_score_features(_snap({}), _snap({
 		"bf": {"battlefield-a": 0, "battlefield-b": 0},
 		"bf_scored": ["battlefield-a"],
 	}), [])
@@ -99,7 +100,7 @@ static func _test_control_fragility_sign(assertions) -> void:
 		"mine": _unit(0, "battlefield-a", 2),
 		"opp_reserve": _unit(1, "base", 5, false),
 	}
-	var feats := ScoreModel.build_score_features(_snap({}), _snap({
+	var feats := ScoreModelScript.build_score_features(_snap({}), _snap({
 		"bf": {"battlefield-a": 0}, "units": units,
 	}), [])
 	assertions.assert_true(float(feats["control_fragility"]) < 0.0,
@@ -107,7 +108,7 @@ static func _test_control_fragility_sign(assertions) -> void:
 
 
 static func _test_asymmetric_card_advantage(assertions) -> void:
-	var feats := ScoreModel.build_score_features(_snap({}), _snap({
+	var feats := ScoreModelScript.build_score_features(_snap({}), _snap({
 		"my_hand": 5, "opp_hand": 5,
 	}), [])
 	# 5 - 0.8*5 = 1.0 (own cards worth more than denying theirs).
@@ -121,7 +122,7 @@ static func _test_damage_fragility(assertions) -> void:
 		"enemy": _unit(1, "battlefield-a", 4, false, 3),
 		"mine": _unit(0, "battlefield-a", 4, false, 0),
 	}
-	var feats := ScoreModel.build_score_features(_snap({}), _snap({
+	var feats := ScoreModelScript.build_score_features(_snap({}), _snap({
 		"bf": {"battlefield-a": 1}, "units": units,
 	}), [])
 	# enemy progress 3/4 positive, mine 0 → positive.
@@ -130,7 +131,7 @@ static func _test_damage_fragility(assertions) -> void:
 
 
 static func _test_registry_drives_breakdown(assertions) -> void:
-	var feats := ScoreModel.build_score_features(_snap({}), _snap({}), [])
+	var feats := ScoreModelScript.build_score_features(_snap({}), _snap({}), [])
 	var profile := ScoringProfileScript.new()
 	var bd: Dictionary = profile.score_with_breakdown(feats)["breakdown"]
 	for spec in FeatureRegistryScript.specs():

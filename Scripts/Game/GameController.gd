@@ -727,8 +727,9 @@ func _kill_temporary_permanent(perm: CardInstance) -> void:
 func _place_unit(player_index: int, card: CardInstance, destination: String, use_accelerate: bool) -> void:
 	var ps: PlayerState = gs.players[player_index]
 
-	# Confront and similar effects let units you play this turn enter ready.
-	var enters_ready := use_accelerate or ps.units_enter_ready_this_turn
+	# Confront and Magma Wurm-style passives let units you play enter ready.
+	var enters_ready := use_accelerate or ps.units_enter_ready_this_turn or \
+		_has_other_friendly_enter_ready_aura(player_index, card)
 
 	# Default: send to base
 	if destination.is_empty() or destination == "base":
@@ -759,6 +760,34 @@ func _place_unit(player_index: int, card: CardInstance, destination: String, use
 		elif not bf.units[1 - player_index].is_empty():
 			bf.is_contested = true
 			gs.attacker_player_index = player_index
+
+
+func _has_other_friendly_enter_ready_aura(player_index: int, entering_card: CardInstance) -> bool:
+	var candidates: Array = []
+	candidates.append_array(gs.players[player_index].get_units_at_base())
+	candidates.append_array(gs.board.get_all_units_on_board(player_index))
+	for unit in candidates:
+		if unit == entering_card:
+			continue
+		for ab in unit.definition.abilities:
+			if ab.get("ability_type", "") == "passive" and \
+					ab.get("effect_type", "") == "other_friendly_units_enter_ready":
+				return true
+	return false
+
+
+func play_unit_from_effect(card: CardInstance, player_index: int, destination: String = "base") -> void:
+	var ps: PlayerState = gs.players[player_index]
+	ps.trash.erase(card)
+	ps.hand.erase(card)
+	ps.base_permanents.erase(card)
+	gs.board.remove_unit_from_battlefield(card)
+	card.owner_index = player_index
+	ps.cards_played_this_turn += 1
+	card.played_this_turn = true
+	_emit_card_event("played", card, 0)
+	_place_unit(player_index, card, destination, false)
+	_fire_on_play_triggers(card, false, false, -1)
 
 
 func _place_gear(player_index: int, card: CardInstance, target_id: String) -> void:
@@ -1030,12 +1059,6 @@ func _fire_on_play_triggers(
 		_log(line)
 		if not gs.pending_prompt.is_empty():
 			return
-	for ab in card.definition.abilities:
-		if ab.get("effect_type", "") == "other_friendly_units_enter_ready":
-			for line in ability_resolver.resolve_ability(ab, card, null, gs, ctx):
-				_log(line)
-			if not gs.pending_prompt.is_empty():
-				return
 
 
 # ─── Move ─────────────────────────────────────────────────────────────────────
@@ -1383,6 +1406,8 @@ func _dispatch_discard_continuation(continuation: Dictionary) -> void:
 				effect_ctx2["controller"] = self
 				for line in ability_resolver.resolve_ability(ab2, source2, target2, gs, effect_ctx2):
 					_log(line)
+		"chain_after_custom_cost":
+			_finish_chain_after_custom_cost(continuation, false, null)
 
 
 func _finish_chain_after_discard_cost(continuation: Dictionary) -> void:
@@ -1408,6 +1433,75 @@ func _finish_chain_after_discard_cost(continuation: Dictionary) -> void:
 		gs.passes_in_sequence = 0
 		gs.priority_player_index = 1 - owner_pi
 		_log("[PROMPT] P%d: play Reaction or 'pass'" % (gs.priority_player_index + 1))
+
+
+func _finish_chain_after_custom_cost(
+	continuation: Dictionary,
+	custom_paid: bool,
+	custom_target: CardInstance
+) -> void:
+	var item: ChainItem = continuation.get("chain_item")
+	var ab: Dictionary = continuation.get("ability", {})
+	var target: CardInstance = continuation.get("target")
+	var computed: Dictionary = continuation.get("computed", {})
+	if item == null:
+		return
+	var owner_pi = item.owner_index
+	var card = item.source_card
+	var remaining_cost = computed.duplicate()
+	remaining_cost["custom"] = ""
+	if not try_pay_cost(owner_pi, remaining_cost, card):
+		return
+	var ability_to_resolve = ab.duplicate(true)
+	if custom_paid and str(computed.get("custom", "")) == "may_exhaust_friendly_unit":
+		var params: Dictionary = ability_to_resolve.get("effect_params", {}).duplicate(true)
+		params["amount"] = maxi(int(params.get("amount", 1)), 2)
+		ability_to_resolve["effect_params"] = params
+	var ctx = {
+		"controller": self,
+		"player_index": owner_pi,
+		"custom_cost_paid": custom_paid,
+		"custom_cost_target": custom_target,
+	}
+	for line in ability_resolver.resolve_ability(ability_to_resolve, card, target, gs, ctx):
+		_log(line)
+	if card != null and card.definition.card_type == "spell":
+		gs.players[owner_pi].move_to_trash(card)
+	if gs.chain.is_empty():
+		for l in ChainProcessor._return_to_open(gs):
+			_log(l)
+	else:
+		gs.passes_in_sequence = 0
+		gs.priority_player_index = 1 - owner_pi
+		_log("[PROMPT] P%d: play Reaction or 'pass'" % (gs.priority_player_index + 1))
+
+
+func begin_may_exhaust_friendly_unit_cost(player_index: int, continuation: Dictionary) -> Array:
+	var valid = _ready_friendly_units(player_index)
+	if valid.is_empty():
+		_finish_chain_after_custom_cost(continuation, false, null)
+		return []
+	gs.pending_prompt = {
+		"player_index": player_index,
+		"type": "choose_optional",
+		"valid_choices": ["yes", "no"],
+		"custom_cost": "may_exhaust_friendly_unit",
+		"custom_cost_valid_targets": valid,
+		"chain_custom_resume": continuation,
+		"prompt": "[PROMPT] Exhaust a friendly unit to draw 2? (choose yes or no)",
+	}
+	return [gs.pending_prompt["prompt"]]
+
+
+func _ready_friendly_units(player_index: int) -> Array:
+	var valid: Array = []
+	for u in gs.players[player_index].get_units_at_base():
+		if not u.is_exhausted:
+			valid.append(u)
+	for u in gs.board.get_all_units_on_board(player_index):
+		if not u.is_exhausted:
+			valid.append(u)
+	return valid
 
 
 func _resume_discard_prompt(prompt: Dictionary) -> void:
@@ -1462,6 +1556,12 @@ func _cmd_choose(player_index: int, args: Array) -> void:
 
 
 func _handle_choose_target(player_index: int, choice: String) -> void:
+	if gs.pending_prompt.has("chain_custom_resume"):
+		_handle_choose_custom_cost_target(player_index, choice)
+		return
+	if gs.pending_prompt.has("trigger_target_resume"):
+		_handle_choose_trigger_target(player_index, choice)
+		return
 	var item: ChainItem = gs.pending_prompt.get("chain_item")
 	if item == null:
 		gs.pending_prompt.clear()
@@ -1525,6 +1625,49 @@ func _handle_choose_target(player_index: int, choice: String) -> void:
 	_run_cleanup()
 
 
+func _handle_choose_custom_cost_target(player_index: int, choice: String) -> void:
+	var prompt = gs.pending_prompt.duplicate()
+	var valid: Array = prompt.get("valid_choices", [])
+	var target: CardInstance = null
+	for v in valid:
+		if v is CardInstance and v.instance_id == choice:
+			target = v
+			break
+	if target == null:
+		_log("[ERROR] '%s' is not a valid target." % choice)
+		return
+	gs.pending_prompt.clear()
+	target.exhaust()
+	_log("> P%d exhausted %s" % [player_index + 1, target.display_name()])
+	_finish_chain_after_custom_cost(prompt.get("chain_custom_resume", {}), true, target)
+	_run_cleanup()
+
+
+func _handle_choose_trigger_target(player_index: int, choice: String) -> void:
+	var prompt = gs.pending_prompt.duplicate()
+	var valid: Array = prompt.get("valid_choices", [])
+	var target: CardInstance = null
+	for v in valid:
+		if v is CardInstance and v.instance_id == choice:
+			target = v
+			break
+	if target == null:
+		_log("[ERROR] '%s' is not a valid target." % choice)
+		return
+	gs.pending_prompt.clear()
+	var resume: Dictionary = prompt.get("trigger_target_resume", {})
+	var ab: Dictionary = resume.get("ability", {})
+	var source = resume.get("source")
+	var ctx: Dictionary = resume.get("ctx", {})
+	var effect_ctx = ctx.duplicate()
+	effect_ctx["controller"] = self
+	_log("> P%d chose %s as target" % [player_index + 1, target.display_name()])
+	for line in ability_resolver.resolve_ability(ab, source, target, gs, effect_ctx):
+		_log(line)
+	_finish_optional_prompt_resumes(player_index, prompt)
+	_run_cleanup()
+
+
 func _handle_choose_discard(player_index: int, choice: String) -> void:
 	var prompt = gs.pending_prompt.duplicate()
 	gs.pending_prompt.clear()
@@ -1578,6 +1721,28 @@ func _handle_choose_optional(player_index: int, choice: String) -> void:
 	var play_resume: Dictionary = prompt.get("play_resume", {})
 	gs.pending_prompt.clear()
 
+	if prompt.get("custom_cost", "") == "may_exhaust_friendly_unit":
+		if choice == "yes" or choice == "true":
+			var valid_targets: Array = prompt.get("custom_cost_valid_targets", [])
+			var ids: Array[String] = []
+			for valid_target in valid_targets:
+				if valid_target is CardInstance:
+					ids.append(valid_target.instance_id)
+			gs.pending_prompt = {
+				"player_index": player_index,
+				"type": "choose_target",
+				"valid_choices": valid_targets,
+				"custom_cost": "may_exhaust_friendly_unit",
+				"chain_custom_resume": prompt.get("chain_custom_resume", {}),
+				"prompt": "[PROMPT] Choose a friendly unit to exhaust — use: choose <%s>" % "|".join(ids),
+			}
+			_log(gs.pending_prompt["prompt"])
+		else:
+			_log("> P%d declined to exhaust a unit" % (player_index + 1))
+			_finish_chain_after_custom_cost(prompt.get("chain_custom_resume", {}), false, null)
+			_run_cleanup()
+		return
+
 	if not play_resume.is_empty():
 		if choice == "yes" or choice == "true":
 			var card = source if source is CardInstance else gs.find_instance_anywhere(play_resume.get("card_id", ""))
@@ -1611,7 +1776,27 @@ func _handle_choose_optional(player_index: int, choice: String) -> void:
 				_log("[ERROR] Cannot afford optional ability cost: %s" % CostCalculator.cost_to_string(computed))
 				_run_cleanup()
 				return
-		var target = trigger_dispatcher._resolve_trigger_target(ab, source, ctx, gs)
+		var valid_targets = _valid_trigger_targets(ab, source, ctx)
+		if valid_targets.size() > 1:
+			var ids: Array[String] = []
+			for valid_target in valid_targets:
+				ids.append(valid_target.instance_id)
+			gs.pending_prompt = {
+				"player_index": player_index,
+				"type": "choose_target",
+				"valid_choices": valid_targets,
+				"trigger_target_resume": {
+					"ability": ab,
+					"source": source,
+					"ctx": ctx,
+				},
+				"discard_resume": prompt.get("discard_resume", {}),
+				"resume_on_play": prompt.get("resume_on_play", {}),
+				"prompt": "[PROMPT] Choose a target — use: choose <%s>" % "|".join(ids),
+			}
+			_log(gs.pending_prompt["prompt"])
+			return
+		var target = valid_targets[0] if not valid_targets.is_empty() else null
 		var effect_ctx = ctx.duplicate()
 		effect_ctx["controller"] = self
 		for line in ability_resolver.resolve_ability(ab, source, target, gs, effect_ctx):
@@ -1619,7 +1804,13 @@ func _handle_choose_optional(player_index: int, choice: String) -> void:
 	else:
 		_log("> P%d declined optional ability" % (player_index + 1))
 
+	_finish_optional_prompt_resumes(player_index, prompt)
+	_run_cleanup()
+
+
+func _finish_optional_prompt_resumes(player_index: int, prompt: Dictionary) -> void:
 	var discard_resume: Dictionary = prompt.get("discard_resume", {})
+	var ctx: Dictionary = prompt.get("ctx", {})
 	if discard_resume.is_empty() and not ctx.is_empty():
 		discard_resume = ctx.get("discard_resume", {})
 	if not discard_resume.is_empty():
@@ -1638,7 +1829,22 @@ func _handle_choose_optional(player_index: int, choice: String) -> void:
 			if not gs.pending_prompt.is_empty():
 				_run_cleanup()
 				return
-	_run_cleanup()
+
+
+func _valid_trigger_targets(ab: Dictionary, source: Variant, ctx: Dictionary) -> Array:
+	var params: Dictionary = ab.get("effect_params", {})
+	var target_filter: String = params.get("target", "")
+	if target_filter.is_empty():
+		return []
+	var tctx = ctx.duplicate()
+	if source is CardInstance:
+		tctx["player_index"] = source.owner_index
+	var targets = TargetResolverScript.filter_with_params(
+		target_filter, params, source if source is CardInstance else null, gs, tctx
+	)
+	return TargetResolverScript.restrict_to_hidden_battlefield(
+		targets, int(ctx.get("hidden_bf_idx", -1))
+	)
 
 
 func _handle_choose_battlefield(player_index: int, choice: String) -> void:

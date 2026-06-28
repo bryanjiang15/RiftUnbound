@@ -19,6 +19,7 @@ extends RefCounted
 
 const GameControllerScript = preload("res://Scripts/Game/GameController.gd")
 const TriggerDispatcherScript = preload("res://Scripts/Game/TriggerDispatcher.gd")
+const ScoreModelScript = preload("res://Scripts/Game/ScoreModel.gd")
 
 # Bound on engine steps (auto-passes / prompt resolutions) per drive so a sim can
 # never hang on a pathological loop.
@@ -55,7 +56,7 @@ func simulate_line(live_gs: GameState, seat: int, move_commands: Array) -> Dicti
 	if sc == null:
 		return {"legal": false, "error": "failed to clone game state"}
 
-	var before := ScoreModel.snapshot(sc.gs, ai_index)
+	var before := ScoreModelScript.snapshot(sc.gs, ai_index)
 	var applied: Array = []
 	var windows: Array = []
 	var stopped_reason := "quiescence"
@@ -82,7 +83,7 @@ func simulate_line(live_gs: GameState, seat: int, move_commands: Array) -> Dicti
 		result["first_illegal_move"] = first_illegal
 		# A line that became illegal mid-way still reports the partial resolution
 		# so the agent sees how far it got.
-	var after := ScoreModel.snapshot(sc.gs, ai_index)
+	var after := ScoreModelScript.snapshot(sc.gs, ai_index)
 	result["resolved_if_unanswered"] = build_delta(before, after, sc.gs)
 	if not windows.is_empty():
 		result["opponent_windows"] = windows
@@ -145,7 +146,7 @@ func advance_to_quiescence(sc: GameController, after_move: String, windows: Arra
 				# is given) and capture it as an explicit line step (command +
 				# human-readable context) so the executor replays it instead of
 				# treating it as an unexpected divergence.
-				var pre_hash := ScoreModel.structural_hash(ScoreModel.snapshot(sc.gs, ai_index))
+				var pre_hash := ScoreModelScript.structural_hash(ScoreModelScript.snapshot(sc.gs, ai_index))
 				var cc := _resolve_ai_prompt(sc, choice_ranker)
 				if sc.last_command_error:
 					return "quiescence"
@@ -166,7 +167,7 @@ func advance_to_quiescence(sc: GameController, after_move: String, windows: Arra
 		if seat == ai_index:
 			# The AI's own pass in a showdown/chain window — record it as an
 			# intermediate step so the planned line carries the pass forward.
-			var pre_hash := ScoreModel.structural_hash(ScoreModel.snapshot(sc.gs, ai_index))
+			var pre_hash := ScoreModelScript.structural_hash(ScoreModelScript.snapshot(sc.gs, ai_index))
 			var ctx := _describe_ai_pass(sc.gs)
 			sc.submit_command(seat, "pass")
 			if sc.last_command_error:
@@ -210,7 +211,7 @@ func _record_window(gs: GameState, after_move: String, windows: Array) -> void:
 		"opponent_may_respond": true,
 		"legal_response_classes": classes,
 		"opponent_unknown_cards": opp.hand.size(),
-		"opponent_potential_energy": ScoreModel.ready_runes(opp),
+		"opponent_potential_energy": ScoreModelScript.ready_runes(opp),
 		"note": "auto-passed; opponent could respond here (contested branch not resolved)",
 	})
 
