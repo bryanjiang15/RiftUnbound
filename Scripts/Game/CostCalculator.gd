@@ -86,6 +86,7 @@ static func compute_ability_cost(
 		"recycle_self": cost.get("recycle_self", false),
 		"recycle": cost.get("recycle", 0),
 		"discard": cost.get("discard", 0),
+		"custom": cost.get("custom", ""),
 	}
 
 
@@ -239,4 +240,6 @@ static func cost_to_string(cost: Dictionary) -> String:
 		parts.append("DISCARD:%d" % cost.get("discard", 0))
 	if cost.get("recycle", 0) > 0:
 		parts.append("RECYCLE:%d" % cost.get("recycle", 0))
+	if not str(cost.get("custom", "")).is_empty():
+		parts.append(str(cost.get("custom", "")))
 	return " + ".join(parts) if not parts.is_empty() else "free"

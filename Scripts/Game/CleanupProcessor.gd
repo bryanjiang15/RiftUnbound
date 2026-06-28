@@ -114,7 +114,11 @@ static func _process_deaths(gs: GameState, ability_resolver: AbilityResolver, co
 				if u.has_lethal_damage():
 					units_to_kill.append(u)
 
+	var replaced_units: Array = []
 	for u in units_to_kill:
+		if _consume_death_replacement(gs, u, log_lines):
+			replaced_units.append(u)
+			continue
 		if ability_resolver != null:
 			for ab in u.definition.abilities:
 				if ab.get("timing", "") == "on_death":
@@ -130,6 +134,8 @@ static func _process_deaths(gs: GameState, ability_resolver: AbilityResolver, co
 							controller.log_lines.append(line)
 
 	for u in units_to_kill:
+		if u in replaced_units:
+			continue
 		log_lines.append("> %s (P%d) was killed" % [u.display_name(), u.owner_index + 1])
 		gs.board.remove_unit_from_battlefield(u)
 		var owner_ps: PlayerState = gs.players[u.owner_index]
@@ -138,6 +144,26 @@ static func _process_deaths(gs: GameState, ability_resolver: AbilityResolver, co
 			controller._emit_card_event("died", u)
 
 	return log_lines
+
+
+static func _consume_death_replacement(gs: GameState, unit: CardInstance, log_lines: Array) -> bool:
+	if not gs.death_replacement_recalls.has(unit.instance_id):
+		return false
+	gs.death_replacement_recalls.erase(unit.instance_id)
+	if unit.is_at_battlefield():
+		gs.board.remove_unit_from_battlefield(unit)
+	else:
+		gs.players[unit.owner_index].base_permanents.erase(unit)
+	unit.location = "base"
+	unit.battlefield_index = -1
+	unit.heal_all()
+	unit.exhaust()
+	unit.is_attacker = false
+	unit.is_defender = false
+	if not unit in gs.players[unit.owner_index].base_permanents:
+		gs.players[unit.owner_index].base_permanents.append(unit)
+	log_lines.append("> %s would die, but is recalled to base instead" % unit.display_name())
+	return true
 
 
 static func _recall_unattached_gear(gs: GameState, log_lines: Array) -> void:
@@ -244,6 +270,7 @@ static func heal_all_units(gs: GameState) -> void:
 
 
 static func expire_turn_effects(gs: GameState) -> void:
+	gs.death_replacement_recalls.clear()
 	for ps in gs.players:
 		for perm in ps.base_permanents:
 			perm.expire_turn_effects()

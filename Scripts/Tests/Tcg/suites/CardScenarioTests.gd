@@ -8,6 +8,13 @@ const TargetResolver = preload("res://Scripts/Game/TargetResolver.gd")
 
 static func run(assertions) -> void:
 	_test_magma_wurm_aura(assertions)
+	_test_meditation_exhaust_draws_two(assertions)
+	_test_meditation_decline_draws_one(assertions)
+	_test_meditation_no_ready_friendly_draws_one(assertions)
+	_test_highlander_replaces_next_death(assertions)
+	_test_highlander_expires_end_of_turn(assertions)
+	_test_reavers_row_choose_defender(assertions)
+	_test_fortified_position_choose_defender(assertions)
 	_test_traveling_merchant_on_move(assertions)
 	_test_traveling_merchant_on_move_to_base(assertions)
 	_test_traveling_merchant_not_on_other_move(assertions)
@@ -38,10 +45,146 @@ static func run(assertions) -> void:
 
 
 static func _test_magma_wurm_aura(assertions) -> void:
-	var h = _harness_with_play({"id": "chemtech-enforcer", "exhausted": true}, [], "magma-wurm", 10, [{"id": "fury-rune", "exhausted": false}])
+	var h = _harness_with_play({"id": "chemtech-enforcer", "exhausted": true}, ["flame-chompers"], "magma-wurm", 20, [{"id": "fury-rune", "exhausted": false}])
 	h.cmd(0, "play magma-wurm")
 	var ally = h.find_unit("chemtech-enforcer")
-	assertions.assert_true(ally != null and not ally.is_exhausted, "magma wurm readies other units")
+	assertions.assert_true(ally != null and ally.is_exhausted, "magma wurm does not ready existing units")
+	h.cmd(0, "play flame-chompers")
+	var later = h.find_unit("flame-chompers")
+	assertions.assert_true(later != null and not later.is_exhausted, "magma wurm makes later friendly units enter ready")
+
+
+static func _test_meditation_exhaust_draws_two(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 2, "power": {}}, "hand": ["meditation"],
+			 "base": [{"id": "chemtech-enforcer", "exhausted": false}],
+			 "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd_with_choices(0, "play meditation", ["yes", "chemtech-enforcer"])
+	var unit = h.find_unit("chemtech-enforcer")
+	assertions.assert_true(unit != null and unit.is_exhausted, "meditation exhausts chosen friendly unit")
+	assertions.assert_eq(h.gs().players[0].hand.size(), 2, "meditation draws 2 when custom cost is paid")
+
+
+static func _test_meditation_decline_draws_one(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 2, "power": {}}, "hand": ["meditation"],
+			 "base": [{"id": "chemtech-enforcer", "exhausted": false}],
+			 "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd_with_choices(0, "play meditation", ["no"])
+	var unit = h.find_unit("chemtech-enforcer")
+	assertions.assert_true(unit != null and not unit.is_exhausted, "meditation decline does not exhaust unit")
+	assertions.assert_eq(h.gs().players[0].hand.size(), 1, "meditation draws 1 when custom cost is declined")
+
+
+static func _test_meditation_no_ready_friendly_draws_one(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 2, "power": {}}, "hand": ["meditation"],
+			 "base": [{"id": "chemtech-enforcer", "exhausted": true}],
+			 "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd(0, "play meditation")
+	assertions.assert_eq(h.gs().players[0].hand.size(), 1, "meditation draws 1 with no ready friendly unit")
+
+
+static func _test_highlander_replaces_next_death(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 4, "power": {}}, "hand": ["highlander"],
+			 "battlefield-a": [{"id": "chemtech-enforcer", "owner": 0}],
+			 "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd_with_choices(0, "play highlander", ["chemtech-enforcer"])
+	var unit = h.find_unit("chemtech-enforcer")
+	unit.add_damage(10)
+	CleanupProcessor.run(h.gs(), h.controller.ability_resolver, h.controller)
+	assertions.assert_eq(unit.location, "base", "highlander recalls lethal unit to base")
+	assertions.assert_eq(unit.damage, 0, "highlander heals recalled unit")
+	assertions.assert_true(unit.is_exhausted, "highlander exhausts recalled unit")
+	assertions.assert_true(not unit in h.gs().players[0].trash, "highlander replacement prevents death")
+
+
+static func _test_highlander_expires_end_of_turn(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 4, "power": {}}, "hand": ["highlander"],
+			 "base": [{"id": "chemtech-enforcer"}], "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd_with_choices(0, "play highlander", ["chemtech-enforcer"])
+	var unit = h.find_unit("chemtech-enforcer")
+	h.cmd(0, "end turn")
+	unit.add_damage(10)
+	CleanupProcessor.run(h.gs(), h.controller.ability_resolver, h.controller)
+	assertions.assert_true(unit in h.gs().players[0].trash, "highlander replacement expires at end of turn")
+
+
+static func _test_reavers_row_choose_defender(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["reavers-row", "targons-peak"],
+		"players": [
+			{"battlefield-a": [{"id": "magma-wurm", "owner": 0}], "deck_size": 5, "rune_deck_size": 12},
+			{"battlefield-a": [{"id": "chemtech-enforcer", "owner": 1}, {"id": "flame-chompers", "owner": 1}],
+			 "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.set_choices(["yes", "flame-chompers"])
+	for line in CombatProcessor.begin_combat(0, 0, h.gs(), h.controller):
+		h.controller.log_lines.append(line)
+	h._drain_prompts(1)
+	assertions.assert_eq(h.find_unit("flame-chompers").location, "base", "reavers row recalls chosen defender")
+	assertions.assert_true(h.find_unit("chemtech-enforcer").is_at_battlefield(), "reavers row leaves unchosen defender")
+
+
+static func _test_fortified_position_choose_defender(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["fortified-position", "targons-peak"],
+		"players": [
+			{"battlefield-a": [{"id": "magma-wurm", "owner": 0}], "deck_size": 5, "rune_deck_size": 12},
+			{"battlefield-a": [{"id": "chemtech-enforcer", "owner": 1}, {"id": "flame-chompers", "owner": 1}],
+			 "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.set_choices(["yes", "flame-chompers"])
+	for line in CombatProcessor.begin_combat(0, 0, h.gs(), h.controller):
+		h.controller.log_lines.append(line)
+	h._drain_prompts(1)
+	assertions.assert_eq(h.find_unit("flame-chompers").get_keyword_value("shield"), 2,
+		"fortified position shields chosen defender")
+	assertions.assert_eq(h.find_unit("chemtech-enforcer").get_keyword_value("shield"), 0,
+		"fortified position leaves unchosen defender")
 
 
 static func _test_traveling_merchant_on_move(assertions) -> void:
@@ -238,12 +381,16 @@ static func _test_cemetery_attendant(assertions) -> void:
 		"players": [
 			{"pool": {"energy": 5, "power": {}}, "hand": ["cemetery-attendant"],
 			 "runes": [{"id": "chaos-rune", "exhausted": false}],
-			 "trash": [{"id": "chemtech-enforcer"}], "deck_size": 5, "rune_deck_size": 12},
+			 "trash": [{"id": "chemtech-enforcer"}, {"id": "flame-chompers"}],
+			 "deck_size": 5, "rune_deck_size": 12},
 			{"deck_size": 5, "rune_deck_size": 12}
 		]
 	})
-	h.cmd(0, "play cemetery-attendant")
-	assertions.assert_log_contains(h.controller, "returned", "cemetery attendant returns from trash")
+	h.cmd_with_choices(0, "play cemetery-attendant", ["flame-chompers"])
+	assertions.assert_true(h.gs().players[0].get_hand_instance("flame-chompers") != null,
+		"cemetery attendant returns chosen unit from trash")
+	assertions.assert_true(h.gs().players[0].find_instance("chemtech-enforcer") in h.gs().players[0].trash,
+		"cemetery attendant leaves unchosen trash unit")
 
 
 static func _test_get_excited(assertions) -> void:
@@ -438,6 +585,8 @@ static func _test_flame_chompers_discard_prompts(assertions) -> void:
 	h.cmd_with_choices(0, "play chemtech-enforcer", ["flame-chompers", "yes"])
 	assertions.assert_log_contains(h.controller, "Flame Chompers", "flame chompers named in optional prompt")
 	assertions.assert_log_contains(h.controller, "played itself", "flame chompers play_self on discard")
+	assertions.assert_eq(h.gs().players[0].cards_played_this_turn, 2,
+		"flame chompers play_self counts as a played card")
 
 
 static func _test_flame_chompers_not_on_other_discard(assertions) -> void:

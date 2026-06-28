@@ -34,6 +34,9 @@ var rng_seed: String = ""
 # Pending prompt for player choices
 var pending_prompt: Dictionary = {}
 
+# Turn-duration death replacement effects keyed by protected instance_id.
+var death_replacement_recalls: Dictionary = {}
+
 # Mulligan state
 var mulligan_phase: bool = false
 var mulligan_done: Array[bool] = [false, false]
@@ -273,6 +276,7 @@ func clone() -> GameState:
 	g.victory_score = victory_score
 	g.game_session_id = game_session_id
 	g.pending_prompt = _clone_variant(pending_prompt, map)
+	g.death_replacement_recalls = _clone_variant(death_replacement_recalls, map)
 	g.mulligan_phase = mulligan_phase
 	g.mulligan_done = mulligan_done.duplicate()
 	g.combat_assignment_active = combat_assignment_active
