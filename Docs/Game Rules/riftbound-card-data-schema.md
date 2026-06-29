@@ -165,13 +165,14 @@ Each `effect_type` string maps to a handler in `AbilityResolver.gd` unless the n
 | `"predict"` | Reveal top cards in logs; recycle choice is not modeled | `{ "amount": 2 }` |
 | `"return_to_hand"` | Return a permanent to its owner's hand | `{ "target": "unit_at_battlefield" }` |
 | `"enter_ready"` | Ready the source card as it enters; used by Accelerate-style abilities | `{}` |
-| `"return_from_trash"` | Return the last matching trash card to hand; no prompt is opened yet | `{ "target": "unit" }` |
+| `"return_from_trash"` | Return a matching trash card to hand; prompts with `choose_trash_return` when multiple matches exist | `{ "target": "unit" }` |
 | `"other_friendly_units_enter_ready"` | Special-cased after a unit is played; readies other friendly units already on board/base | `{}` |
 | `"gain_keywords"` | Append passive keywords to the source when passive auras refresh | `{ "keywords": [{ "id": "assault", "value": 1 }] }` |
 | `"play_self"` | Move the source card from trash to base after its ability cost is paid | `{}` |
 | `"deal_damage_equal_to_discarded_energy_cost"` | Damage target by the Energy cost of the most recently discarded card this turn | `{ "target": "unit_at_battlefield", "targeting": "choose_one" }` |
 | `"cost_reduction"` | Read by `CostCalculator`; resolver intentionally does nothing | `{ "amount": 2, "scope": "self", "duration": "play" }` |
 | `"attach"` | Attach this Gear to a target unit | `{ "target": "friendly_unit" }` |
+| `"death_replacement_recall"` | Protect a chosen friendly unit from its next death this turn; cleanup heals, exhausts, and recalls it instead | `{ "target": "friendly_unit", "targeting": "choose_one", "duration": "turn" }` |
 
 Passive aura effects are refreshed by `TriggerDispatcher.emit_passive_auras()` rather than normal chain resolution:
 
@@ -181,11 +182,15 @@ Passive aura effects are refreshed by `TriggerDispatcher.emit_passive_auras()` r
 | `"aura_might"` | Legend aura that adds Might to each friendly unit whose condition evaluates true | `{ "target": "friendly_unit", "amount": 2 }` |
 | `"gain_keywords"` | Add passive keywords while the source's condition evaluates true | `{ "keywords": [{ "id": "ganking" }] }` |
 
-Declared but unsupported effect names should be treated as gaps until a handler and tests are added: `"spend_buff"`, `"banish"`, `"gain_xp"`, `"prevent_damage"`, `"custom"`, and `"death_replacement_recall"` (Highlander replacement effect).
+Declared but unsupported effect names should be treated as gaps until a handler and tests are added: `"spend_buff"`, `"banish"`, `"gain_xp"`, `"prevent_damage"`, and `"custom"` (general bespoke behavior; known custom cost strings such as `"may_exhaust_friendly_unit"` are handled explicitly by the chain/controller path).
 
 ### Multi-Target Spell Resolution
 
 For spells with multiple resolution abilities that each use `targeting: "choose_one"`, `GameController._queue_spell_target_prompt()` prompts for each target before the spell is put onto the Chain. The resulting `ChainItem.targets` array is passed to the resolver as `ctx.chosen_targets`; `fight_chosen_units` uses the first chosen target as the friendly unit buffed by Gentlemen's Duel and the second target as the enemy fight target.
+
+### Triggered Ability Target Prompts
+
+Triggered abilities normally resolve their first valid target from `TargetResolver`. Optional triggered abilities with more than one valid target prompt in two steps: `choose yes` / `choose no`, then `choose <instance-id>` for the target. This is used by battlefield `on_defend` abilities such as Reaver's Row and Fortified Position.
 
 ### Target Value Reference
 
@@ -199,11 +204,14 @@ The `"target"` field in `effect_params` uses the following string values:
 | `"unit_at_battlefield"` | Any unit at any battlefield |
 | `"friendly_unit_at_battlefield"` | Friendly unit specifically at a battlefield |
 | `"enemy_unit_at_battlefield"` | Enemy unit at a battlefield |
+| `"friendly_unit_here"` | Friendly unit at the event battlefield from trigger context |
 | `"friendly_gear"` | Any gear the controller controls |
 | `"enemy_gear"` | Any gear an opponent controls |
+| `"unit_or_gear_at_battlefield"` | Any unit at a battlefield plus unattached Gear at base |
 | `"spell_on_chain"` | A spell or ability currently on the chain |
 | `"top_of_deck"` | Top card(s) of the controller's main deck |
 | `"card_in_trash"` | A card in the controller's trash |
+| `"unit"` | Unit cards in trash; used by `return_from_trash` |
 | `"any_unit"` | Any unit regardless of controller |
 | `"all_friendly_units"` | All units the controller controls (no choice) |
 | `"all_enemy_units"` | All units opponents control (no choice) |
