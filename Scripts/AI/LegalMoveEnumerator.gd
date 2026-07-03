@@ -95,7 +95,7 @@ static func enumerate(gs: GameState, player_index: int) -> Array:
 	if ps.champion_zone != null and not ps.champion_zone.is_exhausted:
 		var champ: CardInstance = ps.champion_zone
 		var cost = CostCalculator.compute_play_cost(champ, player_index, gs)
-		if CostCalculator.can_afford_with_autopay(player_index, cost, gs):
+		if CostCalculator.can_afford_with_autopay(player_index, cost, gs, champ):
 			moves.append("play %s from champion" % champ.instance_id)
 
 	_add_hide_moves(gs, ps, player_index, moves)
@@ -115,7 +115,7 @@ static func _add_playable_cards(gs: GameState, ps: PlayerState, player_index: in
 			continue  # reactions are played via react/chain, not play
 
 		var cost = CostCalculator.compute_play_cost(card, player_index, gs)
-		if not CostCalculator.can_afford_with_autopay(player_index, cost, gs):
+		if not CostCalculator.can_afford_with_autopay(player_index, cost, gs, card):
 			continue
 
 		if card.definition.card_type == "unit":
@@ -128,7 +128,7 @@ static func _add_playable_cards(gs: GameState, ps: PlayerState, player_index: in
 					moves.append("play %s to %s" % [card.instance_id, bf.battlefield_id])
 			if card.has_keyword("accelerate"):
 				var accel_cost = CostCalculator.compute_play_cost(card, player_index, gs, true)
-				if CostCalculator.can_afford_with_autopay(player_index, accel_cost, gs):
+				if CostCalculator.can_afford_with_autopay(player_index, accel_cost, gs, card):
 					moves.append("play %s accelerate" % card.instance_id)
 		elif card.definition.card_type == "gear":
 			moves.append("play %s" % card.instance_id)
@@ -184,6 +184,8 @@ static func _add_ganking_moves(gs: GameState, player_index: int, moves: Array) -
 
 static func _add_activated_abilities(gs: GameState, ps: PlayerState, player_index: int, moves: Array) -> void:
 	var board_permanents: Array = []
+	if ps.legend != null:
+		board_permanents.append(ps.legend)
 	board_permanents.append_array(ps.base_permanents)
 	for bf in gs.board.battlefields:
 		board_permanents.append_array(bf.units[player_index])
@@ -193,7 +195,7 @@ static func _add_activated_abilities(gs: GameState, ps: PlayerState, player_inde
 			if ab.get("ability_type", "") != "activated":
 				continue
 			var cost = CostCalculator.compute_ability_cost(ab, perm, null, gs)
-			if not CostCalculator.can_afford_with_autopay(player_index, cost, gs):
+			if not CostCalculator.can_afford_with_autopay(player_index, cost, gs, perm):
 				continue
 			if cost.get("exhaust", false) and perm.is_exhausted:
 				continue
@@ -263,7 +265,7 @@ static func _add_action_plays(gs: GameState, player_index: int, moves: Array) ->
 		if not TurnStateMachine.can_play_card(card, gs.current_state, player_index, gs):
 			continue
 		var cost = CostCalculator.compute_play_cost(card, player_index, gs)
-		if not CostCalculator.can_afford_with_autopay(player_index, cost, gs):
+		if not CostCalculator.can_afford_with_autopay(player_index, cost, gs, card):
 			continue
 		var tab = _choose_one_target_ability(card)
 		if tab.is_empty():
@@ -283,7 +285,7 @@ static func _add_reaction_plays(gs: GameState, player_index: int, moves: Array) 
 		if not card.definition.is_reaction:
 			continue
 		var cost = CostCalculator.compute_play_cost(card, player_index, gs)
-		if not CostCalculator.can_afford_with_autopay(player_index, cost, gs):
+		if not CostCalculator.can_afford_with_autopay(player_index, cost, gs, card):
 			continue
 		var tab = _choose_one_target_ability(card)
 		if tab.is_empty():

@@ -102,10 +102,12 @@
     ],
     "rarity": "Common",
     "energy_cost": 8,
-    "power_cost": [{
+    "power_cost": [
+      {
         "domain": "fury",
         "amount": 1
-      }],
+      }
+    ],
     "might": 8,
     "might_bonus": null,
     "keywords": [],
@@ -458,10 +460,12 @@
     ],
     "rarity": "Common",
     "energy_cost": 5,
-    "power_cost": [{
+    "power_cost": [
+      {
         "domain": "chaos",
         "amount": 1
-      }],
+      }
+    ],
     "might": 5,
     "might_bonus": null,
     "keywords": [
@@ -546,10 +550,12 @@
     ],
     "rarity": "Rare",
     "energy_cost": 10,
-    "power_cost": [{
+    "power_cost": [
+      {
         "domain": "chaos",
         "amount": 1
-      }],
+      }
+    ],
     "might": 6,
     "might_bonus": null,
     "keywords": [],
@@ -866,5 +872,452 @@
     "abilities": [],
     "flavor_text": "If you're seeing that behavior up close ... run.",
     "image": "CardArts/OGN-142.webp"
+  },
+  {
+    "id": "noxus-hopeful",
+    "name": "Noxus Hopeful",
+    "set": "OGN",
+    "card_number": "012",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Trifarian",
+      "Noxus"
+    ],
+    "domain": [
+      "fury"
+    ],
+    "rarity": "Common",
+    "energy_cost": 4,
+    "power_cost": [],
+    "might": 4,
+    "might_bonus": null,
+    "keywords": [
+      {
+        "id": "legion"
+      }
+    ],
+    "effect_text": "Legion — I cost 2 less. (Get the effect if you've played another card this turn.)",
+    "abilities": [
+      {
+        "ability_id": "noxus-hopeful-legion-cost",
+        "ability_type": "passive",
+        "timing": null,
+        "condition": {
+          "type": "legion"
+        },
+        "is_optional": false,
+        "cost": {
+          "energy": 0,
+          "power": [],
+          "exhaust": false
+        },
+        "effect_type": "cost_reduction",
+        "effect_params": {
+          "amount": 2,
+          "scope": "self",
+          "duration": "play"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "First to the front, first to glory.",
+    "image": "CardArts/OGN-012.webp"
+  },
+  {
+    "id": "pouty-poro",
+    "name": "Pouty Poro",
+    "set": "OGN",
+    "card_number": "013",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Poro"
+    ],
+    "domain": [
+      "fury"
+    ],
+    "rarity": "Common",
+    "energy_cost": 2,
+    "power_cost": [],
+    "might": 2,
+    "might_bonus": null,
+    "keywords": [
+      {
+        "id": "deflect",
+        "value": 1
+      }
+    ],
+    "effect_text": "Deflect (Opponents must pay a rainbow rune to choose me with a spell or ability.)",
+    "abilities": [],
+    "flavor_text": "“Braum takes medicine too, see?” — Braum",
+    "image": "CardArts/OGN-013.webp"
+  },
+  {
+    "id": "darius-trifarian",
+    "name": "Darius - Trifarian",
+    "set": "OGN",
+    "card_number": "027",
+    "card_type": "unit",
+    "supertypes": [
+      "champion"
+    ],
+    "tags": [
+      "Trifarian",
+      "Darius",
+      "Noxus"
+    ],
+    "domain": [
+      "fury"
+    ],
+    "rarity": "Rare",
+    "energy_cost": 5,
+    "power_cost": [],
+    "might": 5,
+    "might_bonus": null,
+    "keywords": [],
+    "effect_text": "When you play your second card in a turn, give me +2 Might this turn and ready me.",
+    "abilities": [
+      {
+        "ability_id": "darius-trifarian-second-card-might",
+        "ability_type": "triggered",
+        "timing": "on_play",
+        "condition": {
+          "type": "played_card_count_eq",
+          "value": 2
+        },
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "give_might",
+        "effect_params": {
+          "amount": 2,
+          "duration": "turn",
+          "target": "self"
+        },
+        "is_action": false,
+        "is_reaction": false
+      },
+      {
+        "ability_id": "darius-trifarian-second-card-ready",
+        "ability_type": "triggered",
+        "timing": "on_play",
+        "condition": {
+          "type": "played_card_count_eq",
+          "value": 2
+        },
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "ready_permanent",
+        "effect_params": {
+          "target": "self"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "“With overwhelming force.”",
+    "image": "CardArts/OGN-027.webp"
+  },
+  {
+    "id": "watchful-sentry",
+    "name": "Watchful Sentry",
+    "set": "OGN",
+    "card_number": "096",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Freljord"
+    ],
+    "domain": [
+      "mind"
+    ],
+    "rarity": "Common",
+    "energy_cost": 2,
+    "power_cost": [],
+    "might": 1,
+    "might_bonus": null,
+    "keywords": [
+      {
+        "id": "deathknell"
+      }
+    ],
+    "effect_text": "Deathknell — Draw 1. (When I die, get the effect.)",
+    "abilities": [
+      {
+        "ability_id": "watchful-sentry-deathknell",
+        "ability_type": "triggered",
+        "timing": "on_death",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "draw",
+        "effect_params": {
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "He may never see home again. But because of him, that home still stands.",
+    "image": "CardArts/OGN-096.webp"
+  },
+  {
+    "id": "ravenbloom-student",
+    "name": "Ravenbloom Student",
+    "set": "OGN",
+    "card_number": "103",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Noxus"
+    ],
+    "domain": [
+      "mind"
+    ],
+    "rarity": "Uncommon",
+    "energy_cost": 2,
+    "power_cost": [],
+    "might": 2,
+    "might_bonus": null,
+    "keywords": [],
+    "effect_text": "When you play a spell, give me +1 Might this turn.",
+    "abilities": [
+      {
+        "ability_id": "ravenbloom-student-spell-might",
+        "ability_type": "triggered",
+        "timing": "on_play",
+        "condition": {
+          "type": "played_card_type",
+          "card_type": "spell"
+        },
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "give_might",
+        "effect_params": {
+          "amount": 1,
+          "duration": "turn",
+          "target": "self"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "A little knowledge is a dangerous thing. A lot of knowledge is awesome.",
+    "image": "CardArts/OGN-103.webp"
+  },
+  {
+    "id": "lecturing-yordle",
+    "name": "Lecturing Yordle",
+    "set": "OGN",
+    "card_number": "087",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Yordle",
+      "Bandle City"
+    ],
+    "domain": [
+      "mind"
+    ],
+    "rarity": "Common",
+    "energy_cost": 3,
+    "power_cost": [],
+    "might": 2,
+    "might_bonus": null,
+    "keywords": [
+      {
+        "id": "tank"
+      }
+    ],
+    "effect_text": "Tank (I must be assigned combat damage first.)\nWhen you play me, draw 1.",
+    "abilities": [
+      {
+        "ability_id": "lecturing-yordle-play-draw",
+        "ability_type": "triggered",
+        "timing": "on_play",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "draw",
+        "effect_params": {
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "... poisonous, but I didn't know that at the time. You see ...",
+    "image": "CardArts/OGN-087.webp"
+  },
+  {
+    "id": "sprite-mother",
+    "name": "Sprite Mother",
+    "set": "OGN",
+    "card_number": "106",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Fae"
+    ],
+    "domain": [
+      "mind"
+    ],
+    "rarity": "Uncommon",
+    "energy_cost": 4,
+    "power_cost": [],
+    "might": 3,
+    "might_bonus": null,
+    "keywords": [],
+    "effect_text": "When you play me, play a ready 3 Might Sprite unit token with Temporary here. (Kill it at the start of its controller's Beginning Phase, before scoring.)",
+    "abilities": [
+      {
+        "ability_id": "sprite-mother-play-token",
+        "ability_type": "triggered",
+        "timing": "on_play",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "play_token",
+        "effect_params": {
+          "token_type": "sprite-3m",
+          "location": "here",
+          "ready": true,
+          "keywords": [
+            {
+              "id": "temporary",
+              "duration": "until_beginning"
+            }
+          ]
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "“Come, little ones.”",
+    "image": "CardArts/OGN-106.webp"
+  },
+  {
+    "id": "thousand-tailed-watcher",
+    "name": "Thousand-Tailed Watcher",
+    "set": "OGN",
+    "card_number": "116",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Ionia"
+    ],
+    "domain": [
+      "mind"
+    ],
+    "rarity": "Rare",
+    "energy_cost": 7,
+    "power_cost": [],
+    "might": 7,
+    "might_bonus": null,
+    "keywords": [
+      {
+        "id": "accelerate"
+      }
+    ],
+    "effect_text": "Accelerate (You may pay 1 and a mind rune as an additional cost to have me enter ready.)\nWhen you play me, give enemy units -3 Might this turn, to a minimum of 1 Might.",
+    "abilities": [
+      {
+        "ability_id": "thousand-tailed-watcher-accelerate",
+        "ability_type": "keyword_ability",
+        "timing": "on_play",
+        "condition": null,
+        "is_optional": true,
+        "cost": {
+          "energy": 1,
+          "power": [
+            {
+              "domain": "mind",
+              "amount": 1
+            }
+          ]
+        },
+        "effect_type": "enter_ready",
+        "effect_params": {},
+        "is_action": false,
+        "is_reaction": false
+      },
+      {
+        "ability_id": "thousand-tailed-watcher-enemy-debuff",
+        "ability_type": "triggered",
+        "timing": "on_play",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "give_might",
+        "effect_params": {
+          "amount": -3,
+          "duration": "turn",
+          "target": "all_enemy_units",
+          "minimum_might": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "You will know when you've pushed the wilds too far.",
+    "image": "CardArts/OGN-116.webp"
+  },
+  {
+    "id": "dr-mundo-expert",
+    "name": "Dr. Mundo - Expert",
+    "set": "OGN",
+    "card_number": "109",
+    "card_type": "unit",
+    "supertypes": [
+      "champion"
+    ],
+    "tags": [
+      "Dr. Mundo",
+      "Zaun"
+    ],
+    "domain": [
+      "mind"
+    ],
+    "rarity": "Rare",
+    "energy_cost": 8,
+    "power_cost": [],
+    "might": 6,
+    "might_bonus": null,
+    "keywords": [],
+    "effect_text": "My Might is increased by the number of cards in your trash.\nAt the start of your Beginning Phase, recycle 3 from your trash.",
+    "abilities": [
+      {
+        "ability_id": "dr-mundo-expert-trash-might",
+        "ability_type": "passive",
+        "timing": null,
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "conditional_might",
+        "effect_params": {
+          "per_card_in_trash": true,
+          "amount_per_card": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      },
+      {
+        "ability_id": "dr-mundo-expert-beginning-recycle",
+        "ability_type": "triggered",
+        "timing": "beginning_phase_start",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "recycle_from_trash",
+        "effect_params": {
+          "amount": 3
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "“This not hurt a bit!”",
+    "image": "CardArts/OGN-109.webp"
   }
 ]

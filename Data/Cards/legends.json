@@ -82,5 +82,48 @@
       }
     ],
     "image": "CardArts/OGS-019.webp"
+  },
+  {
+    "id": "kaisa-daughter-of-the-void",
+    "name": "Kai'Sa - Daughter of the Void",
+    "set": "OGN",
+    "card_number": "247",
+    "card_type": "legend",
+    "supertypes": [],
+    "tags": [
+      "Kai'Sa"
+    ],
+    "domain": [
+      "fury",
+      "mind"
+    ],
+    "rarity": "Rare",
+    "energy_cost": 0,
+    "power_cost": [],
+    "champion_tag": "Kai'Sa",
+    "keywords": [],
+    "effect_text": "Exhaust: Reaction — Add a rainbow rune. Use only to play spells. (Abilities that add resources can't be reacted to.)",
+    "abilities": [
+      {
+        "ability_id": "kaisa-daughter-of-the-void-add-spell-rainbow",
+        "ability_type": "activated",
+        "timing": null,
+        "condition": null,
+        "is_optional": true,
+        "cost": {
+          "energy": 0,
+          "power": [],
+          "exhaust": true
+        },
+        "effect_type": "add_power",
+        "effect_params": {
+          "domain": "spell_rainbow",
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": true
+      }
+    ],
+    "image": "CardArts/OGN-247.webp"
   }
 ]

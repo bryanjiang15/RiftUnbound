@@ -900,9 +900,10 @@ func _queue_spell_target_prompt(
 		params.get("target", ""), params, card, gs, {"player_index": player_index}
 	)
 	valid = TargetResolverScript.restrict_to_hidden_battlefield(valid, hidden_bf_idx)
-	for chosen in item.targets:
-		if chosen is CardInstance:
-			valid.erase(chosen)
+	if not params.get("allow_repeat_targets", false):
+		for chosen in item.targets:
+			if chosen is CardInstance:
+				valid.erase(chosen)
 	if valid.is_empty():
 		if item.targets.size() <= target_step:
 			item.targets.append(null)
@@ -980,7 +981,7 @@ func _complete_play(
 		cost = CostCalculator.compute_play_cost(
 			card, player_index, gs, use_accelerate, optional_discard_discount
 		)
-	if not try_pay_cost(player_index, cost):
+	if not try_pay_cost(player_index, cost, card):
 		_log("[ERROR] Cannot play %s: insufficient resources (need %s, pool: %s)" % [
 			card.definition.name, CostCalculator.cost_to_string(cost),
 			ps.rune_pool.describe()
@@ -1013,8 +1014,9 @@ func _complete_play(
 		"spell":
 			_play_spell(player_index, card, target_id, destination, hidden_bf_idx)
 
-	if card.definition.card_type != "spell":
-		_fire_on_play_triggers(card, use_accelerate, declined_accelerate, hidden_bf_idx)
+	if not gs.pending_prompt.is_empty():
+		return
+	_fire_on_play_triggers(card, use_accelerate, declined_accelerate, hidden_bf_idx)
 
 	if gs.pending_prompt.is_empty():
 		_run_cleanup()
@@ -1209,6 +1211,13 @@ func _cmd_use(player_index: int, args: Array) -> void:
 		_log("[ERROR] Cannot afford ability cost: %s" % CostCalculator.cost_to_string(cost))
 		return
 
+	if ab.get("effect_type", "") in ["add_energy", "add_power"]:
+		for line in ability_resolver.resolve_ability(ab, card, target, gs, {"player_index": player_index, "controller": self}):
+			_log(line)
+		_log("> [P%d] Activated resource ability on %s" % [player_index + 1, card.display_name()])
+		_run_cleanup()
+		return
+
 	var item = ChainItem.from_ability(card, ab, 0)
 	if target:
 		item.targets.append(target)
@@ -1270,7 +1279,7 @@ func _cmd_react(player_index: int, args: Array) -> void:
 			return
 
 	var cost = CostCalculator.compute_play_cost(card, player_index, gs)
-	if not try_pay_cost(player_index, cost):
+	if not try_pay_cost(player_index, cost, card):
 		_log("[ERROR] Cannot afford %s (need %s, pool: %s)" % [
 			card.definition.name, CostCalculator.cost_to_string(cost),
 			ps.rune_pool.describe()
@@ -2050,6 +2059,8 @@ func _emit_card_event(event: String, card: CardInstance, energy_spent: int = 0) 
 
 func _find_player_permanent(player_index: int, inst_id: String) -> CardInstance:
 	var ps: PlayerState = gs.players[player_index]
+	if ps.legend != null and ps.legend.instance_id == inst_id:
+		return ps.legend
 	var c = ps.get_board_instance(inst_id)
 	if c:
 		return c
@@ -2124,23 +2135,27 @@ func _cost_after_discard_paid(cost: Dictionary) -> Dictionary:
 func try_pay_cost(player_index: int, cost: Dictionary, source: CardInstance = null) -> bool:
 	if cost.is_empty():
 		return true
-	if not CostCalculator.can_afford(player_index, cost, gs):
-		_auto_pay_runes(player_index, cost)
-	if not CostCalculator.can_afford(player_index, cost, gs):
+	if not CostCalculator.can_afford(player_index, cost, gs, source):
+		_auto_pay_runes(player_index, cost, source)
+	if not CostCalculator.can_afford(player_index, cost, gs, source):
 		return false
 	CostCalculator.pay_cost(player_index, cost, source, gs)
 	return true
 
 
-func _auto_pay_runes(player_index: int, cost: Dictionary) -> void:
+func _auto_pay_runes(player_index: int, cost: Dictionary, source: CardInstance = null) -> void:
 	var ps: PlayerState = gs.players[player_index]
+	var can_use_spell_rainbow := source != null and source.definition.card_type == "spell"
 
 	# 1. Specific domain power requirements — recycle matching runes.
 	for pc in cost.get("power", []):
 		var domain: String = pc.get("domain", "")
 		if domain == "any":
 			continue
-		var need: int = maxi(0, pc.get("amount", 0) - ps.rune_pool.power.get(domain, 0))
+		var available: int = ps.rune_pool.power.get(domain, 0)
+		if can_use_spell_rainbow:
+			available += ps.rune_pool.power.get(RunePool.SPELL_RAINBOW_POWER, 0)
+		var need: int = maxi(0, pc.get("amount", 0) - available)
 		for _i in range(need):
 			var rune = _find_rune_for_recycle_domain(ps, domain)
 			if rune != null:

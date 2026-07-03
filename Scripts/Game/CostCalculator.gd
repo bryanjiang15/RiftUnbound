@@ -90,18 +90,18 @@ static func compute_ability_cost(
 	}
 
 
-static func can_afford(player_index: int, cost: Dictionary, gs: GameState) -> bool:
+static func can_afford(player_index: int, cost: Dictionary, gs: GameState, source: CardInstance = null) -> bool:
 	var ps: PlayerState = gs.players[player_index]
 	if cost.get("discard", 0) > ps.hand.size():
 		return false
 	if cost.get("recycle", 0) > ps.deck.size():
 		return false
-	return ps.rune_pool.can_pay(cost.get("energy", 0), cost.get("power", []))
+	return ps.rune_pool.can_pay(cost.get("energy", 0), cost.get("power", []), _payment_context(source))
 
 
-static func can_afford_with_autopay(player_index: int, cost: Dictionary, gs: GameState) -> bool:
+static func can_afford_with_autopay(player_index: int, cost: Dictionary, gs: GameState, source: CardInstance = null) -> bool:
 	# Fast path: pool already covers the cost with no auto-pay needed.
-	if can_afford(player_index, cost, gs):
+	if can_afford(player_index, cost, gs, source):
 		return true
 
 	var ps: PlayerState = gs.players[player_index]
@@ -118,6 +118,7 @@ static func can_afford_with_autopay(player_index: int, cost: Dictionary, gs: Gam
 	# Pool values as starting point
 	var sim_energy: int = ps.rune_pool.energy
 	var sim_power: Dictionary = ps.rune_pool.power.duplicate()
+	var can_use_spell_rainbow := source != null and source.definition.card_type == "spell"
 
 	# Track runes that would be recycled for domain power (they can't also be tapped)
 	var recycled_instance_ids: Array = []
@@ -141,7 +142,10 @@ static func can_afford_with_autopay(player_index: int, cost: Dictionary, gs: Gam
 				for d in rune.definition.domain:
 					sim_power[d] = sim_power.get(d, 0) + 1
 		else:
-			needed = maxi(0, needed - sim_power.get(domain, 0))
+			var available: int = sim_power.get(domain, 0)
+			if can_use_spell_rainbow:
+				available += sim_power.get(RunePool.SPELL_RAINBOW_POWER, 0)
+			needed = maxi(0, needed - available)
 			for _i in range(needed):
 				var rune = _find_recyclable_rune_domain(ps, domain, recycled_instance_ids)
 				if rune == null:
@@ -193,7 +197,7 @@ static func _find_recyclable_rune_any(ps: PlayerState, exclude_ids: Array) -> Ca
 
 static func pay_cost(player_index: int, cost: Dictionary, source: CardInstance, gs: GameState) -> void:
 	var ps: PlayerState = gs.players[player_index]
-	ps.rune_pool.pay(cost.get("energy", 0), cost.get("power", []))
+	ps.rune_pool.pay(cost.get("energy", 0), cost.get("power", []), _payment_context(source))
 	if cost.get("exhaust", false) and source != null:
 		source.exhaust()
 	if cost.get("recycle_self", false) and source != null:
@@ -243,3 +247,9 @@ static func cost_to_string(cost: Dictionary) -> String:
 	if not str(cost.get("custom", "")).is_empty():
 		parts.append(str(cost.get("custom", "")))
 	return " + ".join(parts) if not parts.is_empty() else "free"
+
+
+static func _payment_context(source: CardInstance) -> Dictionary:
+	if source == null:
+		return {}
+	return {"card_type": source.definition.card_type}

@@ -8,10 +8,14 @@ var _pending_end_of_turn: Array = []
 
 
 func emit(event: String, ctx: Dictionary, gs: GameState, controller: GameController = null) -> Array:
-	if event == "on_play":
-		return _emit_played_card_abilities(ctx, gs, controller, 0)
-
 	var log_lines: Array[String] = []
+	if event == "on_play":
+		log_lines.append_array(_emit_played_card_abilities(ctx, gs, controller, 0))
+		if not gs.pending_prompt.is_empty():
+			return log_lines
+		ctx = ctx.duplicate()
+		ctx["skip_played_card_source"] = true
+
 	var resolver = controller.ability_resolver if controller else AbilityResolver.new()
 
 	for entry in _collect_sources(event, ctx, gs):
@@ -84,7 +88,11 @@ func emit_passive_auras(gs: GameState) -> void:
 						for kw in ab.get("effect_params", {}).get("keywords", []):
 							u.passive_keywords.append(kw)
 					"conditional_might":
-						u.passive_might_bonus += int(ab.get("effect_params", {}).get("amount", 0))
+						var ep: Dictionary = ab.get("effect_params", {})
+						if ep.get("per_card_in_trash", false):
+							u.passive_might_bonus += ps.trash.size() * int(ep.get("amount_per_card", 1))
+						else:
+							u.passive_might_bonus += int(ep.get("amount", 0))
 		# Legend auras that buff friendly units (e.g. Master Yi - Wuju Bladesman).
 		if ps.legend != null:
 			for ab in ps.legend.definition.abilities:
@@ -121,10 +129,11 @@ func _collect_sources(event: String, ctx: Dictionary, gs: GameState) -> Array:
 
 	if event == "on_play":
 		var played: Variant = ctx.get("source")
-		if played is CardInstance:
+		if played is CardInstance and not ctx.get("skip_played_card_source", false):
 			for ab in played.definition.abilities:
 				results.append({"source": played, "ability": ab})
-		return results
+		if not ctx.get("skip_played_card_source", false):
+			return results
 
 	if event == "on_discard":
 		var discarded: CardInstance = ctx.get("discarded_card")
@@ -157,14 +166,36 @@ func _collect_sources(event: String, ctx: Dictionary, gs: GameState) -> Array:
 				results.append({"source": null, "ability": ab, "battlefield_index": i})
 
 	for ps in gs.players:
+		if event == "on_play" and ps.legend != null:
+			for ab in ps.legend.definition.abilities:
+				if not _is_play_observer_ability(ab):
+					continue
+				results.append({"source": ps.legend, "ability": ab})
 		for perm in ps.base_permanents:
+			if ctx.get("skip_played_card_source", false) and perm == ctx.get("source"):
+				continue
 			for ab in perm.definition.abilities:
+				if event == "on_play" and ctx.get("skip_played_card_source", false) and not _is_play_observer_ability(ab):
+					continue
 				results.append({"source": perm, "ability": ab})
 		for u in gs.board.get_all_units_on_board(ps.player_index):
+			if ctx.get("skip_played_card_source", false) and u == ctx.get("source"):
+				continue
 			for ab in u.definition.abilities:
+				if event == "on_play" and ctx.get("skip_played_card_source", false) and not _is_play_observer_ability(ab):
+					continue
 				results.append({"source": u, "ability": ab})
 
 	return results
+
+
+func _is_play_observer_ability(ab: Dictionary) -> bool:
+	if str(ab.get("timing", "")) != "on_play":
+		return false
+	var cond = ab.get("condition", null)
+	if not cond is Dictionary:
+		return false
+	return cond.get("type", "") in ["played_card_type", "played_card_count_eq"]
 
 
 func _owner_index(source: Variant, ctx: Dictionary) -> int:
