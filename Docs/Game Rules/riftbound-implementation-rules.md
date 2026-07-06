@@ -284,6 +284,9 @@ Combat occurs when Units from two opposing players are at the same Battlefield.
 
 - Damage is tracked per Unit (a temporary value).
 - A Unit is **killed** (sent to Trash) during a Cleanup when damage ≥ Might.
+- Turn-duration death replacement effects are checked before a lethal unit dies.
+  Highlander's replacement is single-use: the protected unit is recalled to base,
+  healed, exhausted, and does not enter Trash.
 - Units with **Deathknell** trigger their effect before being moved to Trash.
 - Damage is **healed** at:
   - End of each player's turn (Expiration Step).
@@ -329,8 +332,9 @@ A Cleanup is triggered automatically after most game events (moves, state change
 1. Check win condition (points ≥ Victory Score and more than any opponent → player wins).
 2. Assign/Remove Attacker and Defender designations.
 3. Handle outstanding board state:
-   - a. Deathknell abilities of units with lethal damage trigger.
-   - b. Units with lethal damage are killed → sent to Trash.
+   - a. Death replacement effects consume first and recall protected units to Base.
+   - b. Deathknell abilities of remaining units with lethal damage trigger.
+   - c. Remaining units with lethal damage are killed → sent to Trash.
 4. Battlefields with no units in an Open State become **Uncontrolled**.
 5. Recall unattached Gear at Battlefields to Base.
 6. Mark Showdowns as Staged where Contested was applied.
@@ -500,11 +504,11 @@ Prompt `type` values currently handled by the controller:
 
 | Prompt `type` | Resolved by | Notes |
 |---|---|---|
-| `choose_target` | `choose <instance-id>` | Target prompts may be queued before a spell enters the Chain when multiple resolution abilities need targets |
+| `choose_target` | `choose <instance-id>` | Target prompts may be queued before a spell enters the Chain when multiple resolution abilities need targets; also used after custom-cost `choose yes` flows such as Meditation's unit-to-exhaust choice and optional triggered abilities with multiple valid targets |
 | `choose_discard` | `choose <hand-card-id>` | Used for discard costs/effects so `on_discard` triggers fire correctly |
-| `choose_optional` | `choose yes` / `choose no` | Optional ability or optional cost branch |
+| `choose_optional` | `choose yes` / `choose no` | Optional ability or optional cost branch. For `custom_cost == "may_exhaust_friendly_unit"`, `yes` opens a `choose_target` prompt for a ready friendly unit; `no` resolves the base effect. |
 | `choose_battlefield` | `choose <battlefield-id>` | Selects a staged combat/showdown battlefield |
-| `choose_trash_return` | `choose <trash-card-id>` | Handler exists, but `return_from_trash` currently auto-returns the last matching trash card instead of opening this prompt |
+| `choose_trash_return` | `choose <trash-card-id>` | Used by `return_from_trash` when more than one matching trash card can be returned; exactly one match auto-returns |
 
 Discard prompts appear when an effect or cost requires discarding from hand:
 

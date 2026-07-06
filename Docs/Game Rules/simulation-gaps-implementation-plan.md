@@ -65,7 +65,6 @@ These effects are still unhandled by `AbilityResolver.gd` and should be treated 
 | `gain_xp` | No handler |
 | `prevent_damage` | No handler |
 | `custom` | No script-loading path for bespoke card behavior |
-| `death_replacement_recall` | No replacement-effect layer; Highlander logs `[INFO] Unhandled effect type` |
 
 Other content-facing gaps:
 
@@ -79,8 +78,8 @@ Other content-facing gaps:
 |---|---|
 | Chosen Champion identity | `DeckLoader` places a champion in `champion_zone`, but deck copies are not specially treated as Chosen Champion copies in other zones |
 | Signature card limit | Not enforced by `DeckLoader.validate()` |
-| Cemetery Attendant choice | `choose_trash_return` exists, but `return_from_trash` currently returns the last matching trash card without opening that prompt |
 | Gear `on_death` | Unit Deathknell hooks run during lethal cleanup; Scrapheap's gear `on_death` ability is not tied to an attached-unit death path |
+| Non-optional triggered target selection | Optional triggered abilities can prompt for a target after `choose yes`; non-optional triggered abilities with multiple valid targets still auto-pick the first valid target via `TriggerDispatcher._resolve_trigger_target` |
 | Manual combat assignment | Supported only when `gs.auto_combat_damage` is false; defender damage is still auto-assigned |
 | Staged combat chaining | Cleanup prompts when multiple battlefields are staged, but `CombatProcessor.finalize_combat()` can still auto-open the next staged combat |
 
@@ -96,12 +95,20 @@ Other content-facing gaps:
 
 Passive keyword auras are refreshed by `emit_passive_auras()` and currently cover `gain_keywords`. Magma Wurm's "other friendly units enter ready" is an `on_play` effect, not a passive aura refresh.
 
+Optional triggered abilities resolve through `choose_optional`; after the
+controller accepts, `GameController._handle_choose_optional()` can open
+`choose_target` when several valid targets exist (covered by Reaver's Row and
+Fortified Position scenario tests). Non-optional triggers still use the
+dispatcher's first-valid-target fallback.
+
 ### 4.4 Cost and payment constraints
 
 - Use `GameController.try_pay_cost()` for costs with energy or power so auto-tap/auto-recycle can satisfy shortfalls.
 - Discard costs go through `begin_discard()` to preserve player choice and `on_discard` triggers.
 - `play_self` assumes the dispatcher already paid the ability cost; `_play_self()` only moves the card from trash to base.
 - `CostCalculator.compute_play_cost()` applies card-local `cost_reduction`, `per_card_in_trash`, Legion conditions, and Accelerate surcharge.
+- `cost.custom` is a registry of named cost flows, not a general script hook.
+  The current supported value is `may_exhaust_friendly_unit` for Meditation.
 
 ### 4.5 Developer-facing command pitfalls
 
@@ -137,7 +144,7 @@ Legend: ✅ works · ⚠️ partial · ❌ broken/missing
 | Raging Soul | ✅ | Conditional `gain_keywords` applies after a discard this turn |
 | Jinx — Demolitionist | ✅ | Accelerate + player-chosen discard on play |
 | Vi — Destructive | ✅ | Activated `give_might` pays `cost.recycle: 1` from deck |
-| Cemetery Attendant | ⚠️ | `return_from_trash` works but no target choice (returns last unit in trash) |
+| Cemetery Attendant | ✅ | `return_from_trash` prompts with `choose_trash_return` when several matching trash cards exist; one match auto-returns |
 | Undercover Agent | ✅ | Deathknell `discard_then_draw` with player choice |
 | Traveling Merchant | ✅ | `on_move` `discard_then_draw` with player choice |
 | Rhasa the Sunderer | ✅ | `cost_reduction` per card in trash applies in `CostCalculator` |
@@ -182,9 +189,7 @@ Work in this order to close the remaining verified gaps without reworking implem
 
 ### 6.2 Remaining starter-card fidelity
 
-1. Add a trash-choice prompt for `return_from_trash` so Cemetery Attendant does not auto-pick the last matching unit.
-2. Wire Scrapheap's gear `on_death` to an attached-death or gear-destruction path if that rule is intended for the simulation.
-3. Add direct coverage for Reaver's Row `on_defend` optional decline/accept behavior.
+1. Wire Scrapheap's gear `on_death` to an attached-death or gear-destruction path if that rule is intended for the simulation.
 
 ### 6.3 Future content hooks
 
@@ -247,9 +252,9 @@ the Main Menu ("Master Yi Deck (vs AI)").
 | Mobilize (OGN-134) | `spells.json` | ✅ `channel_rune_or_draw` |
 | Confront (OGN-129) | `spells.json` | ✅ `units_enter_ready_this_turn` + draw |
 | Cannon Barrage (OGN-127) | `spells.json` | ✅ `deal_damage_all_enemies_in_combat` |
-| Meditation (OGN-048) | `spells.json` | ⚠️ Partial — see gaps |
+| Meditation (OGN-048) | `spells.json` | ✅ Optional exhaust cost draws 2 when paid; otherwise draws 1 |
 | Gentlemen's Duel (OGS-008) | `spells.json` | ✅ Multi-target buff + fight resolution |
-| Highlander (OGS-020) | `spells.json` | ❌ Not implemented — see gaps |
+| Highlander (OGS-020) | `spells.json` | ✅ Turn-duration death replacement recalls, heals, and exhausts protected unit |
 
 ### Engine features added for this deck
 
@@ -265,26 +270,22 @@ the Main Menu ("Master Yi Deck (vs AI)").
 - `GameController._queue_spell_target_prompt` queues each `targeting: choose_one`
   resolution ability before putting a spell onto the Chain, so spells such as
   Gentlemen's Duel can carry multiple chosen targets through resolution.
+- `GameState.death_replacement_recalls` plus
+  `CleanupProcessor._consume_death_replacement` implement Highlander's
+  single-use "next death this turn" replacement before Deathknell/trash movement.
+- `cost.custom = "may_exhaust_friendly_unit"` is handled during Chain
+  resolution by `GameController.begin_may_exhaust_friendly_unit_cost`: no ready
+  friendly unit auto-declines; `choose yes` prompts for a ready friendly unit to
+  exhaust and upgrades Meditation's draw from 1 to 2.
+- `return_from_trash` opens `choose_trash_return` when multiple cards match,
+  preserving player choice for Cemetery Attendant.
 
 ### Remaining gaps (require further engine work)
 
-1. **Replacement effects (Highlander, OGS-020).** "The next time a friendly unit would die
-   this turn, heal/exhaust/recall it instead." The engine has no replacement-effect layer;
-   `CleanupProcessor.process_deaths` moves lethally-damaged units straight to Trash. Needs:
-   a per-unit/turn "death replacement" registry consulted before a unit dies, plus a recall
-   (heal + exhaust + send to base, not a move). The JSON ability is present
-   (`effect_type: death_replacement_recall`, `ability_type: replacement`) but logs `[INFO]`.
-2. **Optional additional costs (Meditation, OGN-048).** "You may exhaust a friendly unit; if
-   you do, draw 2, otherwise draw 1." Costs that prompt the player to choose-and-exhaust a
-   unit, with a branching effect, are not supported. Current behavior: draws 1 (the floor);
-   the exhaust-for-+1-draw upside is unimplemented (ability `cost.custom = may_exhaust_friendly_unit`).
-3. **Triggered-ability target selection.** Triggered abilities (e.g. Fortified Position's
-   `on_defend`, Reaver's Row) auto-pick the *first* valid target via
-   `TriggerDispatcher._resolve_trigger_target`; they cannot yet prompt the controller to
-   choose among several valid targets. `targeting: choose_one` is therefore only honored for
-   spells (via `_play_spell`), not triggered abilities. Fortified Position drops the
-   (no-op) `targeting` field and grants Shield 2 to the first friendly defender; with a
-   single defender — the common case — this matches the card.
+1. **Non-optional triggered-ability target selection.** Optional triggered
+   abilities such as Fortified Position and Reaver's Row can prompt after
+   `choose yes`, but non-optional triggered abilities still auto-pick the first
+   valid target via `TriggerDispatcher._resolve_trigger_target`.
 
 ### Engine timing fixes (from PR review)
 
@@ -330,7 +331,7 @@ so `targons-peak` and `reavers-row` were added to round out the deck's `battlefi
 [ ] gain_xp             [x] gain_points         [ ] prevent_damage
 [x] cost_reduction      [x] counter_spell       [x] attach
 [x] predict             [x] return_to_hand      [x] enter_ready
-[~] return_from_trash   [ ] custom
+[x] return_from_trash   [ ] custom
 
 [x] discard_then_draw   [x] move_unit_to_base   [x] play_self
 [x] gain_keywords       [x] ready_runes
@@ -342,7 +343,7 @@ so `targons-peak` and `reavers-row` were added to round out the deck's `battlefi
 [x] deal_damage_all_enemies_in_combat
 [x] fight_chosen_units
 [x] conditional_might   [x] aura_might
-[ ] death_replacement_recall
+[x] death_replacement_recall
 
 [x] implemented   [~] partial/stub   [ ] missing
 ```

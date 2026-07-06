@@ -112,6 +112,15 @@ Abilities are defined as structured objects. They are **not free-form text** in 
 | `is_action` | `true` / `false` | Can be used during Showdowns |
 | `is_reaction` | `true` / `false` | Can be used during Closed States on any player's turn |
 
+### Custom Cost Registry
+
+Use `cost.custom` only for cost flows that need controller prompts or branching
+resolution. Supported values:
+
+| `cost.custom` | Runtime meaning | Prompt flow |
+|---|---|---|
+| `"may_exhaust_friendly_unit"` | Optional additional cost used by Meditation. During spell resolution, the controller may exhaust one ready friendly unit at base or a battlefield. If paid, the resolving `draw` amount is raised to at least 2; otherwise the ability resolves with its base amount. | `choose_optional` (`yes`/`no`); `yes` opens `choose_target` for the ready friendly unit. If no ready friendly unit exists, the cost is auto-declined. |
+
 ### Implemented Conditions
 
 `ConditionEvaluator.gd` treats unknown condition types as `true`, so card authors should use only the implemented names below unless they also add evaluator coverage and tests.
@@ -165,13 +174,14 @@ Each `effect_type` string maps to a handler in `AbilityResolver.gd` unless the n
 | `"predict"` | Reveal top cards in logs; recycle choice is not modeled | `{ "amount": 2 }` |
 | `"return_to_hand"` | Return a permanent to its owner's hand | `{ "target": "unit_at_battlefield" }` |
 | `"enter_ready"` | Ready the source card as it enters; used by Accelerate-style abilities | `{}` |
-| `"return_from_trash"` | Return the last matching trash card to hand; no prompt is opened yet | `{ "target": "unit" }` |
+| `"return_from_trash"` | Return a matching card from the controller's trash to hand. If multiple cards match and a controller is available, opens `choose_trash_return`; exactly one match auto-returns. | `{ "target": "unit", "destination": "hand" }` |
 | `"other_friendly_units_enter_ready"` | Special-cased after a unit is played; readies other friendly units already on board/base | `{}` |
 | `"gain_keywords"` | Append passive keywords to the source when passive auras refresh | `{ "keywords": [{ "id": "assault", "value": 1 }] }` |
 | `"play_self"` | Move the source card from trash to base after its ability cost is paid | `{}` |
 | `"deal_damage_equal_to_discarded_energy_cost"` | Damage target by the Energy cost of the most recently discarded card this turn | `{ "target": "unit_at_battlefield", "targeting": "choose_one" }` |
 | `"cost_reduction"` | Read by `CostCalculator`; resolver intentionally does nothing | `{ "amount": 2, "scope": "self", "duration": "play" }` |
 | `"attach"` | Attach this Gear to a target unit | `{ "target": "friendly_unit" }` |
+| `"death_replacement_recall"` | Register a turn-duration replacement for a chosen friendly unit's next death. When cleanup would kill that unit, the replacement is consumed; the unit is recalled to base, healed, exhausted, and does not enter trash. | `{ "target": "friendly_unit", "targeting": "choose_one", "duration": "turn" }` |
 
 Passive aura effects are refreshed by `TriggerDispatcher.emit_passive_auras()` rather than normal chain resolution:
 
@@ -181,7 +191,7 @@ Passive aura effects are refreshed by `TriggerDispatcher.emit_passive_auras()` r
 | `"aura_might"` | Legend aura that adds Might to each friendly unit whose condition evaluates true | `{ "target": "friendly_unit", "amount": 2 }` |
 | `"gain_keywords"` | Add passive keywords while the source's condition evaluates true | `{ "keywords": [{ "id": "ganking" }] }` |
 
-Declared but unsupported effect names should be treated as gaps until a handler and tests are added: `"spend_buff"`, `"banish"`, `"gain_xp"`, `"prevent_damage"`, `"custom"`, and `"death_replacement_recall"` (Highlander replacement effect).
+Declared but unsupported effect names should be treated as gaps until a handler and tests are added: `"spend_buff"`, `"banish"`, `"gain_xp"`, `"prevent_damage"`, and `"custom"`.
 
 ### Multi-Target Spell Resolution
 
