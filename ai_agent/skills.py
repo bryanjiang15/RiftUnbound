@@ -34,6 +34,13 @@ _current_legal_moves: list[str] = []
 _current_memory: Any = None
 _current_game_id: str = ""
 
+# Scout-search context injected by agent.build_goal_overlay before the strategist
+# runs (Phase 1). A pre-summarized list of the engine's top candidate lines for
+# THIS turn, so the strategist's search_turn tool can ground its goals in what the
+# search actually finds rather than a static snapshot. Empty when no scout ran.
+_current_scout_lines: list[dict] = []
+_current_scout_stats: dict = {}
+
 
 # ── State injection (called by main.py) ──────────────────────────────────────
 
@@ -51,6 +58,19 @@ def set_history_context(memory: Any, game_id: str) -> None:
     global _current_memory, _current_game_id
     _current_memory = memory
     _current_game_id = game_id
+
+
+def set_search_context(scout_lines: list[dict] | None, search_stats: dict | None = None) -> None:
+    """Install the scout-search summaries the strategist's search_turn tool serves.
+
+    Called by agent.build_goal_overlay before running the strategist. Pass an
+    already-summarized, compact line list (see agent._summarize_lines_for_strategist)
+    so this module stays a dumb accessor. Clearing (None) resets it so a later turn
+    without a scout search does not serve stale lines.
+    """
+    global _current_scout_lines, _current_scout_stats
+    _current_scout_lines = scout_lines or []
+    _current_scout_stats = search_stats or {}
 
 
 # ── Read Skills ───────────────────────────────────────────────────────────────
@@ -286,6 +306,37 @@ def _move_to_command(move: dict) -> str:
         # Best-effort fallback for malformed tool input.
         action = (move or {}).get("action", "")
         return str(action)
+
+
+def search_turn(top_n: int = 5) -> dict[str, Any]:
+    """
+    Return the engine's top candidate lines for THIS turn (scout search).
+
+    Phase 1 (search-grounded strategist): before the strategist runs, the engine
+    may run a cheap base-profile search and inline its best full-turn lines. This
+    tool surfaces them as ENGINE-TRUTH facts — each line is a sequence the rules
+    engine actually simulated, with its mechanical score and the top score terms
+    driving it. Use it to set goals grounded in what the search can achieve:
+    - pick goals that PUSH the search toward a strong line it already found, or
+    - REDIRECT it when every top line ignores a winning idea you can see.
+    If no scout search ran, 'lines' is empty — fall back to evaluate_position.
+    """
+    if not _current_scout_lines:
+        return {
+            "lines": [],
+            "note": (
+                "No scout search available this turn. Ground goals with "
+                "evaluate_position and the board summary instead."
+            ),
+        }
+    return {
+        "lines": _current_scout_lines[: max(1, int(top_n or 5))],
+        "search_stats": _current_scout_stats,
+        "note": (
+            "Scores are mechanical (base profile). A high-scoring line is the "
+            "search's current best guess; set goals to sharpen or redirect it."
+        ),
+    }
 
 
 def evaluate_position() -> dict[str, Any]:

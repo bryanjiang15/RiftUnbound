@@ -31,6 +31,15 @@ from fastapi.responses import JSONResponse
 
 from pydantic import BaseModel
 
+# Load .env BEFORE importing .agent: agent.py computes _LOG_INPUTS from the
+# environment at import time (module-level constant), so the .env values must be
+# present in os.environ first. If this ran after `from .agent import _LOG_INPUTS`,
+# the flag would freeze to its pre-.env default (False) and no file logs would be
+# written even with RIFTBOUND_LOG_INPUTS=1 set in .env.
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from . import skills as skill_module
 from . import capture as capture_mod
 from .agent import (
@@ -42,10 +51,11 @@ from .agent import (
     _PLAN_LOG_PATH,
     _LOG_INPUTS,
     _log_game_state_event,
+    build_goal_overlay,
     choose_line,
 )
 from .memory import DecisionLogger, Memory
-from .schemas import Decision, DecisionRequest, Move
+from .schemas import Decision, DecisionRequest, GoalsRequest, Move
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,6 +69,7 @@ _decision_logger: DecisionLogger | None = None
 _pipeline_mode: str = PIPELINE_LEGACY
 _search_enabled: bool = False
 _argmax_enabled: bool = False
+_goals_enabled: bool = False
 _weight_version_id: int | None = None
 _data_origin: str = "vs_human"
 # When set (0 or 1), only persist the tuning dataset (search_decisions /
@@ -131,6 +142,7 @@ def _current_git_sha() -> str | None:
 async def _lifespan(app: FastAPI):
     global _memory, _decision_logger, _pipeline_mode, _search_enabled
     global _argmax_enabled, _weight_version_id, _data_origin, _capture_seat
+    global _goals_enabled
     db_path_override = os.environ.get("RIFTBOUND_DB_PATH", "").strip()
     if db_path_override:
         from pathlib import Path
@@ -154,6 +166,16 @@ async def _lifespan(app: FastAPI):
         "on",
     )
     _argmax_enabled = os.environ.get("RIFTBOUND_SEARCH_ARGMAX", "off").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    # Goal-oriented strategist: when on (and search is on, argmax off), an LLM sets
+    # 1–4 per-turn goals that are compiled into a transient scoring overlay biasing
+    # line selection. Off by default so the proven base-profile search stays the
+    # floor and argmax self-play remains LLM-free.
+    _goals_enabled = os.environ.get("RIFTBOUND_GOALS", "off").strip().lower() in (
         "1",
         "true",
         "yes",
@@ -203,14 +225,40 @@ async def _lifespan(app: FastAPI):
             + "=" * 72 + "\n",
             encoding="utf-8",
         )
+        with open(_SEARCH_LOG_PATH, "w", encoding="utf-8") as f:
+            f.write(
+                f"Riftbound AI Agent — Search & Goal Log\nStarted: "
+                f"{__import__('datetime').datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
+                + "═" * 72 + "\n"
+            )
     logger.info("Riftbound AI agent service started.")
-    logger.info("OpenAI API key: %s", "set" if os.environ.get("OPENAI_API_KEY") else "NOT SET")
+    _provider = os.environ.get("RIFTBOUND_LLM_PROVIDER", "openai").strip().lower()
+    if _provider == "azure":
+        logger.info("LLM provider: Azure OpenAI")
+        logger.info("Azure endpoint: %s", "set" if os.environ.get("AZURE_OPENAI_ENDPOINT") else "NOT SET")
+        logger.info("Azure API key: %s", "set" if os.environ.get("AZURE_OPENAI_API_KEY") else "NOT SET")
+    else:
+        logger.info("LLM provider: OpenAI")
+        logger.info("OpenAI API key: %s", "set" if os.environ.get("OPENAI_API_KEY") else "NOT SET")
     logger.info("Input logging: %s", "ENABLED → agent_inputs.log" if _LOG_INPUTS else "disabled")
     logger.info("Plan logging: %s", "ENABLED → agent_plans.log" if _LOG_INPUTS else "disabled")
     logger.info("Game state logging: %s", "ENABLED → agent_game_state.log" if _LOG_INPUTS else "disabled")
     logger.info("Pipeline mode: %s", _pipeline_mode)
     logger.info("Search mode: %s", "ENABLED" if _search_enabled else "disabled")
     logger.info("Argmax-only selection: %s", "ENABLED" if _argmax_enabled else "disabled")
+    logger.info("Goal strategist: %s", "ENABLED" if _goals_enabled else "disabled")
+    logger.info(
+        "Search & goal log: %s",
+        ("ENABLED → %s" % _SEARCH_LOG_PATH) if (_LOG_INPUTS and _search_enabled)
+        else "disabled (needs RIFTBOUND_LOG_INPUTS=1 AND RIFTBOUND_SEARCH=on)",
+    )
+    if (_search_enabled or _goals_enabled) and not _LOG_INPUTS:
+        logger.warning(
+            "Search/goals are ON but RIFTBOUND_LOG_INPUTS is not set — "
+            "no search or goal logs will be written. Start with "
+            "RIFTBOUND_LOG_INPUTS=1 to populate %s.",
+            _SEARCH_LOG_PATH,
+        )
     logger.info("Weight version id: %s", _weight_version_id)
     logger.info(
         "Capture seat filter: %s",
@@ -379,6 +427,21 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
     # Run reasoning loop
     eval_metrics: dict = {}
     if _search_enabled and request.candidate_lines:
+        overlay = None
+        # With fewer than two candidate lines there is nothing to bias/select, so
+        # skip the strategist overlay (choose_line will short-circuit to the single
+        # line). Goals only matter when the search actually offers a choice.
+        if _goals_enabled and not _argmax_enabled and len(request.candidate_lines) > 1:
+            try:
+                overlay = await build_goal_overlay(
+                    brief_state=brief_state,
+                    game_id=game_id,
+                    memory=_memory,
+                    eval_metrics=eval_metrics,
+                )
+            except Exception as exc:
+                logger.warning("Goal overlay failed (%s); selecting under base profile", exc)
+                overlay = None
         decision = await choose_line(
             brief_state=brief_state,
             game_id=game_id,
@@ -387,6 +450,7 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
             search_stats=request.search_stats,
             eval_metrics=eval_metrics,
             argmax_only=_argmax_enabled,
+            overlay=overlay,
         )
     else:
         if _search_enabled:
@@ -740,8 +804,38 @@ async def health() -> dict:
         "status": "ok",
         "version": "1.0.0",
         "search_enabled": _search_enabled,
+        "goals_enabled": _goals_enabled and not _argmax_enabled,
         "pipeline": _pipeline_mode,
     }
+
+
+@app.post("/goals")
+async def goals_endpoint(request: GoalsRequest) -> dict:
+    """Pre-search handshake. Returns this turn's compiled goal overlay so the
+    engine can build TurnSearch under the biased weights. No-op (empty overlay)
+    when goals are disabled, so the engine can call it unconditionally."""
+    if _memory is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    brief_state = request.brief_state.model_dump()
+    game_id = request.game_id
+    if not (_goals_enabled and not _argmax_enabled):
+        return {"overlay": {}}
+    # Install state so the strategist's read tools (evaluate_position,
+    # get_card_detail, …) resolve against this position.
+    skill_module.set_state(brief_state)
+    try:
+        overlay = await build_goal_overlay(
+            brief_state=brief_state,
+            game_id=game_id,
+            memory=_memory,
+            eval_metrics={},
+            candidate_lines=request.candidate_lines,
+            search_stats=request.search_stats,
+        )
+    except Exception as exc:  # noqa: BLE001 — never fail the turn on a goal error
+        logger.warning("Goal overlay (handshake) failed (%s); empty overlay", exc)
+        return {"overlay": {}}
+    return {"overlay": overlay.to_dict()}
 
 
 @app.get("/legal_moves")

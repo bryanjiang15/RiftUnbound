@@ -59,6 +59,18 @@ var _http: HTTPRequest = null
 # Dedicated request for the one-shot search-config handshake (HTTPRequest handles
 # a single request at a time, so it cannot share _http).
 var _config_http: HTTPRequest = null
+# Dedicated request for the pre-search goal handshake (POST /goals). Separate from
+# _http so it can be awaited inline before the decision request is issued.
+var _goals_http: HTTPRequest = null
+# Whether the agent service has the goal-oriented strategist enabled. Learned from
+# /health (goals_enabled); when true the engine fetches a per-turn goal overlay
+# before running the main search so generic goals bias line generation.
+var _goals_mode: bool = false
+# Phase 1 (search-grounded strategist): when goals are on, run a cheap base-profile
+# "scout" search before the /goals handshake and ship its top lines so the
+# strategist grounds its goals in the engine's actual best lines. Toggle with
+# RIFTBOUND_GOALS_SCOUT (default on) to A/B the grounded vs. blind strategist.
+var _goals_scout: bool = true
 var _pending_brief_state: Dictionary = {}
 var _retry_count: int = 0
 var _last_rejected_move: Dictionary = {}
@@ -99,6 +111,10 @@ func setup(gc: GameController, pi: int, scoring_profile_path: String = "") -> vo
 	# Pre-handshake default from the engine's own env (usually unset); the agent
 	# service's /health response is authoritative and overrides this below.
 	_search_mode = _env_flag("RIFTBOUND_SEARCH")
+	# Scout search defaults ON; disable only with an explicit falsey value so the
+	# grounded strategist is the default whenever goals are enabled.
+	var scout_env := OS.get_environment("RIFTBOUND_GOALS_SCOUT").strip_edges().to_lower()
+	_goals_scout = scout_env not in ["0", "false", "no", "off"]
 	# Offline capture: no server round-trips. Search mode is forced on (the whole
 	# point is to capture the searched tuning dataset) and the /health handshake
 	# is skipped.
@@ -127,6 +143,10 @@ func setup(gc: GameController, pi: int, scoring_profile_path: String = "") -> vo
 	_config_http.timeout = HTTP_TIMEOUT
 	add_child(_config_http)
 	_config_http.request_completed.connect(_on_config_completed)
+	# Goal handshake request, awaited inline (no persistent signal handler).
+	_goals_http = HTTPRequest.new()
+	_goals_http.timeout = HTTP_TIMEOUT
+	add_child(_goals_http)
 	# In capture mode the server isn't running, so skip the /health handshake.
 	if not _capture_mode:
 		_fetch_search_config()
@@ -153,6 +173,8 @@ func _on_config_completed(result: int, response_code: int, _headers: PackedStrin
 	var parsed = JSON.parse_string(body.get_string_from_utf8())
 	if parsed is Dictionary and parsed.has("search_enabled"):
 		_search_mode = bool(parsed["search_enabled"])
+	if parsed is Dictionary and parsed.has("goals_enabled"):
+		_goals_mode = bool(parsed["goals_enabled"])
 
 
 # Mirror the Python agent's truthy-env parsing so both sides agree on whether
@@ -225,8 +247,44 @@ func _request_decision(gs: GameState) -> void:
 	_candidate_lines = []
 	_search_stats = {}
 	if _search_mode and _should_run_search(gs):
-		var searcher: TurnSearch = TurnSearchScript.new(_scoring_profile_path)
-		var result: Dictionary = searcher.search(gs, player_index, {"mode": "main"})
+		# Goal handshake: fetch this turn's overlay BEFORE searching so generic
+		# (weight_bias) goals bias line generation, not just selection. Scoped to
+		# main-turn search; reactive windows stay on the base profile. Skipped in
+		# offline capture (no server). Any failure → empty overlay = base profile.
+		# The fetch must never abort the turn: search always runs and logs, even if
+		# the overlay comes back empty.
+		var overlay: Dictionary = {}
+		if _goals_mode and not _capture_mode:
+			# Phase 1: run a cheap base-profile scout search first and hand its top
+			# lines to the strategist via /goals, so goals are grounded in the
+			# engine's actual best lines rather than a static snapshot. Base profile
+			# (no overlay) so the strategist sees the UNBIASED search. Skipped if
+			# disabled; any failure just yields no scout lines (blind strategist).
+			var scout_lines: Array = []
+			var scout_stats: Dictionary = {}
+			if _goals_scout:
+				var scout: TurnSearch = TurnSearchScript.new(_scoring_profile_path)
+				var scout_result: Dictionary = scout.search(gs, player_index, {
+					"mode": "main", "max_depth": 8, "node_budget": 150, "time_budget_ms": 400
+				})
+				if gs.game_over:
+					return
+				scout_lines = scout_result.get("candidate_lines", [])
+				scout_stats = scout_result.get("search_stats", {})
+			# Only consult the strategist when the scout found a real choice. With
+			# ≤1 line there is nothing for goals to bias or select, so skip the
+			# /goals round-trip (planning) entirely and search under the base
+			# profile — the /decision selector then short-circuits to that one line.
+			# When the scout is disabled we can't know the count yet, so keep the
+			# handshake to preserve existing behaviour.
+			if not _goals_scout or scout_lines.size() > 1:
+				overlay = await _fetch_goal_overlay(scout_lines, scout_stats)
+				if gs.game_over:
+					return
+		var searcher: TurnSearch = TurnSearchScript.new(_scoring_profile_path, overlay)
+		var result: Dictionary = searcher.search(gs, player_index, {
+			"mode": "main", "max_depth": 12, "node_budget": 300, "time_budget_ms": 800
+		})
 		_candidate_lines = result.get("candidate_lines", [])
 		_search_stats = result.get("search_stats", {})
 	elif _search_mode and _should_run_reactive_search(gs):
@@ -272,6 +330,44 @@ func _build_request_payload() -> Dictionary:
 		if _scoring_profile_json != "":
 			payload["scoring_profile_json"] = _scoring_profile_json
 	return payload
+
+
+# Pre-search goal handshake: POST the current brief state to /goals and await the
+# compiled overlay. Returns the overlay Dictionary (weight_multipliers consumed by
+# TurnSearch; situational/card terms are re-ranked server-side at /decision), or
+# {} on any failure so the search falls back to the base profile. _waiting_for_http
+# is held across the await to block re-entry from _take_turn, then released before
+# the synchronous search + /decision post (which sets it again).
+func _fetch_goal_overlay(scout_lines: Array = [], scout_stats: Dictionary = {}) -> Dictionary:
+	var url := _agent_base_url() + "/goals"
+	var body_dict := {
+		"brief_state": _pending_brief_state,
+		"game_id": _pending_brief_state.get("game_id", "game"),
+	}
+	# Phase 1: ship the scout search's top lines so the strategist can ground its
+	# goals in them (read server-side via the search_turn tool). Trimmed to the top
+	# few — the strategist needs the shape of the best lines, not the full beam.
+	if not scout_lines.is_empty():
+		body_dict["candidate_lines"] = scout_lines.slice(0, 5)
+		body_dict["search_stats"] = scout_stats
+	var body := JSON.stringify(body_dict)
+	var headers := PackedStringArray(["Content-Type: application/json"])
+	_waiting_for_http = true
+	var err := _goals_http.request(url, headers, HTTPClient.METHOD_POST, body)
+	if err != OK:
+		push_warning("AIPlayer: goal handshake failed to start (err=%d); base profile." % err)
+		_waiting_for_http = false
+		return {}
+	var res = await _goals_http.request_completed
+	_waiting_for_http = false
+	# res = [result, response_code, headers, body]
+	if int(res[0]) != HTTPRequest.RESULT_SUCCESS or int(res[1]) != 200:
+		push_warning("AIPlayer: goal handshake error (result=%d, code=%d); base profile." % [int(res[0]), int(res[1])])
+		return {}
+	var parsed = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
+	if parsed is Dictionary and parsed.get("overlay", null) is Dictionary:
+		return parsed["overlay"]
+	return {}
 
 
 # ── Offline decision (no server) ──────────────────────────────────────────────
@@ -406,7 +502,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 			_report_decision_metrics(false, false)
 			_retry_count += 1
 			push_warning("AIPlayer: Move rejected — retry %d/%d" % [_retry_count, MAX_RETRIES])
-			_request_decision(gs)  # synchronous; sets _waiting_for_http = true
+			await _request_decision(gs)  # may await the goal handshake before re-searching
 		else:
 			_report_decision_metrics(true, false)
 			push_warning("AIPlayer: Exhausted %d retries — heuristic fallback." % MAX_RETRIES)

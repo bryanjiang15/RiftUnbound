@@ -18,6 +18,7 @@ out/selfplay_capture*.jsonl
 __pycache__/
 *.pyc
 .env
+.env.bak
 
 /Docs/bugs/entries/
 /Docs/bugs/logs/

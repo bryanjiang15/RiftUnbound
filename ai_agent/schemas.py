@@ -315,6 +315,104 @@ class Plan(BaseModel):
     tactical_flexibility: TacticalFlexibility = "medium"
 
 
+# ── Goal-oriented strategist ───────────────────────────────────────────────────
+#
+# The strategist (an extension of the Planner) emits a GoalSet once per turn. A
+# deterministic compiler (ai_agent/goal_compiler.py) turns it into a transient
+# scoring-profile OVERLAY that biases the engine search for that turn only. The
+# LLM never writes raw weights — it picks WHAT to want (feature / metric / card)
+# and a coarse priority; the compiler decides HOW MUCH (magnitude), with a
+# whitelist + clamp so a malformed goal compiles to a no-op rather than an
+# unbounded or crashing weight. See docs/Score_Tuning_And_Evolution.md §5.
+
+GoalKind = Literal["weight_bias", "state_target", "card_target"]
+GoalPriority = Literal["low", "med", "high"]
+GoalComparator = Literal[">=", "<=", "=="]
+
+# LLMs phrase these freely; normalize common synonyms to the canonical tokens so a
+# valid-in-spirit goal isn't rejected over wording (e.g. priority "medium" → "med",
+# comparator "at_least" → ">=").
+_PRIORITY_SYNONYMS = {
+    "low": "low", "lo": "low", "minor": "low",
+    "med": "med", "medium": "med", "mid": "med", "normal": "med", "moderate": "med",
+    "high": "high", "hi": "high", "major": "high", "critical": "high", "urgent": "high",
+}
+_COMPARATOR_SYNONYMS = {
+    ">=": ">=", ">": ">=", "ge": ">=", "gte": ">=", "at_least": ">=", "atleast": ">=",
+    "min": ">=", "minimum": ">=", "≥": ">=",
+    "<=": "<=", "<": "<=", "le": "<=", "lte": "<=", "at_most": "<=", "atmost": "<=",
+    "max": "<=", "maximum": "<=", "≤": "<=",
+    "==": "==", "=": "==", "eq": "==", "equal": "==", "equals": "==", "exactly": "==",
+}
+
+
+class Goal(BaseModel):
+    """One strategic goal for the current turn.
+
+    Mechanism by ``kind``:
+    - ``weight_bias`` (generic, continuous): scale an EXISTING registry weight.
+      Set ``feature`` to a registry spec id (e.g. ``battlefield_control``) or a
+      sub-weight ref ``battlefield_weights:battlefield-a`` / ``keyword_weights:tank``.
+      ``multiplier`` is advisory; the compiler clamps it. If omitted, ``priority``
+      selects the multiplier tier.
+    - ``state_target`` (specific, discrete): reward reaching a board state. Set
+      ``metric`` to a whitelisted feature key (e.g. ``my_ready_runes``,
+      ``bf_might_margin``), ``metric_key`` for dict metrics (a battlefield id),
+      plus ``comparator`` + ``threshold``. Compiled to a GRADED situational bonus
+      so the search sees a gradient toward the goal, not a flat plateau.
+    - ``card_target`` (specific): reward lines that play a named card. Set
+      ``card_id`` (a hand instance id confirmed via get_card_detail).
+    """
+
+    id: str
+    kind: GoalKind
+    description: str = ""
+    priority: GoalPriority = "med"
+
+    # weight_bias
+    feature: Optional[str] = None
+    multiplier: Optional[float] = None
+
+    # state_target
+    metric: Optional[str] = None
+    metric_key: Optional[str] = None
+    comparator: Optional[GoalComparator] = None
+    threshold: Optional[float] = None
+
+    # card_target
+    card_id: Optional[str] = None
+
+    @field_validator("priority", mode="before")
+    @classmethod
+    def _norm_priority(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return _PRIORITY_SYNONYMS.get(v.strip().lower(), "med")
+        return "med"
+
+    @field_validator("comparator", mode="before")
+    @classmethod
+    def _norm_comparator(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        if isinstance(v, str):
+            return _COMPARATOR_SYNONYMS.get(v.strip().lower(), v)
+        return v
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def _norm_kind(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.strip().lower()
+        return v
+
+
+class GoalSet(BaseModel):
+    schema_version: str = "1.0"
+    turn: int = 0
+    rationale: str = ""
+    goals: list[Goal] = Field(default_factory=list, max_length=4)
+
+
 # ── Move ─────────────────────────────────────────────────────────────────────
 
 ActionType = Literal[
@@ -473,3 +571,21 @@ class DecisionRequest(BaseModel):
     # server attributes each captured row to the exact weights that produced it
     # (per-seat). Absent for live play → server falls back to its startup profile.
     scoring_profile_json: Optional[str] = None
+
+
+class GoalsRequest(BaseModel):
+    """Pre-search handshake: the engine asks for this turn's goal overlay BEFORE
+    running TurnSearch, so generic (weight_bias) goals bias line generation, not
+    just post-hoc selection. The server runs the strategist (cached per turn) and
+    returns the compiled overlay; the same cached GoalSet is reused by the
+    following /decision call so selection and generation share one overlay."""
+
+    brief_state: BriefState
+    game_id: str
+    # Phase 1 (search-grounded strategist): the engine may run a cheap base-profile
+    # "scout" search BEFORE this handshake and inline its top-K lines here. The
+    # strategist reads them via the search_turn tool so its goals are grounded in
+    # what the engine can actually achieve this turn, instead of a static snapshot.
+    # Absent (older engines / scout disabled) → strategist behaves as before.
+    candidate_lines: Optional[list[CandidateLine]] = None
+    search_stats: Optional[SearchStats] = None
