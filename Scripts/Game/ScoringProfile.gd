@@ -18,6 +18,32 @@ func _init(path: String = DEFAULT_PROFILE_PATH) -> void:
 	profile = load_profile(path)
 
 
+# Apply a transient goal overlay to this profile's weights (goal-oriented
+# strategist). The overlay is the deterministic compile of an LLM GoalSet; here we
+# consume only its weight-modulation part — `weight_multipliers` keyed
+# "block.weight_key" (e.g. "state_weights.battlefield_control") — so generic goals
+# bias the ACTUAL search, not just post-hoc selection. Specific situational /
+# card-target goals are applied server-side as a selection re-rank (they need a
+# leaf-predicate evaluator the engine does not yet have). Unknown keys are ignored
+# so a malformed overlay degrades to the base profile rather than corrupting it.
+func apply_overlay(overlay: Dictionary) -> void:
+	if overlay.is_empty():
+		return
+	var mults: Dictionary = overlay.get("weight_multipliers", {})
+	for key in mults:
+		var parts := str(key).split(".", true, 1)
+		if parts.size() != 2:
+			continue
+		var block: String = parts[0]
+		var wkey: String = parts[1]
+		if not profile.has(block):
+			continue
+		var blockdict = profile[block]
+		if typeof(blockdict) != TYPE_DICTIONARY or not blockdict.has(wkey):
+			continue
+		blockdict[wkey] = float(blockdict[wkey]) * float(mults[key])
+
+
 static func load_profile(path: String = DEFAULT_PROFILE_PATH) -> Dictionary:
 	var file := FileAccess.open(path, FileAccess.READ)
 	if file == null:

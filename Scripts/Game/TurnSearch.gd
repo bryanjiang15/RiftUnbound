@@ -22,7 +22,7 @@ var _ai_index: int = 1
 var _mode: String = "main"
 
 
-func _init(profile_path: String = "") -> void:
+func _init(profile_path: String = "", overlay: Dictionary = {}) -> void:
 	_sim = MoveSimulatorScript.new()
 	# An explicit profile_path lets each AI seat search under its own weights
 	# (e.g. self-play A/B between a candidate and a baseline profile). Empty =
@@ -31,6 +31,11 @@ func _init(profile_path: String = "") -> void:
 		_scorer = ScoringProfileScript.new(profile_path)
 	else:
 		_scorer = ScoringProfileScript.new()
+	# A non-empty overlay (goal-oriented strategist) transiently re-weights the
+	# scorer for THIS turn's search, so generic goals bias line generation, not
+	# just selection. The base profile file is never mutated.
+	if not overlay.is_empty():
+		_scorer.apply_overlay(overlay)
 
 
 func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dictionary:

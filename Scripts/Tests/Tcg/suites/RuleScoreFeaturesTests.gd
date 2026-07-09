@@ -19,6 +19,8 @@ static func run(assertions) -> void:
 	_test_asymmetric_card_advantage(assertions)
 	_test_damage_fragility(assertions)
 	_test_registry_drives_breakdown(assertions)
+	_test_overlay_scales_weight(assertions)
+	_test_overlay_ignores_unknown_keys(assertions)
 
 
 # Minimal snapshot with sensible defaults; override via `over`.
@@ -140,3 +142,32 @@ static func _test_registry_drives_breakdown(assertions) -> void:
 	# Legacy terms that were removed must not reappear.
 	assertions.assert_false(bd.has("runes_available"),
 		"removed term runes_available is gone")
+
+
+# A goal overlay's weight_multipliers transiently scale the named weight, so a
+# generic goal biases the live search; the term in the breakdown scales with it.
+static func _test_overlay_scales_weight(assertions) -> void:
+	var feats := ScoreModel.build_score_features(_snap({}), _snap({"my_score": 4}), [])
+	var base := ScoringProfileScript.new()
+	var base_term := float(base.score_with_breakdown(feats)["breakdown"]["score_diff"])
+	var biased := ScoringProfileScript.new()
+	biased.apply_overlay({"weight_multipliers": {"state_weights.score_diff": 2.0}})
+	var biased_term := float(biased.score_with_breakdown(feats)["breakdown"]["score_diff"])
+	assertions.assert_true(absf(biased_term - 2.0 * base_term) < 1e-6,
+		"overlay ×2 on score_diff doubles its term")
+
+
+static func _test_overlay_ignores_unknown_keys(assertions) -> void:
+	var feats := ScoreModel.build_score_features(_snap({}), _snap({"my_score": 4}), [])
+	var base := ScoringProfileScript.new()
+	var base_total := float(base.score_with_breakdown(feats)["breakdown"]["total"])
+	var biased := ScoringProfileScript.new()
+	# Malformed / unknown refs must be no-ops, not crashes or corruption.
+	biased.apply_overlay({"weight_multipliers": {
+		"state_weights.not_a_weight": 9.0,
+		"no_such_block.score_diff": 9.0,
+		"malformedkey": 9.0,
+	}})
+	var biased_total := float(biased.score_with_breakdown(feats)["breakdown"]["total"])
+	assertions.assert_true(absf(biased_total - base_total) < 1e-6,
+		"overlay with only unknown keys leaves the score unchanged")

@@ -33,8 +33,10 @@ from openai.types.chat import ChatCompletionMessageParam
 from . import planner as planner_module
 from . import router as router_module
 from . import skills as skill_module
+from . import strategist as strategist_module
+from .goal_compiler import ProfileOverlay, compile_goals, overlay_delta, overlay_delta_breakdown
 from .memory import Memory
-from .schemas import CandidateLine, Decision, LegalActionOption, Move, Plan, SearchStats
+from .schemas import CandidateLine, Decision, GoalSet, LegalActionOption, Move, Plan, SearchStats
 from .system_prompt import build_system_prompt, build_system_prompt_from_modules
 
 logger = logging.getLogger(__name__)
@@ -59,6 +61,10 @@ _INPUT_LOG_PATH = Path(__file__).resolve().parent / "agent_inputs.log"
 _PLAN_LOG_PATH = Path(__file__).resolve().parent / "agent_plans.log"
 _TOOLS_LOG_PATH = Path(__file__).resolve().parent / "agent_tools.log"
 _GAME_STATE_LOG_PATH = Path(__file__).resolve().parent / "agent_game_state.log"
+# Goals + per-line score modifiers are logged here, alongside the engine's
+# candidate-line search payload (main.py writes the lines, agent.py writes the
+# goal overlay that re-ranks them), so the strategy and its effect read together.
+_SEARCH_LOG_PATH = Path(__file__).resolve().parent / "agent_search.log"
 _LOG_INPUTS: bool = os.environ.get("RIFTBOUND_LOG_INPUTS", "0").strip() not in ("0", "", "false", "no")
 
 # Maximum tool-call rounds before we give up and emit a decision
@@ -66,8 +72,37 @@ MAX_TOOL_ROUNDS = 6
 # Model to use (can be overridden via RIFTBOUND_AI_MODEL env var)
 DEFAULT_MODEL = "gpt-4o"
 
+
+def _default_model() -> str:
+    """Model used by the planner and actor stages."""
+    return os.environ.get("RIFTBOUND_AI_MODEL", DEFAULT_MODEL)
+
+
+def _strategist_model() -> str:
+    """Model used by the per-turn goal strategist.
+
+    Planning benefits most from a stronger (reasoning) model, and the strategist
+    runs at most once per turn (cached), so its cost is amortized. Point ONLY the
+    strategist at a bigger model with RIFTBOUND_STRATEGIST_MODEL without changing
+    the planner/actor. Falls back to RIFTBOUND_AI_MODEL, then DEFAULT_MODEL.
+    """
+    return os.environ.get("RIFTBOUND_STRATEGIST_MODEL") or _default_model()
+
+
+def _is_reasoning_model(model: str) -> bool:
+    """True for OpenAI reasoning models (o-series, gpt-5) that emit a thinking
+    stream before answering and reject the ``temperature`` sampling param.
+
+    Used so the strategist can call such models cleanly (omit temperature) and
+    default to the think/format split, which plays to their strength instead of
+    fighting the single-call "JSON only" contract.
+    """
+    m = (model or "").strip().lower()
+    return m.startswith(("o1", "o3", "o4", "gpt-5"))
+
 _client: Optional[AsyncOpenAI] = None
 _planner = planner_module.Planner()
+_strategist = strategist_module.Strategist()
 
 PIPELINE_LEGACY = "legacy"
 PIPELINE_STAGED = "staged"
@@ -82,11 +117,39 @@ def get_client() -> AsyncOpenAI:
         # The SDK retries transient failures (429/5xx/timeout) with backoff that
         # respects Retry-After; we also retry in-loop (see _chat_create) so a
         # brief rate limit does not collapse the whole decision into a pass.
-        _client = AsyncOpenAI(
-            api_key=os.environ.get("OPENAI_API_KEY"),
-            timeout=30.0,
-            max_retries=int(os.environ.get("RIFTBOUND_CLIENT_MAX_RETRIES", "2")),
-        )
+        timeout = 30.0
+        max_retries = int(os.environ.get("RIFTBOUND_CLIENT_MAX_RETRIES", "2"))
+        provider = os.environ.get("RIFTBOUND_LLM_PROVIDER", "openai").strip().lower()
+        if provider == "azure":
+            # Azure AI Foundry exposes an OpenAI-compatible endpoint at
+            # ``<resource>/openai/v1``. We use the plain OpenAI client pointed at
+            # that base_url (NOT AzureOpenAI, which appends ?api-version=… and is
+            # rejected by the v1 API). The "model" passed to the API is the Azure
+            # *deployment* name, so name your deployment to match
+            # RIFTBOUND_AI_MODEL (or set that var to the deployment name).
+            endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
+            if not endpoint:
+                raise RuntimeError(
+                    "RIFTBOUND_LLM_PROVIDER=azure requires AZURE_OPENAI_ENDPOINT "
+                    "(your Azure Foundry project endpoint)."
+                )
+            base_url = endpoint.rstrip("/")
+            # Accept either the bare resource endpoint or the full v1 base URL;
+            # normalize so the caller can paste either from the portal.
+            if not base_url.endswith("/openai/v1"):
+                base_url = base_url.removesuffix("/openai") + "/openai/v1"
+            _client = AsyncOpenAI(
+                base_url=base_url,
+                api_key=os.environ.get("AZURE_OPENAI_API_KEY"),
+                timeout=timeout,
+                max_retries=max_retries,
+            )
+        else:
+            _client = AsyncOpenAI(
+                api_key=os.environ.get("OPENAI_API_KEY"),
+                timeout=timeout,
+                max_retries=max_retries,
+            )
     return _client
 
 
@@ -136,6 +199,13 @@ async def _chat_create(
     stage-specific metric keys so the two agents can be reported separately.
     """
     last_exc: Exception | None = None
+    # Reasoning models (o-series, gpt-5) reject a non-default ``temperature``.
+    # The call sites (line selector, actor, planner) hardcode one, so strip it
+    # here — the single choke point they all pass through — when targeting such
+    # a model. Under Azure the model is a deployment name, so this relies on the
+    # deployment being named after the underlying model (e.g. ``gpt-5.4``).
+    if _is_reasoning_model(str(kwargs.get("model", ""))):
+        kwargs.pop("temperature", None)
     for attempt in range(MAX_TRANSIENT_RETRIES + 1):
         try:
             response = await client.chat.completions.create(**kwargs)
@@ -350,6 +420,31 @@ TOOLS: list[dict] = [
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_turn",
+            "description": (
+                "Return the engine's top candidate full-turn lines for THIS turn "
+                "(a cheap scout search the engine ran up front). Each line is a "
+                "sequence the rules engine actually simulated, with its mechanical "
+                "score and the top scoring terms driving it. Call this FIRST when "
+                "setting goals: see what the search can already achieve, then set "
+                "goals that sharpen the best line or redirect the search toward a "
+                "winning idea it is missing. Empty if no scout search ran."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "top_n": {
+                        "type": "integer",
+                        "description": "How many top lines to return (default 5).",
+                    }
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 
@@ -377,6 +472,8 @@ def _dispatch_tool(name: str, arguments: dict) -> Any:
         return skill_module.simulate_line(arguments.get("moves", []))
     if name == "evaluate_position":
         return skill_module.evaluate_position()
+    if name == "search_turn":
+        return skill_module.search_turn(arguments.get("top_n", 5))
     return f"Unknown skill: {name}"
 
 
@@ -943,6 +1040,194 @@ def _render_line_steps(line: CandidateLine) -> list[dict]:
     return out
 
 
+def _line_move_strings(line: CandidateLine) -> list[str]:
+    return [_line_move_command(m) for m in line.moves]
+
+
+def _summarize_lines_for_strategist(
+    lines: list[CandidateLine], *, top_n: int = 5, top_terms: int = 4
+) -> list[dict]:
+    """Compact the engine's candidate lines into what the strategist needs.
+
+    The full CandidateLine carries heavy fields (full features, resolved_state) the
+    strategist does not need to set goals. This keeps only the decision-relevant
+    shape: the move sequence, the mechanical score, the few score terms driving it,
+    and whether the opponent gets a response window (a line the strategist should
+    treat as contestable). Sorted best-first so top_n is meaningful.
+    """
+    ordered = sorted(lines, key=lambda ln: float(ln.score), reverse=True)
+    out: list[dict] = []
+    for line in ordered[: max(1, int(top_n))]:
+        breakdown = line.score_breakdown or {}
+        drivers = sorted(
+            ((k, float(v)) for k, v in breakdown.items() if isinstance(v, (int, float))),
+            key=lambda kv: abs(kv[1]),
+            reverse=True,
+        )[:top_terms]
+        out.append({
+            "line_id": line.line_id,
+            "moves": _line_move_strings(line),
+            "score": round(float(line.score), 3),
+            "top_score_terms": {k: round(v, 3) for k, v in drivers},
+            "contested": bool(line.opponent_windows),
+            "opponent_windows": len(line.opponent_windows),
+        })
+    return out
+
+
+def _adjusted_line_score(line: CandidateLine, overlay: ProfileOverlay) -> float:
+    """Engine score plus the goal overlay's bias for this line (re-rank)."""
+    return float(line.score) + overlay_delta(
+        overlay,
+        features=line.features or {},
+        score_breakdown=line.score_breakdown or {},
+        moves=_line_move_strings(line),
+    )
+
+
+def _goal_selector_context(overlay: Optional[ProfileOverlay]) -> str:
+    """One-line goal briefing injected into the line-selector system prompt."""
+    if overlay is None or overlay.is_empty():
+        return ""
+    bits: list[str] = []
+    for key, mult in overlay.weight_multipliers.items():
+        bits.append(f"lean {key.split('.', 1)[-1]} ×{mult:.2f}")
+    for term in overlay.situational_terms:
+        tgt = f"{term['metric']}[{term['metric_key']}]" if term.get("metric_key") else term["metric"]
+        bits.append(f"reach {tgt} {term['comparator']} {term['threshold']}")
+    for bonus in overlay.card_bonuses:
+        bits.append(f"play {bonus['card_id']}")
+    goals = "; ".join(bits)
+    return (
+        "This turn's GOALS bias the score — prefer the line with the best "
+        f"'goal_adjusted_score' unless an opponent window makes it unsafe. Goals: {goals}. "
+    )
+
+
+async def build_goal_overlay(
+    *,
+    brief_state: dict,
+    game_id: str,
+    memory: Memory,
+    eval_metrics: Optional[dict] = None,
+    candidate_lines: Optional[list[CandidateLine]] = None,
+    search_stats: Optional[SearchStats] = None,
+) -> ProfileOverlay:
+    """Run the per-turn strategist and compile its GoalSet into an overlay.
+
+    Cached once per turn by the Strategist (invalidated when the opponent acts),
+    so the LLM cost is paid at most once per turn. Any failure degrades to an
+    empty overlay (today's base-profile selection), never an exception.
+
+    When ``candidate_lines`` are supplied (Phase 1 scout search), they are
+    summarized and installed so the strategist's ``search_turn`` tool grounds its
+    goals in the engine's actual best lines instead of a static snapshot.
+    """
+    opponent_action_count = memory.count_opponent_material_actions(game_id)
+    timeline = memory.timeline_slice(game_id)
+    scout_summaries = (
+        _summarize_lines_for_strategist(candidate_lines) if candidate_lines else []
+    )
+    skill_module.set_search_context(
+        scout_summaries,
+        search_stats.model_dump() if search_stats else {},
+    )
+    try:
+        goal_set, was_cached = await _strategist.goals(
+            client=get_client(),
+            model=_strategist_model(),
+            game_id=game_id,
+            brief_state=brief_state,
+            memory_summary=timeline,
+            opponent_action_count=opponent_action_count,
+            metrics=eval_metrics,
+            has_scout_lines=bool(scout_summaries),
+        )
+    finally:
+        # Clear so a later decision in the same turn (or a turn with no scout)
+        # never serves stale lines through search_turn.
+        skill_module.set_search_context(None)
+    overlay = compile_goals(goal_set)
+    if not was_cached:
+        _log_goals(game_id, brief_state, goal_set, overlay)
+    return overlay
+
+
+def _log_goals(game_id: str, brief_state: dict, goal_set: "GoalSet", overlay: ProfileOverlay) -> None:
+    """Append the turn's GoalSet + compiled overlay to the plan log (when input
+    logging is on). Mirrors _log_plan's gating; goal-specific so it shares the log
+    with the planner without colliding on the Plan schema."""
+    if not _LOG_INPUTS:
+        return
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sep = "─" * 72
+    lines = [
+        "",
+        sep,
+        f"Turn {brief_state.get('turn_number', '?')}  "
+        f"Type: {brief_state.get('decision_type', '?')}  Game: {game_id}  [{ts}]",
+        f"GoalSet goals={len(goal_set.goals)}: {goal_set.rationale}",
+    ]
+    for g in goal_set.goals:
+        lines.append(f"  - [{g.kind}] {g.id} ({g.priority}) {g.description}".rstrip())
+    lines.append("Compiled overlay:")
+    lines.extend(f"  · {note}" for note in overlay.notes)
+    lines.append("")
+    try:
+        with _SEARCH_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError as exc:
+        logger.warning("Goal log write failed: %s", exc)
+
+
+def _log_overlay_scores(
+    game_id: str,
+    brief_state: dict,
+    candidate_lines: list[CandidateLine],
+    overlay: ProfileOverlay,
+    *,
+    chosen_id: str | None,
+) -> None:
+    """Append the goal score modifier per candidate line to the plan log.
+
+    For each line: base engine score, overlay delta, adjusted score, and the
+    per-goal contributions that make up the delta. Lets you see exactly how the
+    goals re-ranked the lines and which line won. Gated on input logging like the
+    other goal logs; no-op when the overlay is empty."""
+    if not _LOG_INPUTS or overlay is None or overlay.is_empty():
+        return
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sep = "─" * 72
+    lines = [
+        "",
+        sep,
+        f"Turn {brief_state.get('turn_number', '?')}  Goal score modifiers  "
+        f"Game: {game_id}  [{ts}]",
+        sep,
+    ]
+    rows = []
+    for line in candidate_lines:
+        parts = overlay_delta_breakdown(
+            overlay,
+            features=line.features or {},
+            score_breakdown=line.score_breakdown or {},
+            moves=_line_move_strings(line),
+        )
+        delta = sum(parts.values())
+        rows.append((float(line.score) + delta, line.line_id, float(line.score), delta, parts))
+    rows.sort(key=lambda r: r[0], reverse=True)
+    for adj, lid, base, delta, parts in rows:
+        mark = " ◄ chosen" if lid == chosen_id else ""
+        detail = ", ".join(f"{k}{v:+.2f}" for k, v in parts.items()) if parts else "—"
+        lines.append(f"  {lid}: base={base:.2f} {delta:+.2f} → {adj:.2f}  [{detail}]{mark}")
+    lines.append("")
+    try:
+        with _SEARCH_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError as exc:
+        logger.warning("Overlay score log write failed: %s", exc)
+
+
 async def choose_line(
     *,
     brief_state: dict,
@@ -952,6 +1237,7 @@ async def choose_line(
     search_stats: SearchStats | None = None,
     eval_metrics: Optional[dict] = None,
     argmax_only: bool = False,
+    overlay: Optional["ProfileOverlay"] = None,
 ) -> Decision:
     """Use the Actor as a compact policy selector over Godot-searched lines.
 
@@ -959,11 +1245,25 @@ async def choose_line(
     skipped entirely and the top-scored playable line is returned directly. This
     is the bulk data-generation / weight-tuning regime; rows are tagged
     ``selector_source='argmax'`` so the two regimes stay separable.
+
+    When a goal ``overlay`` is supplied (goal-oriented strategist), each line's
+    engine score is biased by ``overlay_delta`` before ranking, so the selection
+    optimizes the turn's goals. The base profile / search are untouched; this is
+    the server-side re-rank path (a line the search never generated still cannot
+    be chosen — that gap is closed by the engine-side overlay).
     """
     if not candidate_lines:
         return _PASS_DECISION
     if argmax_only:
-        return _argmax_line(candidate_lines, source="argmax")
+        decision = _argmax_line(candidate_lines, source="argmax", overlay=overlay)
+        _log_overlay_scores(game_id, brief_state, candidate_lines, overlay, chosen_id=decision.chosen_line_id)
+        return decision
+    # Single forced line: nothing to choose, so skip the LLM selector entirely
+    # (mirrors the router's single-legal-move short-circuit for the search path).
+    single = _single_playable_line(candidate_lines)
+    if single is not None:
+        _log_overlay_scores(game_id, brief_state, candidate_lines, overlay, chosen_id=single.chosen_line_id)
+        return single
     metrics = eval_metrics if eval_metrics is not None else {}
     metrics.setdefault("model_calls", 0)
     metrics.setdefault("actor_model_calls", 0)
@@ -971,14 +1271,18 @@ async def choose_line(
     legal_ids = {line.line_id for line in candidate_lines}
     lines_payload = []
     for line in candidate_lines:
-        lines_payload.append({
+        entry = {
             "line_id": line.line_id,
             "steps": _render_line_steps(line),
             "score": line.score,
             "score_breakdown": line.score_breakdown,
             "resolved_state": line.resolved_state,
             "opponent_windows": [w.model_dump() for w in line.opponent_windows],
-        })
+        }
+        if overlay is not None and not overlay.is_empty():
+            entry["goal_adjusted_score"] = _adjusted_line_score(line, overlay)
+        lines_payload.append(entry)
+    goal_context = _goal_selector_context(overlay)
     messages: list[ChatCompletionMessageParam] = [
         {
             "role": "system",
@@ -990,6 +1294,7 @@ async def choose_line(
                 "showdown focus or choosing an ability target — its 'context' "
                 "explains it). The engine score is mechanical; use "
                 "opponent-history judgement for contested opponent_windows. "
+                f"{goal_context}"
                 "You may call get_opponent_history. "
                 "Respond with raw JSON only: {\"chosen_line_id\":\"line-1\","
                 "\"reasoning\":\"...\"}."
@@ -1041,6 +1346,7 @@ async def choose_line(
             commands = [_line_move_command(m) for m in chosen.moves]
             first_move = _move_from_command(commands[0]) if commands else None
             if first_move is not None:
+                _log_overlay_scores(game_id, brief_state, candidate_lines, overlay, chosen_id=chosen.line_id)
                 return Decision(
                     reasoning=str(parsed.get("reasoning", "Selected searched line.")),
                     move=first_move,
@@ -1054,14 +1360,18 @@ async def choose_line(
     # move. A line with no parseable first move cannot be committed (Godot would
     # replay a move the search never planned), so such lines are skipped and we
     # pass without committing a line if none qualify.
-    return _argmax_line(candidate_lines, source="fallback")
+    decision = _argmax_line(candidate_lines, source="fallback", overlay=overlay)
+    _log_overlay_scores(game_id, brief_state, candidate_lines, overlay, chosen_id=decision.chosen_line_id)
+    return decision
 
 
-def _argmax_line(candidate_lines: list[CandidateLine], *, source: str) -> Decision:
-    """Return the highest-scoring playable line as a Decision (engine argmax).
+def _playable_lines(
+    candidate_lines: list[CandidateLine],
+) -> list[tuple[CandidateLine, Move]]:
+    """Lines whose first move parses into a committable Move, paired with it.
 
-    Shared by the LLM-selector fallback (``source='fallback'``) and the no-LLM
-    argmax data-generation path (``source='argmax'``).
+    A line with no parseable first move cannot be committed (Godot would replay a
+    move the search never planned), so it is excluded from selection everywhere.
     """
     playable: list[tuple[CandidateLine, Move]] = []
     for line in candidate_lines:
@@ -1069,14 +1379,66 @@ def _argmax_line(candidate_lines: list[CandidateLine], *, source: str) -> Decisi
         first_move = _move_from_command(commands[0]) if commands else None
         if first_move is not None:
             playable.append((line, first_move))
+    return playable
+
+
+def _single_playable_line(
+    candidate_lines: list[CandidateLine],
+) -> Decision | None:
+    """If exactly one line is committable, return it as a forced Decision.
+
+    There is nothing to choose among a single line, so both the strategist re-rank
+    and the LLM selector round-trip are pointless — this mirrors the router's
+    single-legal-move short-circuit for the search path. Returns None when 0 or ≥2
+    lines are playable (the caller then runs the normal selector / argmax).
+    """
+    playable = _playable_lines(candidate_lines)
+    if len(playable) != 1:
+        return None
+    line, move = playable[0]
+    return Decision(
+        reasoning="Only one playable line was available; committed it without deliberation.",
+        move=move,
+        confidence="high",
+        alternatives_considered="No alternatives — a single line was available.",
+        chosen_line_id=line.line_id,
+        selector_source="single",
+    )
+
+
+def _argmax_line(
+    candidate_lines: list[CandidateLine],
+    *,
+    source: str,
+    overlay: Optional["ProfileOverlay"] = None,
+) -> Decision:
+    """Return the highest-scoring playable line as a Decision (engine argmax).
+
+    Shared by the LLM-selector fallback (``source='fallback'``) and the no-LLM
+    argmax data-generation path (``source='argmax'``). When a goal ``overlay`` is
+    supplied, ranking uses the goal-adjusted score instead of the raw engine
+    score.
+    """
+    playable = _playable_lines(candidate_lines)
     if not playable:
         return _PASS_DECISION
-    best, best_move = max(playable, key=lambda pair: pair[0].score)
-    reasoning = (
-        "Argmax: selected the highest-scoring searched line."
-        if source == "argmax"
-        else "Fallback: selected the highest-scoring searched line."
-    )
+    use_overlay = overlay is not None and not overlay.is_empty()
+    if use_overlay:
+        best, best_move = max(playable, key=lambda pair: _adjusted_line_score(pair[0], overlay))
+    else:
+        best, best_move = max(playable, key=lambda pair: pair[0].score)
+    if source == "argmax":
+        reasoning = (
+            "Goal-argmax: selected the highest goal-adjusted searched line."
+            if use_overlay
+            else "Argmax: selected the highest-scoring searched line."
+        )
+    else:
+        reasoning = (
+            "Goal-fallback: selected the highest goal-adjusted searched line."
+            if use_overlay
+            else "Fallback: selected the highest-scoring searched line."
+        )
     return Decision(
         reasoning=reasoning,
         move=best_move,

@@ -25,8 +25,12 @@ uvicorn ai_agent.main:app --port 8765 --reload
 
 | Variable | Default | Required | Description |
 |---|---|---|---|
-| `OPENAI_API_KEY` | (none) | Yes | Your OpenAI secret key. The service starts without it but every `/decision` call falls back to a safe `pass`. |
-| `RIFTBOUND_AI_MODEL` | `gpt-4o` | No | OpenAI model used by both the Planner and Actor stages (e.g. `gpt-4o-mini`, `o1-mini`). |
+| `RIFTBOUND_LLM_PROVIDER` | `openai` | No | Which LLM backend to use. `openai` = OpenAI API (uses `OPENAI_API_KEY`). `azure` = Azure AI Foundry's OpenAI-compatible endpoint (uses `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_KEY`). Under `azure`, the model names (`RIFTBOUND_AI_MODEL`, `RIFTBOUND_STRATEGIST_MODEL`) are treated as Azure **deployment** names. |
+| `OPENAI_API_KEY` | (none) | Yes* | Your OpenAI secret key (required when `RIFTBOUND_LLM_PROVIDER=openai`). The service starts without it but every `/decision` call falls back to a safe `pass`. |
+| `AZURE_OPENAI_ENDPOINT` | (none) | Yes* | Your Azure AI Foundry endpoint. Either the full v1 base URL (`https://<resource>.services.ai.azure.com/openai/v1`) or the bare resource URL (`https://<resource>.services.ai.azure.com`) — the service appends `/openai/v1` if missing. Required when `RIFTBOUND_LLM_PROVIDER=azure`. |
+| `AZURE_OPENAI_API_KEY` | (none) | Yes* | Your Azure OpenAI API key. Required when `RIFTBOUND_LLM_PROVIDER=azure`. |
+| `RIFTBOUND_AI_MODEL` | `gpt-4o` | No | OpenAI model used by the Planner and Actor stages (e.g. `gpt-4o-mini`, `o1-mini`). |
+| `RIFTBOUND_STRATEGIST_MODEL` | (falls back to `RIFTBOUND_AI_MODEL`) | No | OpenAI model for the per-turn goal Strategist ONLY (`RIFTBOUND_GOALS=on`). Planning benefits most from a stronger/reasoning model, and the Strategist runs at most once per turn (cached), so its cost is amortized — point it at a bigger model here without changing the cheaper Planner/Actor. Unset ⇒ uses `RIFTBOUND_AI_MODEL`. Reasoning models (o-series, `gpt-5`) are auto-detected so `temperature` is dropped. The Strategist always runs the think/format split: it first deliberates freely in prose (with tools), then a second call serializes that reasoning into the strict `GoalSet` JSON. |
 | `RIFTBOUND_PIPELINE` | `legacy` | No | Decision pipeline mode. `legacy` = single monolithic decision loop. `staged` = Router → Planner → Actor → Validator pipeline. Any other value falls back to `legacy`. |
 | `RIFTBOUND_LOG_INPUTS` | `0` | No | When set to a truthy value (anything other than `0`, ``, `false`, `no`), writes debug logs on each decision: full model input to `agent_inputs.log`, the turn plan to `agent_plans.log` (staged pipeline only), the per-decision tool-call trace + outcome to `agent_tools.log`, and post-event game snapshots to `agent_game_state.log`. |
 | `RIFTBOUND_CLIENT_MAX_RETRIES` | `2` | No | How many times the OpenAI SDK itself retries a failed request (with its own backoff that respects `Retry-After`). |
@@ -34,6 +38,7 @@ uvicorn ai_agent.main:app --port 8765 --reload
 | `RIFTBOUND_TRANSIENT_BACKOFF_S` | `1.0` | No | Base seconds for exponential backoff between in-process transient retries (used when the error carries no `Retry-After` header). |
 | `RIFTBOUND_SEARCH` | `off` | No | Enables engine search mode. When on, Godot runs `TurnSearch` and posts candidate lines; the server selects a line (via `choose_line`) and captures the tuning dataset (`search_decisions` / `candidate_lines` / `decision_snapshots`). |
 | `RIFTBOUND_SEARCH_ARGMAX` | `off` | No | When on (with search enabled), skips the LLM line-selector round-trip and returns the top-scored line directly. Decisions are tagged `selector_source='argmax'`. Use for bulk data generation / weight tuning. |
+| `RIFTBOUND_GOALS` | `off` | No | Enables the goal-oriented strategist: once per turn an LLM emits a structured GoalSet that is compiled into a transient scoring-profile overlay biasing line selection (`ai_agent/docs/Goal_Oriented_Strategist.md`). Requires `RIFTBOUND_SEARCH=on`; ignored under `RIFTBOUND_SEARCH_ARGMAX`. Off keeps the proven base-profile search as the floor. |
 | `RIFTBOUND_DATA_ORIGIN` | `vs_human` | No | Provenance tag stamped on captured `search_decisions` rows: `vs_human`, `self_play`, or `vs_heuristic`. Keeps state distributions separable so they are never silently mixed in tuning. |
 | `RIFTBOUND_CAPTURE_SEAT` | (unset) | No | When `0` or `1`, persist the tuning dataset (`search_decisions` / `candidate_lines` / `decision_snapshots`) for **only that seat's** decisions. Use in two-profile self-play to store data from just the profile under test (put it on this seat). Unset/invalid = capture both seats. |
 | `RIFTBOUND_DB_PATH` | (default `ai_agent/agent_memory.db`) | No | Override the SQLite database path. Useful to write self-play data to a dedicated file (e.g. `ai_agent/selfplay.db`) instead of the live-play DB. |
@@ -67,11 +72,25 @@ export RIFTBOUND_LOG_INPUTS=1
 uvicorn ai_agent.main:app --port 8765 --reload
 ```
 
+### Example (Azure OpenAI)
+
+```bash
+# Point the agent at an Azure AI Foundry deployment instead of the OpenAI API.
+export RIFTBOUND_LLM_PROVIDER=azure
+# Full v1 base URL (or the bare resource URL — /openai/v1 is appended if missing).
+export AZURE_OPENAI_ENDPOINT=https://bryanbj-4475-resource.services.ai.azure.com/openai/v1
+export AZURE_OPENAI_API_KEY=<your-azure-key>
+# Model names are Azure *deployment* names here — name the deployment to match.
+export RIFTBOUND_AI_MODEL=gpt-5.4
+uvicorn ai_agent.main:app --port 8765 --reload
+```
+
 ## Endpoints
 
 | Endpoint | Method | Description |
 |---|---|---|
 | `/decision` | POST | Main entry — receives BriefState, returns Decision |
+| `/goals` | POST | Pre-search handshake — receives BriefState, returns this turn's compiled goal overlay (empty unless `RIFTBOUND_GOALS=on`) |
 | `/health` | GET | Liveness check |
 | `/legal_moves` | GET | Current enumerated legal moves (debug) |
 | `/state` | GET | Full board state text (debug) |

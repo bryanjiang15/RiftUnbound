@@ -342,6 +342,51 @@ PROMPT_MODULES: dict[str, str] = {
 }
 
 
+def goal_vocabulary_block() -> str:
+    """The strategist's goal menu: exactly what a GoalSet may reference.
+
+    Generated from the goal compiler's own whitelists (registry weights +
+    state_target metrics) so the options offered to the LLM can never drift from
+    what the compiler will accept. Anything off this menu compiles to a no-op, so
+    naming a real metric here is what makes a goal take effect.
+
+    This is the deliberate answer to "how much context does the strategist need":
+    NOT more rules (combat math / priority timing stay tactical, owned by the
+    search and reachable via lookup_rule) — a structured vocabulary of what a goal
+    can express.
+    """
+    # Local import avoids any import-time coupling; goal_compiler only needs schemas.
+    from .goal_compiler import STATE_TARGET_METRICS, weight_bias_features
+
+    wb = weight_bias_features()
+    weight_lines = (
+        "\n".join(f"  - {sid}" for sid in sorted(wb))
+        if wb else "  (registry manifest unavailable — weight_bias goals will no-op)"
+    )
+    metric_lines = "\n".join(
+        f"  - {m}{' [needs metric_key = a battlefield id]' if is_dict else ''}: {meaning}"
+        for m, (is_dict, meaning) in STATE_TARGET_METRICS.items()
+    )
+    return (
+        "## Goal vocabulary — what a GoalSet may reference\n"
+        "Propose at most 4 goals. Each goal must use ONE kind below and reference\n"
+        "ONLY the listed ids/metrics; anything else is ignored by the compiler. You\n"
+        "set WHAT to want and a coarse `priority` (low|med|high); the engine sets the\n"
+        "magnitudes — never write raw weights.\n\n"
+        "### kind = weight_bias (generic lean — scale an existing scoring term)\n"
+        "Fields: feature (one id below), optional multiplier (0.5–2.5; else priority\n"
+        "picks it). Use for broad turns: develop, contest control, push removal.\n"
+        f"{weight_lines}\n\n"
+        "### kind = state_target (specific objective — reward reaching a board state)\n"
+        "Fields: metric (one below), metric_key (battlefield id, only where noted),\n"
+        "comparator (>= | <= | ==), threshold (number). Compiled to a GRADED bonus,\n"
+        "so progress toward the threshold is rewarded, not only the exact hit.\n"
+        f"{metric_lines}\n\n"
+        "### kind = card_target (specific — reward playing a named card this turn)\n"
+        "Fields: card_id (a hand instance id you confirmed with get_card_detail).\n"
+    )
+
+
 def build_system_prompt_from_modules(
     modules: list[str],
     brief_state: dict | None = None,
@@ -356,6 +401,8 @@ def build_system_prompt_from_modules(
         glossary = _keyword_glossary_block(brief_state)
         if glossary:
             parts.append(glossary)
+    if "goal_vocabulary" in modules:
+        parts.append(goal_vocabulary_block())
     return "\n\n".join(p.strip() for p in parts if p.strip()).strip()
 
 
