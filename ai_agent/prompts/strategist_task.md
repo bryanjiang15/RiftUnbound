@@ -1,0 +1,1 @@
+Set this turn's goals. Inspect the board with tools first (search_turn if available, then evaluate_position, get_card_detail), then think through and recommend the goals in prose (a later step formats them).

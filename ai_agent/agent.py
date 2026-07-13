@@ -36,6 +36,7 @@ from . import skills as skill_module
 from . import strategist as strategist_module
 from .goal_compiler import ProfileOverlay, compile_goals, overlay_delta, overlay_delta_breakdown
 from .memory import Memory
+from .prompts import load_prompt
 from .schemas import CandidateLine, Decision, GoalSet, LegalActionOption, Move, Plan, SearchStats
 from .system_prompt import build_system_prompt, build_system_prompt_from_modules
 
@@ -1355,7 +1356,7 @@ async def choose_line(
                     chosen_line_id=chosen.line_id,
                     selector_source="llm",
                 )
-        messages.append({"role": "user", "content": "Choose a valid line_id from the provided candidate_lines and return raw JSON only."})
+        messages.append({"role": "user", "content": load_prompt("line_selector_retry")})
     # Fallback: pick the highest-scoring line that actually starts with a usable
     # move. A line with no parseable first move cannot be committed (Godot would
     # replay a move the search never planned), so such lines are skipped and we

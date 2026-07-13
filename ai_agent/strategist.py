@@ -22,6 +22,7 @@ from typing import Any, Optional
 
 from openai import AsyncOpenAI
 
+from .prompts import load_prompt
 from .schemas import Goal, GoalSet
 from .system_prompt import build_system_prompt_from_modules
 
@@ -29,45 +30,12 @@ logger = logging.getLogger(__name__)
 
 STRATEGIST_MAX_TOOL_ROUNDS = 3
 
-_STRATEGIST_ROLE_BASE = """\
-You are the Riftbound TURN STRATEGIST for one seat.
-
-## Your role
-- Each turn you set 1–4 concrete GOALS that steer the engine's search for THIS
-  turn. You do NOT pick moves — a beam search picks the tactics; you bias what it
-  optimizes toward.
-- A goal is only effective if it references the goal vocabulary EXACTLY. Anything
-  off-menu is silently ignored, so ground every goal in a listed feature/metric.
-- You set WHAT to want and a coarse priority (low|med|high). You never write raw
-  weights — the engine fixes the magnitudes.
-
-## How to choose goals
-- If a scout search is available, call `search_turn` FIRST: it returns the engine's
-  best full-turn lines with their scores. Read them, then decide whether to SHARPEN
-  the search's best line (goals that push it harder) or REDIRECT the search toward a
-  winning idea every top line is missing. If no scout ran, call `evaluate_position`
-  first instead.
-- Then read the score advantage, battlefield control, and playable cards, and choose
-  goals that fit the position:
-  - Behind / scattered board → weight_bias develop or contest control.
-  - Ahead and stable → state_target to lock a battlefield or bank reaction fuel.
-  - A clear removal / combo line → card_target the key card, or state_target the
-    board state it produces.
-- Prefer FEW sharp goals over many vague ones. Two well-aimed goals beat four
-  generic boosts (which just cancel into noise).
-- Confirm any card you name with `get_card_detail` before using card_target."""
+_STRATEGIST_ROLE_BASE = load_prompt("strategist_role_base")
 
 # Think-phase discipline (think/format split): free the model to deliberate. The
 # strict GoalSet JSON is produced by a SEPARATE format call, so here the model
 # should reason openly and end with a concrete recommendation in prose.
-_OUTPUT_DISCIPLINE_THINK = """\
-## How to respond
-First gather facts with tools, then THINK OUT LOUD: weigh the position and the
-scout lines, name the one or two goals that would most improve this turn, and say
-whether each SHARPENS the search's best line or REDIRECTS it. Do NOT emit JSON yet
-— a separate step will format your decision. End with a short, explicit list of the
-goals you recommend (kind + the exact vocabulary feature/metric/card each uses) and
-why. Recommending NO goals is valid when no goal beats plain best-score play."""
+_OUTPUT_DISCIPLINE_THINK = load_prompt("strategist_output_discipline_think")
 
 
 @dataclass
@@ -231,11 +199,7 @@ def _strategist_user_prompt(*, brief_state: dict[str, Any], memory_summary: str)
     strategic = dict(brief_state)
     strategic["legal_moves"] = []
     strategic["legal_action_categories"] = []
-    task = (
-        "Set this turn's goals. Inspect the board with tools first "
-        "(search_turn if available, then evaluate_position, get_card_detail), then "
-        "think through and recommend the goals in prose (a later step formats them)."
-    )
+    task = load_prompt("strategist_task")
     return (
         f"{task}\n\n"
         f"Recent timeline:\n{memory_summary or '(none)'}\n\n"
@@ -245,15 +209,7 @@ def _strategist_user_prompt(*, brief_state: dict[str, Any], memory_summary: str)
 
 # Format phase (think/format split): turn the think-phase reasoning into a strict
 # GoalSet JSON object. No tools, no further reasoning — pure serialization.
-_FORMAT_PHASE_INSTRUCTION = (
-    "Convert your analysis above into ONE JSON object matching the GoalSet schema "
-    "and NOTHING else — no markdown fences, no prose. Required keys: schema_version "
-    '("1.0"), turn (int), rationale (short — one sentence distilled from your '
-    "analysis), goals (list, 0–4). Each goal: id, kind "
-    "(weight_bias|state_target|card_target), priority, and the kind-specific fields "
-    "from the goal vocabulary. Use ONLY goals you recommended above; an empty goals "
-    "list is valid when you recommended none."
-)
+_FORMAT_PHASE_INSTRUCTION = load_prompt("strategist_format_phase")
 
 
 async def _request_goals(
