@@ -1,8 +1,8 @@
 # Goal-Oriented LLM Strategist — Design & Implementation
 
-Status: v0 (server-side re-rank) implemented + tested; engine-side overlay
-primitive implemented + tested; live engine handshake, telemetry, and the SPRT
-gate are scoped follow-ups.
+Status: v0 implemented + tested: server-side re-rank, engine-side overlay
+primitive, live engine handshake, and search-grounded scout flow. Goal telemetry
+and the SPRT gate are scoped follow-ups.
 
 Companion docs:
 - `Score_Tuning_And_Evolution.md` §5 (cross-turn planner hook) — the seam this
@@ -61,14 +61,19 @@ applied as a **selection re-rank** (the engine lacks a leaf-predicate evaluator)
 
 ```
 BriefState
-  └─ Strategist LLM (once/turn) ─► GoalSet ─► goal_compiler.compile_goals ─► ProfileOverlay
-                                                                               │
-   ┌───────────────────────────────────────────────────────────────────────┘
-   ▼
- POST /goals   (engine handshake, BEFORE search) ─► overlay.weight_multipliers
- TurnSearch:   ScoringProfile.apply_overlay(weight_multipliers)          ← engine bias: generic goals shape line GENERATION
- POST /decision (after search) ─► choose_line:
- choose_line:  adjusted_score(line) = line.score + overlay_delta(line)   ← server re-rank: all goals shape SELECTION
+  └─ optional cheap base-profile scout search (engine; top candidate lines)
+       └─ POST /goals with BriefState + scout lines
+            └─ Strategist LLM (once/turn) ─► GoalSet
+                 └─ goal_compiler.compile_goals ─► ProfileOverlay
+                      └─ overlay.weight_multipliers returned to engine
+
+Main TurnSearch:
+  ScoringProfile.apply_overlay(weight_multipliers)
+    -> generic goals shape line GENERATION
+
+POST /decision with searched candidate lines:
+  choose_line adjusted_score(line) = line.score + overlay_delta(line)
+    -> all goals shape SELECTION
 ```
 
 The strategist is cached per turn, so the `/goals` and `/decision` calls in the
@@ -77,6 +82,14 @@ exact same overlay.
 
 `overlay_delta` is exact for weight bias (`(m−1)·breakdown[term]`, since
 `term = weight·feature`), and `weight·graded_value` for situational terms.
+
+When the scout is enabled, the engine runs it with the base scoring profile
+before `/goals` and sends only the top few lines. The Strategist's first tool is
+then `search_turn`, so its goals are grounded in the engine's actual candidate
+space. If the scout finds zero or one line, the engine skips `/goals`: there is
+nothing for a goal overlay to bias, and `/decision` short-circuits selection to
+the single line. If the scout is disabled, the strategist falls back to the
+snapshot-grounded path and uses `evaluate_position` first.
 
 ## 5. Guardrails
 
@@ -113,6 +126,8 @@ it the LLM invents metric names that compile to no-ops. Net prompt size ≈ neut
 | Env var | Default | Description |
 |---|---|---|
 | `RIFTBOUND_GOALS` | `off` | Enable the per-turn strategist + goal overlay (requires `RIFTBOUND_SEARCH=on`, ignored under `RIFTBOUND_SEARCH_ARGMAX`). |
+| `RIFTBOUND_GOALS_SCOUT` | `on` | Engine-side toggle (`Scripts/AI/AIPlayer.gd`). When goals are on, run a cheap base-profile scout search before `/goals` and send its top lines for `search_turn` grounding. Falsey values (`0`, `false`, `no`, `off`) disable the scout. |
+| `RIFTBOUND_LOG_INPUTS` | `0` | When combined with `RIFTBOUND_SEARCH=on`, writes `ai_agent/agent_search.log` with searched candidate lines, search stats, goal overlays, and per-line overlay deltas. |
 
 ## 8. What is implemented vs. follow-up
 
@@ -133,12 +148,21 @@ it the LLM invents metric names that compile to no-ops. Net prompt size ≈ neut
   Verified end-to-end: `/health` advertises the flag, `/goals` returns the
   compiled overlay, and `/decision` re-ranks under the same cached overlay,
   flipping selection to the goal-satisfying line.
+- **Search-grounded scout flow:** `AIPlayer.gd` runs a small base-profile scout
+  search before `/goals` when `RIFTBOUND_GOALS_SCOUT` is not falsey, sends the top
+  five lines to `GoalsRequest`, and skips `/goals` when the scout finds at most
+  one line. `skills.search_turn` serves those summaries to the Strategist, which
+  forces `search_turn` as its first tool when scout lines are present.
 
 **Runtime path (live):** with `RIFTBOUND_SEARCH=on RIFTBOUND_GOALS=on` and
 `OPENAI_API_KEY` set, the system runs end-to-end. Generic (weight_bias) goals bias
 both search generation (via the handshake) and selection; specific
 (state_target / card_target) goals bias selection (re-rank). No key / strategist
 error ⇒ empty overlay ⇒ today's base-profile search.
+
+For debugging, also set `RIFTBOUND_LOG_INPUTS=1`. `agent_search.log` then shows
+the candidate lines the engine sent, search stats, the compiled overlay, and the
+per-line deltas that changed selection.
 
 **Follow-up (scoped, not yet built)**
 - An engine-side leaf-predicate evaluator so `state_target` / `card_target` goals

@@ -32,7 +32,7 @@ uvicorn ai_agent.main:app --port 8765 --reload
 | `RIFTBOUND_AI_MODEL` | `gpt-4o` | No | OpenAI model used by the Planner and Actor stages (e.g. `gpt-4o-mini`, `o1-mini`). |
 | `RIFTBOUND_STRATEGIST_MODEL` | (falls back to `RIFTBOUND_AI_MODEL`) | No | OpenAI model for the per-turn goal Strategist ONLY (`RIFTBOUND_GOALS=on`). Planning benefits most from a stronger/reasoning model, and the Strategist runs at most once per turn (cached), so its cost is amortized — point it at a bigger model here without changing the cheaper Planner/Actor. Unset ⇒ uses `RIFTBOUND_AI_MODEL`. Reasoning models (o-series, `gpt-5`) are auto-detected so `temperature` is dropped. The Strategist always runs the think/format split: it first deliberates freely in prose (with tools), then a second call serializes that reasoning into the strict `GoalSet` JSON. |
 | `RIFTBOUND_PIPELINE` | `legacy` | No | Decision pipeline mode. `legacy` = single monolithic decision loop. `staged` = Router → Planner → Actor → Validator pipeline. Any other value falls back to `legacy`. |
-| `RIFTBOUND_LOG_INPUTS` | `0` | No | When set to a truthy value (anything other than `0`, ``, `false`, `no`), writes debug logs on each decision: full model input to `agent_inputs.log`, the turn plan to `agent_plans.log` (staged pipeline only), the per-decision tool-call trace + outcome to `agent_tools.log`, and post-event game snapshots to `agent_game_state.log`. |
+| `RIFTBOUND_LOG_INPUTS` | `0` | No | When set to a truthy value (anything other than `0`, ``, `false`, `no`), writes debug logs on each decision: full model input to `agent_inputs.log`, the turn plan to `agent_plans.log` (staged pipeline only), the per-decision tool-call trace + outcome to `agent_tools.log`, post-event game snapshots to `agent_game_state.log`, and searched candidate lines / goal overlays to `agent_search.log` when search mode is on. |
 | `RIFTBOUND_CLIENT_MAX_RETRIES` | `2` | No | How many times the OpenAI SDK itself retries a failed request (with its own backoff that respects `Retry-After`). |
 | `RIFTBOUND_TRANSIENT_RETRIES` | `3` | No | Extra in-process retries layered on top of the SDK for transient failures (rate limits / 429, timeouts, connection drops, 5xx) before a decision degrades to a fallback `pass`. |
 | `RIFTBOUND_TRANSIENT_BACKOFF_S` | `1.0` | No | Base seconds for exponential backoff between in-process transient retries (used when the error carries no `Retry-After` header). |
@@ -57,6 +57,10 @@ Notes:
   it fell back to `pass` (validator budget exhausted, transient API failure after
   retries, etc.). Use it to tell rate-limit fallbacks apart from validator
   rejections.
+- `agent_search.log` records searched candidate lines, search stats, and goal
+  overlay deltas. It is written only when `RIFTBOUND_LOG_INPUTS=1` and
+  `RIFTBOUND_SEARCH=on`; enable both when debugging search selection or
+  `RIFTBOUND_GOALS`.
 - The HTTP port is **not** an environment variable. The service is started with
   `uvicorn ... --port 8765`, and the Godot client hardcodes `AGENT_PORT := 8765`
   (`Scripts/AI/AIPlayer.gd`). Change both together if you need a different port.
@@ -102,28 +106,52 @@ uvicorn ai_agent.main:app --port 8765 --reload
 
 ```
 Godot (GameController)
-  └─ AIPlayer.gd          POST /decision ──► FastAPI (main.py)
-       ↑                                          │
-       │  command string                     agent.py (loop)
-       └─────────────────────────────────────     │
-                                            ┌─────┴──────┐
-                                       OpenAI API    skills.py
-                                                      memory.py (SQLite)
+  └─ AIPlayer.gd
+       ├─ GET /health at setup: adopt server search/goals flags
+       ├─ optional TurnSearch scout + POST /goals before main search
+       └─ POST /decision with BriefState and candidate lines
+             │
+             ▼
+        FastAPI (main.py)
+             ├─ agent.py: legacy loop, line selector, goal overlay build
+             ├─ planner.py / strategist.py: cached per-turn LLM stages
+             ├─ skills.py: read tools, simulations, scout search context
+             └─ memory.py / capture.py: SQLite decision and tuning data
 ```
 
 ## File Structure
 
 ```
 ai_agent/
-  __init__.py       Package marker
-  schemas.py        Pydantic models: BriefState, Decision, Move
-  system_prompt.py  System instruction (high-freq rules inline)
-  memory.py         SQLite episodic event log
-  skills.py         Read + helper skill implementations
-  agent.py          ~150-line OpenAI reasoning loop
-  main.py           FastAPI service
-  agent_memory.db   Created at runtime (gitignored)
+  __init__.py          Package marker
+  schemas.py           Pydantic models: BriefState, Decision, Move, GoalSet
+  prompts/             Static Markdown prompt modules loaded by name
+  system_prompt.py     Prompt module assembly + keyword / goal vocabulary blocks
+  planner.py           Cached per-turn plan producer for staged mode
+  strategist.py        Cached per-turn GoalSet producer for search goals
+  goal_compiler.py     GoalSet -> transient scoring-profile overlay
+  skills.py            Read + helper skill implementations
+  agent.py             Legacy reasoning loop, search line selector, fallbacks
+  main.py              FastAPI service, env flags, logging, capture hooks
+  memory.py            SQLite episodic event log
+  capture.py           Search/tuning dataset persistence helpers
+  agent_memory.db      Created at runtime (gitignored)
 ```
+
+## Editing prompts
+
+Static, placeholder-free prompt text lives in `ai_agent/prompts/*.md` and is
+loaded with `load_prompt("<name>")` from `ai_agent/prompts/__init__.py`. Edit
+those Markdown files when changing stable wording for the Actor, Planner,
+Strategist, or line-selector retry prompts; `ai_agent/prompts/README.md` maps
+each file to the Python module that loads it.
+
+Keep runtime-specific prompts in code when they interpolate board state, legal
+move ids, tool results, or schema context. `system_prompt.py` still owns dynamic
+assembly: it includes core modules on every decision, conditionally adds combat /
+priority / mulligan modules, injects only keywords visible in the current
+`BriefState`, and generates the Strategist goal vocabulary from the compiler's
+allowlists.
 
 ## Decision Schema
 
@@ -313,4 +341,5 @@ Engine-side env vars consumed by `Scripts/AI/AIPlayer.gd`:
 | `RIFTBOUND_AGENT_PORT` | `8765` | Agent server port the engine connects to. |
 | `RIFTBOUND_AI_THINK_DELAY` | `0.5` | Per-decision delay (seconds); set `0` for bulk runs. |
 | `RIFTBOUND_SEARCH` | `off` | Pre-handshake search default (the server's `/health` is authoritative). |
+| `RIFTBOUND_GOALS_SCOUT` | `on` | When goals are enabled, run a cheap base-profile scout search before `POST /goals` and send the top lines so the Strategist grounds goals in real candidate lines. Set to `0`, `false`, `no`, or `off` to disable the scout and use a snapshot-only strategist. |
 | `RIFTBOUND_SELFPLAY_CAPTURE` | (unset) | When set (a log path, or `1`/`on` for the default `res://out/selfplay_capture.jsonl`), run fully offline: compute argmax locally, skip the server, and append every server-bound payload to the JSONL log for `import_selfplay_logs.py`. Forces search mode on. |
