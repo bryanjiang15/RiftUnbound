@@ -504,7 +504,7 @@ Prompt `type` values currently handled by the controller:
 | `choose_discard` | `choose <hand-card-id>` | Used for discard costs/effects so `on_discard` triggers fire correctly |
 | `choose_optional` | `choose yes` / `choose no` | Optional ability or optional cost branch |
 | `choose_battlefield` | `choose <battlefield-id>` | Selects a staged combat/showdown battlefield |
-| `choose_trash_return` | `choose <trash-card-id>` | Handler exists, but `return_from_trash` currently auto-returns the last matching trash card instead of opening this prompt |
+| `choose_trash_return` | `choose <trash-card-id>` | Used by `return_from_trash` when multiple matching trash cards are valid; a single match returns automatically |
 
 Discard prompts appear when an effect or cost requires discarding from hand:
 
