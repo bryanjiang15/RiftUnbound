@@ -12,10 +12,12 @@
     ],
     "rarity": "Common",
     "energy_cost": 2,
-    "power_cost": [{
+    "power_cost": [
+      {
         "domain": "fury",
         "amount": 1
-      }],
+      }
+    ],
     "keywords": [
       {
         "id": "action"
@@ -59,10 +61,12 @@
     ],
     "rarity": "Uncommon",
     "energy_cost": 3,
-    "power_cost": [{
+    "power_cost": [
+      {
         "domain": "fury",
         "amount": 1
-      }],
+      }
+    ],
     "keywords": [
       {
         "id": "action"
@@ -210,10 +214,12 @@
     ],
     "rarity": "Uncommon",
     "energy_cost": 4,
-    "power_cost": [{
+    "power_cost": [
+      {
         "domain": "chaos",
         "amount": 1
-      }],
+      }
+    ],
     "keywords": [],
     "is_action": false,
     "is_reaction": false,
@@ -577,5 +583,313 @@
     ],
     "flavor_text": "A proper and formal way to kill your enemies.",
     "image": "CardArts/OGS-008.webp"
+  },
+  {
+    "id": "cleave",
+    "name": "Cleave",
+    "set": "OGN",
+    "card_number": "004",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "fury"
+    ],
+    "rarity": "Common",
+    "energy_cost": 1,
+    "power_cost": [],
+    "keywords": [
+      {
+        "id": "action"
+      }
+    ],
+    "is_action": true,
+    "is_reaction": false,
+    "effect_text": "Action (Play on your turn or in showdowns.)\nGive a unit Assault 3 this turn. (+3 Might while it's an attacker.)",
+    "abilities": [
+      {
+        "ability_id": "cleave-assault",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "give_keyword",
+        "effect_params": {
+          "target": "any_unit",
+          "targeting": "choose_one",
+          "keyword": {
+            "id": "assault",
+            "value": 3
+          },
+          "duration": "turn"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "Nobody ever won a war without attacking.",
+    "image": "CardArts/OGN-004.webp"
+  },
+  {
+    "id": "hextech-ray",
+    "name": "Hextech Ray",
+    "set": "OGN",
+    "card_number": "009",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "fury"
+    ],
+    "rarity": "Common",
+    "energy_cost": 1,
+    "power_cost": [],
+    "keywords": [
+      {
+        "id": "action"
+      }
+    ],
+    "is_action": true,
+    "is_reaction": false,
+    "effect_text": "Action (Play on your turn or in showdowns.)\nDeal 3 to a unit at a battlefield.",
+    "abilities": [
+      {
+        "ability_id": "hextech-ray-damage",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "deal_damage",
+        "effect_params": {
+          "amount": 3,
+          "target": "unit_at_battlefield",
+          "targeting": "choose_one"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "“Destroy. Then improve.”",
+    "image": "CardArts/OGN-009.webp"
+  },
+  {
+    "id": "falling-star",
+    "name": "Falling Star",
+    "set": "OGN",
+    "card_number": "029",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "fury"
+    ],
+    "rarity": "Rare",
+    "energy_cost": 2,
+    "power_cost": [],
+    "keywords": [],
+    "is_action": false,
+    "is_reaction": false,
+    "effect_text": "Deal 3 to a unit.\nDeal 3 to a unit.",
+    "abilities": [
+      {
+        "ability_id": "falling-star-damage-1",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "deal_damage",
+        "effect_params": {
+          "amount": 3,
+          "target": "any_unit",
+          "targeting": "choose_one",
+          "allow_repeat_targets": true
+        },
+        "is_action": false,
+        "is_reaction": false
+      },
+      {
+        "ability_id": "falling-star-damage-2",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "deal_damage",
+        "effect_params": {
+          "amount": 3,
+          "target": "any_unit",
+          "targeting": "choose_one",
+          "allow_repeat_targets": true
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "image": "CardArts/OGN-029.webp"
+  },
+  {
+    "id": "stupefy",
+    "name": "Stupefy",
+    "set": "OGN",
+    "card_number": "095",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "mind"
+    ],
+    "rarity": "Common",
+    "energy_cost": 1,
+    "power_cost": [],
+    "keywords": [
+      {
+        "id": "reaction"
+      }
+    ],
+    "is_action": false,
+    "is_reaction": true,
+    "effect_text": "Reaction (Play any time, even before spells and abilities resolve.)\nGive a unit -1 Might this turn, to a minimum of 1 Might. Draw 1.",
+    "abilities": [
+      {
+        "ability_id": "stupefy-debuff",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "give_might",
+        "effect_params": {
+          "amount": -1,
+          "duration": "turn",
+          "target": "any_unit",
+          "targeting": "choose_one",
+          "minimum_might": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      },
+      {
+        "ability_id": "stupefy-draw",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "draw",
+        "effect_params": {
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "It’s easier to outsmart an opponent with a concussion.",
+    "image": "CardArts/OGN-095.webp"
+  },
+  {
+    "id": "smoke-screen",
+    "name": "Smoke Screen",
+    "set": "OGN",
+    "card_number": "093",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "mind"
+    ],
+    "rarity": "Common",
+    "energy_cost": 2,
+    "power_cost": [],
+    "keywords": [
+      {
+        "id": "reaction"
+      }
+    ],
+    "is_action": false,
+    "is_reaction": true,
+    "effect_text": "Reaction (Play any time, even before spells and abilities resolve.)\nGive a unit -4 Might this turn, to a minimum of 1 Might.",
+    "abilities": [
+      {
+        "ability_id": "smoke-screen-debuff",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "give_might",
+        "effect_params": {
+          "amount": -4,
+          "duration": "turn",
+          "target": "any_unit",
+          "targeting": "choose_one",
+          "minimum_might": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "“Well, well, well. What have we here?”",
+    "image": "CardArts/OGN-093.webp"
+  },
+  {
+    "id": "retreat",
+    "name": "Retreat",
+    "set": "OGN",
+    "card_number": "104",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "mind"
+    ],
+    "rarity": "Uncommon",
+    "energy_cost": 1,
+    "power_cost": [],
+    "keywords": [
+      {
+        "id": "reaction"
+      }
+    ],
+    "is_action": false,
+    "is_reaction": true,
+    "effect_text": "Reaction (Play any time, even before spells and abilities resolve.)\nReturn a friendly unit to its owner's hand. Its owner channels 1 rune exhausted.",
+    "abilities": [
+      {
+        "ability_id": "retreat-return",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "return_to_hand",
+        "effect_params": {
+          "target": "friendly_unit",
+          "targeting": "choose_one",
+          "destination": "owner_hand"
+        },
+        "is_action": false,
+        "is_reaction": false
+      },
+      {
+        "ability_id": "retreat-channel",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "channel_rune",
+        "effect_params": {
+          "amount": 1,
+          "exhausted": true
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "There’s always tomorrow.",
+    "image": "CardArts/OGN-104.webp"
   }
 ]

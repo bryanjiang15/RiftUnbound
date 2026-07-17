@@ -24,7 +24,7 @@ func resolve_ability(ability: Dictionary, source: Variant, target: CardInstance,
 		"kill":
 			log_lines.append_array(_kill(card_source, target, gs))
 		"give_might":
-			log_lines.append_array(_give_might(params, target))
+			log_lines.append_array(_give_might(params, target, gs, owner_pi))
 		"give_keyword":
 			log_lines.append_array(_give_keyword(params, target))
 		"buff_unit":
@@ -37,6 +37,8 @@ func resolve_ability(ability: Dictionary, source: Variant, target: CardInstance,
 			log_lines.append_array(_move_unit_to_base(target, gs))
 		"recycle":
 			log_lines.append_array(_recycle(params, card_source, gs, owner_pi))
+		"recycle_from_trash":
+			log_lines.append_array(_recycle_from_trash(params, gs, owner_pi))
 		"discard":
 			log_lines.append_array(_discard(params, card_source, gs, owner_pi, ctx))
 		"discard_then_draw":
@@ -58,7 +60,7 @@ func resolve_ability(ability: Dictionary, source: Variant, target: CardInstance,
 		"ready_runes":
 			log_lines.append_array(_ready_runes(params, gs, owner_pi))
 		"play_token":
-			log_lines.append_array(_play_token(params, gs, owner_pi))
+			log_lines.append_array(_play_token(params, card_source, gs, owner_pi))
 		"gain_points":
 			log_lines.append_array(_gain_points(params, gs, owner_pi))
 		"counter_spell":
@@ -157,14 +159,27 @@ func _kill(source: CardInstance, target: CardInstance, gs: GameState) -> Array:
 	return ["> %s was killed by %s" % [target.display_name(), src_name]]
 
 
-func _give_might(params: Dictionary, target: CardInstance) -> Array:
+func _give_might(params: Dictionary, target: CardInstance, gs: GameState, owner: int) -> Array:
+	if target == null and params.get("target", "") == "all_enemy_units":
+		var log_lines: Array[String] = []
+		for enemy in gs.board.get_all_units_on_board(1 - owner):
+			log_lines.append_array(_give_might_to_one(params, enemy))
+		return log_lines if not log_lines.is_empty() else ["> No enemy units to affect"]
+	return _give_might_to_one(params, target)
+
+
+func _give_might_to_one(params: Dictionary, target: CardInstance) -> Array:
 	if target == null:
 		return []
 	var amount: int = params.get("amount", 1)
 	var duration: String = params.get("duration", "turn")
+	if params.has("minimum_might") and amount < 0:
+		var minimum := int(params.get("minimum_might", 1))
+		amount = maxi(amount, minimum - target.get_current_might())
 	if duration == "turn":
 		target.temp_might_bonus += amount
-	return ["> %s +%d Might (%s)" % [target.display_name(), amount, duration]]
+	var sign := "+" if amount >= 0 else ""
+	return ["> %s %s%d Might (%s)" % [target.display_name(), sign, amount, duration]]
 
 
 func _give_keyword(params: Dictionary, target: CardInstance) -> Array:
@@ -231,6 +246,19 @@ func _recycle(params: Dictionary, source: CardInstance, gs: GameState, owner: in
 			var card = ps.trash[ps.trash.size() - 1]
 			ps.move_to_hand(card)
 			log_lines.append("> P%d recycled %s to hand" % [owner + 1, card.display_name()])
+	return log_lines
+
+
+func _recycle_from_trash(params: Dictionary, gs: GameState, owner: int) -> Array:
+	var log_lines: Array[String] = []
+	var amount: int = params.get("amount", 1)
+	var ps: PlayerState = gs.players[owner]
+	for _i in range(mini(amount, ps.trash.size())):
+		var card = ps.trash[ps.trash.size() - 1]
+		ps.recycle_to_bottom(card, false)
+		log_lines.append("> P%d recycled %s from trash to deck" % [owner + 1, card.display_name()])
+	if log_lines.is_empty():
+		log_lines.append("> P%d has no cards in trash to recycle" % (owner + 1))
 	return log_lines
 
 
@@ -390,7 +418,7 @@ func _ready_runes(params: Dictionary, gs: GameState, owner: int) -> Array:
 	return ["> P%d readied %d rune(s)" % [owner + 1, count]]
 
 
-func _play_token(params: Dictionary, gs: GameState, owner: int) -> Array:
+func _play_token(params: Dictionary, source: CardInstance, gs: GameState, owner: int) -> Array:
 	var token_type: String = params.get("token_type", "recruit_1m")
 	var location: String = params.get("location", "base")
 	var ps: PlayerState = gs.players[owner]
@@ -398,8 +426,15 @@ func _play_token(params: Dictionary, gs: GameState, owner: int) -> Array:
 	if token_def == null:
 		return ["> [ERROR] Unknown token type: %s" % token_type]
 	var token = ps.create_instance(token_def)
-	token.location = location
-	ps.base_permanents.append(token)
+	token.is_exhausted = not params.get("ready", false)
+	for kw in params.get("keywords", []):
+		token.temp_keywords.append(kw)
+	if location == "here" and source != null and source.is_at_battlefield():
+		gs.board.add_unit_to_battlefield(token, source.battlefield_index)
+		location = gs.board.battlefields[source.battlefield_index].battlefield_id
+	else:
+		token.location = "base"
+		ps.base_permanents.append(token)
 	return ["> P%d created a token: %s at %s" % [owner + 1, token.display_name(), location]]
 
 

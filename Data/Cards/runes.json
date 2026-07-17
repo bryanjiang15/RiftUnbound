@@ -230,5 +230,63 @@
       }
     ],
     "image": "Champ_Card.jpg"
+  },
+  {
+    "id": "mind-rune",
+    "name": "Mind Rune",
+    "set": "OGN",
+    "card_number": "092",
+    "card_type": "rune",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "mind"
+    ],
+    "energy_cost": 0,
+    "power_cost": [],
+    "is_basic": true,
+    "keywords": [],
+    "effect_text": "Tap: Add 1 energy to your pool.\nRecycle: Add 1 Mind power to your pool.",
+    "abilities": [
+      {
+        "ability_id": "mind-rune-tap",
+        "ability_type": "activated",
+        "timing": null,
+        "condition": null,
+        "is_optional": true,
+        "cost": {
+          "energy": 0,
+          "power": [],
+          "exhaust": true
+        },
+        "effect_type": "add_energy",
+        "effect_params": {
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": true
+      },
+      {
+        "ability_id": "mind-rune-recycle",
+        "ability_type": "activated",
+        "timing": null,
+        "condition": null,
+        "is_optional": true,
+        "cost": {
+          "energy": 0,
+          "power": [],
+          "exhaust": false,
+          "recycle_self": true
+        },
+        "effect_type": "add_power",
+        "effect_params": {
+          "domain": "mind",
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": true
+      }
+    ],
+    "image": "CardArts/OGN-092.webp"
   }
 ]

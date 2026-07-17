@@ -123,6 +123,8 @@ Abilities are defined as structured objects. They are **not free-form text** in 
 | `discarded_card_this_turn` | none | Controller has discarded at least one card this turn |
 | `might_lte` | `value` | Target's current Might, including passive/temporary/keyword bonuses, is less than or equal to `value` |
 | `rune_count_gte` | `value` | Controller has at least `value` channeled runes |
+| `played_card_type` | `card_type` | Source controller just played a card of the given type, e.g. `"spell"` |
+| `played_card_count_eq` | `value` | Source controller has played exactly `value` cards this turn after the current play |
 | `while_combat_alone` | none | Source unit is the sole friendly unit at the active combat battlefield and is attacking or defending |
 | `while_defending_alone` | none | Source unit is defending alone at the active combat battlefield |
 
@@ -137,18 +139,19 @@ Each `effect_type` string maps to a handler in `AbilityResolver.gd` unless the n
 | `effect_type` | Description | Key `effect_params` |
 |---|---|---|
 | `"add_energy"` | Add Energy to the controller's Rune Pool | `{ "amount": 2 }` |
-| `"add_power"` | Add domain Power to the controller's Rune Pool | `{ "domain": "fury", "amount": 1 }` |
+| `"add_power"` | Add domain Power to the controller's Rune Pool. `"spell_rainbow"` can pay any domain Power cost only while playing spells. | `{ "domain": "fury", "amount": 1 }` |
 | `"draw"` | Draw cards; Burn Out scoring applies when the deck recycles from trash | `{ "amount": 1 }` |
 | `"deal_damage"` | Deal fixed damage to a chosen/resolved target | `{ "amount": 4, "target": "unit_at_battlefield", "targeting": "choose_one" }` |
 | `"heal"` | Heal target damage; `"all"` clears all damage | `{ "amount": "all", "target": "friendly_unit" }` |
 | `"kill"` | Move a target permanent to trash | `{ "target": "enemy_unit" }` |
-| `"give_might"` | Add temporary Might for a duration currently modeled as this turn | `{ "amount": 3, "duration": "turn", "target": "friendly_unit" }` |
+| `"give_might"` | Add temporary Might for a duration currently modeled as this turn. Negative values may include `minimum_might` to clamp current Might. | `{ "amount": 3, "duration": "turn", "target": "friendly_unit" }` |
 | `"give_keyword"` | Grant a temporary keyword. `duration` may be `"turn"`, `"combat"`, or omitted; `temporary` defaults to Beginning Phase cleanup | `{ "keyword": { "id": "shield", "value": 2 }, "duration": "combat" }` |
 | `"buff_unit"` | Place one Buff counter on the target unit | `{ "target": "friendly_unit" }` |
 | `"move_unit"` | Move target unit to its base; currently delegates to `move_unit_to_base` | `{ "target": "friendly_unit" }` |
 | `"move_unit_to_base"` | Move a battlefield unit to its owner's base exhausted | `{ "target": "unit_at_battlefield", "targeting": "choose_one" }` |
 | `"stun_unit"` | Mark a target unit Stunned | `{ "target": "enemy_unit" }` |
 | `"recycle"` | Return cards from trash to hand in current implementation | `{ "from": "trash", "amount": 1 }` |
+| `"recycle_from_trash"` | Recycle up to N cards from controller trash to the bottom of the main deck | `{ "amount": 3 }` |
 | `"discard"` | Discard cards from hand; controller prompts preserve `on_discard` triggers | `{ "amount": 1 }` |
 | `"discard_then_draw"` | Prompt for discards, then draw after the discard continuation resolves | `{ "discard_amount": 1, "draw_amount": 1 }` |
 | `"channel_rune"` | Channel additional rune(s); can enter exhausted | `{ "amount": 1, "exhausted": true }` |
@@ -159,7 +162,7 @@ Each `effect_type` string maps to a handler in `AbilityResolver.gd` unless the n
 | `"fight_chosen_units"` | Use the spell's first chosen target as the buffed friendly unit and this ability's target as the enemy; both deal current Might to each other | `{ "target": "enemy_unit", "targeting": "choose_one" }` |
 | `"ready_permanent"` | Ready a target permanent | `{ "target": "friendly_unit" }` |
 | `"ready_runes"` | Ready up to N channeled runes; `TriggerDispatcher` can queue this for end of turn | `{ "amount": 2, "timing": "end_of_turn" }` |
-| `"play_token"` | Create and play a token definition, if present in `tokens.json` | `{ "token_type": "recruit_1m", "location": "base" }` |
+| `"play_token"` | Create and play a token definition, if present in `tokens.json`; `location: "here"` follows the source's battlefield when possible | `{ "token_type": "sprite_3m", "location": "here", "ready": true }` |
 | `"gain_points"` | Gain Victory Points | `{ "amount": 1 }` |
 | `"counter_spell"` | Remove the top spell/ability from the chain | `{ "target": "spell_on_chain" }` |
 | `"predict"` | Reveal top cards in logs; recycle choice is not modeled | `{ "amount": 2 }` |
@@ -177,7 +180,7 @@ Passive aura effects are refreshed by `TriggerDispatcher.emit_passive_auras()` r
 
 | `effect_type` | Description | Key `effect_params` |
 |---|---|---|
-| `"conditional_might"` | Add to a unit's `passive_might_bonus` while its condition evaluates true | `{ "amount": 2 }` |
+| `"conditional_might"` | Add to a unit's `passive_might_bonus` while its condition evaluates true; may scale by controller trash size | `{ "amount": 2 }` or `{ "per_card_in_trash": true, "amount_per_card": 1 }` |
 | `"aura_might"` | Legend aura that adds Might to each friendly unit whose condition evaluates true | `{ "target": "friendly_unit", "amount": 2 }` |
 | `"gain_keywords"` | Add passive keywords while the source's condition evaluates true | `{ "keywords": [{ "id": "ganking" }] }` |
 

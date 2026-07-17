@@ -20,6 +20,8 @@ static func run(assertions) -> void:
 	_test_hidden_lost_control_trashes_facedown(assertions)
 	_test_play_from_hidden_facedown_card(assertions)
 	_test_play_from_hidden_target_restricted_to_hidden_battlefield(assertions)
+	_test_kaisa_spell_rainbow_pays_spell_only(assertions)
+	_test_kaisa_spell_rainbow_legal_moves(assertions)
 
 
 static func _test_tap_adds_energy(assertions) -> void:
@@ -28,6 +30,44 @@ static func _test_tap_adds_energy(assertions) -> void:
 	h.cmd(0, "tap rune-0")
 	assertions.assert_eq(h.gs().players[0].rune_pool.energy, 1, "tap adds 1 energy")
 	assertions.assert_no_error(h.controller, "tap rune succeeds")
+
+
+static func _test_kaisa_spell_rainbow_pays_spell_only(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"legend": "kaisa-daughter-of-the-void", "pool": {"energy": 3, "power": {}},
+			 "hand": ["void-seeker"], "deck_size": 5, "rune_deck_size": 12},
+			{"battlefield-a": [{"id": "magma-wurm", "owner": 1}], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd(0, "use legend-p0")
+	assertions.assert_eq(h.gs().players[0].rune_pool.power.get(RunePool.SPELL_RAINBOW_POWER, 0), 1,
+		"kaisa legend adds spell-only rainbow power")
+	h.cmd(0, "play void-seeker target magma-wurm")
+	assertions.assert_no_error(h.controller, "spell-only rainbow pays for spell power")
+	assertions.assert_eq(h.gs().players[0].rune_pool.power.get(RunePool.SPELL_RAINBOW_POWER, 0), 0,
+		"spell-only rainbow is spent by spell")
+
+
+static func _test_kaisa_spell_rainbow_legal_moves(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"legend": "kaisa-daughter-of-the-void", "pool": {"energy": 3, "power": {"spell_rainbow": 1}},
+			 "hand": ["void-seeker", "jinx-demolitionist"], "deck_size": 5, "rune_deck_size": 12},
+			{"battlefield-a": [{"id": "magma-wurm", "owner": 1}], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	var moves: Array = LegalMoveEnumerator.enumerate(h.gs(), 0)
+	assertions.assert_true("play void-seeker target magma-wurm" in moves,
+		"spell-only rainbow makes matching spell legal")
+	assertions.assert_true(not ("play jinx-demolitionist" in moves),
+		"spell-only rainbow does not make unit power costs legal")
 
 
 # BUG-001: power costs must auto-recycle channeled runes when the pool is short.

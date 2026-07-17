@@ -1,0 +1,45 @@
+{
+  "deck_id": "ogn-kaisa-fury-mind-wip",
+  "player_label": "Kai'Sa (Fury/Mind) WIP",
+  "legend": "kaisa-daughter-of-the-void",
+  "chosen_champion": "kaisa-survivor",
+  "_notes": [
+    "Source Docs/decklist-kaisa lists 39 MainDeck cards.",
+    "Kai'Sa, Survivor card text is not present in Docs/cardlist-kaisa, so this deck remains WIP until that definition is added.",
+    "Sideboard card text is missing for Singularity, Progress Day, Time Warp, and Icathian Rain."
+  ],
+  "main_deck": [
+    {"card_id": "hextech-ray", "count": 3},
+    {"card_id": "noxus-hopeful", "count": 3},
+    {"card_id": "void-seeker", "count": 3},
+    {"card_id": "falling-star", "count": 3},
+    {"card_id": "stupefy", "count": 3},
+    {"card_id": "watchful-sentry", "count": 3},
+    {"card_id": "ravenbloom-student", "count": 3},
+    {"card_id": "thousand-tailed-watcher", "count": 3},
+    {"card_id": "cleave", "count": 2},
+    {"card_id": "lecturing-yordle", "count": 2},
+    {"card_id": "smoke-screen", "count": 2},
+    {"card_id": "retreat", "count": 2},
+    {"card_id": "sprite-mother", "count": 2},
+    {"card_id": "pouty-poro", "count": 1},
+    {"card_id": "kaisa-survivor", "count": 1},
+    {"card_id": "darius-trifarian", "count": 2},
+    {"card_id": "dr-mundo-expert", "count": 1}
+  ],
+  "rune_deck": [
+    {"card_id": "fury-rune", "count": 6},
+    {"card_id": "mind-rune", "count": 6}
+  ],
+  "battlefields": ["targons-peak"],
+  "sideboard": [
+    {"card_id": "cleave", "count": 1},
+    {"card_id": "darius-trifarian", "count": 1},
+    {"card_id": "smoke-screen", "count": 1},
+    {"card_id": "retreat", "count": 1},
+    {"card_id": "singularity", "count": 1},
+    {"card_id": "progress-day", "count": 1},
+    {"card_id": "time-warp", "count": 1},
+    {"card_id": "icathian-rain", "count": 1}
+  ]
+}

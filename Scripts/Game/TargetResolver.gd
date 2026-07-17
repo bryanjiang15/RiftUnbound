@@ -30,7 +30,10 @@ static func get_valid_targets(filter: String, source: CardInstance, gs: GameStat
 				for g in ps.get_unattached_gear_at_base():
 					results.append(g)
 		"any_unit":
-			results.append_array(_all_board_units(gs))
+			for ps in gs.players:
+				results.append_array(_friendly_units(ps.player_index, gs))
+		"all_enemy_units":
+			results.append_array(_enemy_units(owner, gs))
 		"unit":
 			for ps in gs.players:
 				for c in ps.trash:

@@ -26,6 +26,15 @@ static func evaluate(condition: Variant, source: CardInstance, gs: GameState, ct
 		"rune_count_gte":
 			var pi = source.owner_index if source else ctx.get("player_index", 0)
 			return gs.players[pi].channeled_runes.size() >= int(condition.get("value", 0))
+		"played_card_type":
+			if source == null or source.owner_index != int(ctx.get("player_index", -1)):
+				return false
+			var played: CardInstance = ctx.get("source")
+			return played != null and played.definition.card_type == str(condition.get("card_type", ""))
+		"played_card_count_eq":
+			if source == null or source.owner_index != int(ctx.get("player_index", -1)):
+				return false
+			return gs.players[source.owner_index].cards_played_this_turn == int(condition.get("value", 0))
 		"while_combat_alone":
 			# Unit is attacking or defending and is the only friendly unit at its
 			# battlefield (i.e. fighting "alone").

@@ -42,6 +42,13 @@ static func run(assertions) -> void:
 	_test_p2_can_act_after_chemtech_scrapheap_turn(assertions)
 	_test_gust_rejects_target_above_might(assertions)
 	_test_play_targeted_spell_enumerates_targets(assertions)
+	_test_ravenbloom_student_spell_trigger(assertions)
+	_test_darius_second_card_trigger(assertions)
+	_test_kaisa_debuff_minimum(assertions)
+	_test_falling_star_can_repeat_target(assertions)
+	_test_sprite_mother_token_here_temporary(assertions)
+	_test_dr_mundo_trash_might_and_recycle(assertions)
+	_test_retreat_returns_and_channels(assertions)
 
 
 static func _test_magma_wurm_aura(assertions) -> void:
@@ -70,6 +77,131 @@ static func _test_meditation_exhaust_draws_two(assertions) -> void:
 	var unit = h.find_unit("chemtech-enforcer")
 	assertions.assert_true(unit != null and unit.is_exhausted, "meditation exhausts chosen friendly unit")
 	assertions.assert_eq(h.gs().players[0].hand.size(), 2, "meditation draws 2 when custom cost is paid")
+
+
+static func _test_ravenbloom_student_spell_trigger(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 1, "power": {}}, "hand": ["hextech-ray"],
+			 "base": [{"id": "ravenbloom-student"}], "deck_size": 5, "rune_deck_size": 12},
+			{"battlefield-a": [{"id": "chemtech-enforcer", "owner": 1}], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd(0, "play hextech-ray target chemtech-enforcer")
+	assertions.assert_eq(h.find_unit("ravenbloom-student").get_current_might(), 3,
+		"ravenbloom gets +1 when controller plays a spell")
+
+
+static func _test_darius_second_card_trigger(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 7, "power": {}}, "hand": ["noxus-hopeful", "lecturing-yordle"],
+			 "base": [{"id": "darius-trifarian", "exhausted": true}], "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd(0, "play noxus-hopeful")
+	var darius = h.find_unit("darius-trifarian")
+	assertions.assert_true(darius.is_exhausted, "darius stays exhausted after first card")
+	h.cmd(0, "play lecturing-yordle")
+	assertions.assert_eq(darius.get_current_might(), 7, "darius gains +2 on second card")
+	assertions.assert_true(not darius.is_exhausted, "darius readies on second card")
+
+
+static func _test_kaisa_debuff_minimum(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 2, "power": {}}, "hand": ["smoke-screen"], "deck_size": 5, "rune_deck_size": 12},
+			{"base": [{"id": "watchful-sentry"}], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd(0, "play smoke-screen target watchful-sentry")
+	assertions.assert_eq(h.find_unit("watchful-sentry").get_current_might(), 1,
+		"smoke screen cannot reduce below 1 Might")
+
+
+static func _test_falling_star_can_repeat_target(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 2, "power": {}}, "hand": ["falling-star"], "deck_size": 5, "rune_deck_size": 12},
+			{"base": [{"id": "magma-wurm"}], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd_with_choices(0, "play falling-star target magma-wurm", ["magma-wurm"])
+	assertions.assert_eq(h.find_unit("magma-wurm").damage, 6, "falling star can choose same unit twice")
+
+
+static func _test_sprite_mother_token_here_temporary(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"battlefield_control": [0, -1],
+		"players": [
+			{"pool": {"energy": 4, "power": {}}, "hand": ["sprite-mother"], "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd(0, "play sprite-mother to battlefield-a")
+	var token = h.find_unit("sprite-3m")
+	assertions.assert_true(token != null and token.is_at_battlefield(), "sprite token is played at battlefield")
+	assertions.assert_true(not token.is_exhausted, "sprite token enters ready")
+	assertions.assert_true(token.has_keyword("temporary"), "sprite token has Temporary")
+	h.controller._kill_temporary_permanents(0)
+	assertions.assert_true(token in h.gs().players[0].trash, "temporary sprite dies at beginning phase")
+
+
+static func _test_dr_mundo_trash_might_and_recycle(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"legend": "kaisa-daughter-of-the-void",
+			 "base": [{"id": "dr-mundo-expert"}], "trash": ["hextech-ray", "cleave", "stupefy"],
+			 "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.controller.trigger_dispatcher.emit_passive_auras(h.gs())
+	assertions.assert_eq(h.find_unit("dr-mundo-expert").get_current_might(), 9,
+		"dr mundo gains Might for cards in trash")
+	var deck_before = h.gs().players[0].deck.size()
+	h.controller.trigger_dispatcher.emit("beginning_phase_start", {
+		"player_index": 0, "controller": h.controller
+	}, h.gs(), h.controller)
+	assertions.assert_eq(h.gs().players[0].trash.size(), 0, "dr mundo recycles three from trash")
+	assertions.assert_eq(h.gs().players[0].deck.size(), deck_before + 3, "dr mundo puts recycled cards into deck")
+
+
+static func _test_retreat_returns_and_channels(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 1, "power": {}}, "hand": ["retreat"],
+			 "base": [{"id": "chemtech-enforcer"}], "deck_size": 5, "rune_deck_size": 2},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd(0, "play retreat target chemtech-enforcer")
+	assertions.assert_true(h.gs().players[0].get_hand_instance("chemtech-enforcer") != null,
+		"retreat returns friendly unit to hand")
+	assertions.assert_eq(h.gs().players[0].channeled_runes.size(), 1, "retreat channels one rune")
+	assertions.assert_true(h.gs().players[0].channeled_runes[0].is_exhausted, "retreat rune enters exhausted")
 
 
 static func _test_meditation_decline_draws_one(assertions) -> void:
