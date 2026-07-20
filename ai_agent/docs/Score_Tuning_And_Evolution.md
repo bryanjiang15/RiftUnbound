@@ -1,13 +1,21 @@
 # Score Tuning & Evolution — Design Doc
 
-Status: design only (no code yet)
+Status: partially implemented. The feature registry, tuning dataset capture,
+`texel_tune.py` proposer, and per-turn goal overlay are in source; CMA-ES,
+SPRT acceptance, LLM feature invention, and automated post-game hypothesis
+generation remain roadmap items.
 Scope: how to **tune** `Data/AI/scoring_profile.json` weights, **evolve** them over
 many games, use an **LLM to propose hypotheses and design new features**, and
 handle **delayed-value** (beyond-horizon) moves.
 
-Companion doc: `Statistical_Analysis_Storage.md` covers **collecting** the data
-(schema, endpoints, card stats). This doc covers **using** that data to improve
-the evaluation. Read that one first for table/field names referenced here.
+Companion docs:
+- `Statistical_Analysis_Storage.md` covers **collecting** the data (schema,
+  endpoints, card stats). Read that one first for table/field names referenced
+  here.
+- `Scoring_Features_Reference.md` covers the registry-driven feature space that
+  Texel reads through `Data/AI/feature_registry.json`.
+- `Goal_Oriented_Strategist.md` covers the implemented per-turn overlay that
+  fills the cross-turn planner hook described in §5.
 
 ---
 
@@ -264,18 +272,28 @@ Guardrail throughout: **the LLM hypothesizes and explains; the simulator decides
 
 ## 5. Cross-turn planner hook (tying §1 and §3 together)
 
-The branch already has a planner (`ai_agent/planner.py`) that sets a per-turn
-intent. Extend it into the cross-turn layer the per-turn search lacks:
+The branch has two related LLM stages:
+- `ai_agent/planner.py` sets a per-turn advisory intent for staged Actor
+  decisions (`RIFTBOUND_PIPELINE=staged`).
+- `ai_agent/strategist.py` emits a structured `GoalSet` that
+  `goal_compiler.py` converts into a transient scoring overlay
+  (`RIFTBOUND_SEARCH=on RIFTBOUND_GOALS=on`).
+
+The implemented strategist is the first version of the cross-turn layer the
+per-turn search lacked:
 
 - LLM identifies a **multi-turn goal** ("assemble combo X", "race to 8 on
   battlefield-a", "stabilize then win late").
-- Planner emits a **temporary scoring bias** for the game/turn — e.g. boost
+- Strategist emits a **temporary scoring bias** for the turn — e.g. boost
   `reactive_potential` weight because it spotted a defensive win plan.
-- `TurnSearch` executes within the turn under the biased profile.
+- `AIPlayer.gd` calls `/goals` before the main `TurnSearch`; generic
+  `weight_bias` goals affect line generation, and all goals affect server-side
+  line selection.
 
 This gives a clean separation: **LLM plans ACROSS turns (strategy); search
 optimizes WITHIN a turn (tactics).** The bias is transient and never overwrites
-the tuned base profile — base weights come from §2, the bias is a planner overlay.
+the tuned base profile — base weights come from §2, the bias is a strategy
+overlay.
 
 ---
 
@@ -285,7 +303,7 @@ the tuned base profile — base weights come from §2, the bias is a planner ove
 |---|---|---|---|
 | Eval features | encoding long-term value as leaf-score terms | add to `ScoringProfile` | 1 |
 | Weight tuning | labeling positions with final outcome | Texel → CMA-ES | 1→2 |
-| Cross-turn planner | LLM sets multi-turn goal → biases eval | extend `planner.py` | 2 |
+| Cross-turn planner | LLM sets multi-turn goal → biases eval | `strategist.py` + `goal_compiler.py` overlay | 2 |
 | Feature invention | LLM proposes new delayed-value terms | Eureka-style + gate | 2→3 |
 | Opponent prior | LLM judges hidden-hand threats | `opponent_actions` + LLM | 2 |
 

@@ -1,9 +1,26 @@
 # Riftbound AI Agent — System Design & Memory
 
+Status: baseline design plus current implementation notes. For setup, endpoints,
+environment variables, and the freshest runtime architecture, start with
+`../README.md`; for search goals and scoring, see `Goal_Oriented_Strategist.md`
+and `Scoring_Features_Reference.md`.
+
 ## Overview
 
 The Riftbound AI agent is a Python FastAPI service that receives game state from
 Godot, reasons over it using an LLM tool loop, and returns a single legal move.
+
+Current runtime options extend the baseline flow below:
+- Static prompt text lives in `ai_agent/prompts/*.md` and is assembled by
+  `system_prompt.py`; runtime state and schema-specific text stay in code.
+- `RIFTBOUND_PIPELINE=staged` routes decisions through
+  `router.py` -> `planner.py` -> Actor/Validator in `agent.py`; `legacy` keeps the
+  original single Actor loop.
+- `RIFTBOUND_SEARCH=on` lets `AIPlayer.gd` run Godot `TurnSearch` and send
+  candidate lines to `agent.choose_line`.
+- `RIFTBOUND_GOALS=on` adds a pre-search `POST /goals` handshake:
+  `strategist.py` emits a `GoalSet`, `goal_compiler.py` builds a transient overlay,
+  and `TurnSearch`/`choose_line` rank under that overlay.
 
 ```
 Godot (GDScript)                     Python (FastAPI — port 8765)
@@ -200,7 +217,7 @@ There is no:
 | `get_full_state` | Read | Full board description text from Godot |
 | `get_zone(zone_id)` | Read | Focused description of one zone (hand, base, battlefield, runes) |
 | `get_card_detail(card_id)` | Read | Full card definition JSON from Data/Cards/ |
-| `get_opponent_history` | Read | Opponent public info — score, hand size, base units (no history) |
+| `get_opponent_history` | Read | Opponent public action history from `opponent_actions` plus current public context |
 | `lookup_rule(query)` | Read | Keyword search over implementation rules doc |
 | `simulate_move(move)` | Helper | Engine-truth result of one move (Phase 2.5): structured facts from Godot's rules engine run on a clone, not a heuristic guess |
 | `simulate_line(moves[])` | Helper | Engine-truth result of a scripted multi-step line of the AI's own moves (e.g. enter combat then play a trick) |
@@ -226,12 +243,18 @@ decision, `AIPlayer.gd` falls back to a deterministic heuristic:
 
 | File | Purpose |
 |---|---|
-| `ai_agent/main.py` | FastAPI app, `/decision` endpoint, lifespan setup |
-| `ai_agent/agent.py` | LLM tool loop: assembles context, dispatches skills, parses Decision |
-| `ai_agent/schemas.py` | Pydantic models: BriefState, Move, Decision, DecisionRequest |
-| `ai_agent/skills.py` | All 8 skill implementations (read + helper) |
-| `ai_agent/memory.py` | SQLite episodic log + plain-text DecisionLogger |
-| `ai_agent/system_prompt.py` | Static system prompt: goal, rules, output contract |
+| `ai_agent/main.py` | FastAPI app, `/decision`, `/goals`, `/health`, feedback/metrics endpoints, lifespan setup |
+| `ai_agent/agent.py` | Legacy Actor loop, staged Actor/Validator, search line selector, goal overlay orchestration |
+| `ai_agent/router.py` | Staged-pipeline routing: forced commands, prompt modules, plan requirement |
+| `ai_agent/planner.py` | Cached per-turn plan for staged decisions |
+| `ai_agent/strategist.py` | Cached per-turn `GoalSet` producer for goal-oriented search |
+| `ai_agent/goal_compiler.py` | Whitelisted `GoalSet` -> transient scoring-profile overlay |
+| `ai_agent/schemas.py` | Pydantic models: BriefState, Move, Decision, GoalSet, CandidateLine, requests |
+| `ai_agent/skills.py` | Read/helper skills, including search-scout context for the Strategist |
+| `ai_agent/memory.py` | SQLite episodic log, tuning dataset tables, card events, reports |
+| `ai_agent/capture.py` | Shared live/offline capture writes for tuning data |
+| `ai_agent/prompts/*.md` | Static prompt modules loaded by `ai_agent/prompts/__init__.py` |
+| `ai_agent/system_prompt.py` | Prompt assembly, conditional modules, visible-keyword block, goal vocabulary |
 | `ai_agent/format_decisions.py` | CLI viewer for `agent_decisions.log` with ANSI color |
 | `Scripts/AI/AIPlayer.gd` | Godot HTTP bridge: serializes state, POSTs, retries, fallback |
 | `Scripts/AI/BriefStateSerializer.gd` | GameState → BriefState JSON (schema v1.0) |

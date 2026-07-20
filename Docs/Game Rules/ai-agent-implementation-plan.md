@@ -12,6 +12,14 @@ The agent is an oracle, not an authority. Godot owns the rules engine, the full 
 
 This plan covers what the agent does, the context it receives, the skills it can call, the memory it keeps, the structure of its output, the control loop it lives in, and how its reasoning is captured for debugging.
 
+Current implementation references:
+
+- `ai_agent/README.md` — setup, environment variables, endpoints, and current runtime architecture.
+- `ai_agent/docs/README.md` — navigation across AI design/reference docs.
+- `ai_agent/prompts/README.md` — static Markdown prompt modules and their Python loaders.
+- `ai_agent/docs/Scoring_Features_Reference.md` — Godot `TurnSearch` linear-eval feature registry and manifest export workflow.
+- `ai_agent/docs/Goal_Oriented_Strategist.md` — `RIFTBOUND_GOALS`, the `/goals` handshake, goal compiler guardrails, and overlay-aware search.
+
 ---
 
 ## 2. System overview

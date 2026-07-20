@@ -1,6 +1,10 @@
 # Statistical Analysis Storage — Design Doc
 
-Status: design only (no code yet)
+Status: partially implemented. `memory.py` creates the core SQLite tables for
+search decisions, candidate lines, decision snapshots, weight versions, and card
+events; `capture.py` writes the live/offline capture path; `texel_tune.py` reads
+the captured features. `turn_snapshots`, `tuning_runs`, WPA/card-value modeling,
+and SPRT/CMA-ES acceptance are still roadmap items.
 Scope: prepare queryable data storage to support an analysis/tuning agent for the
 search + linear-evaluation AI on `feature/search-based-ai`.
 
@@ -51,16 +55,20 @@ Three failure modes the schema must keep distinguishable:
 |---|---|---|---|
 | `decisions` | per AI decision | turn, decision_index, decision_type, `brief_state_hash` (HASH ONLY), reasoning, `move_json`, accepted, rejection_reason, outcome_summary | state not reconstructable; no features/breakdown |
 | `opponent_actions` | per visible opp action | turn, action text | — |
-| `games` | per finished game | outcome, my_score, opp_score, turns_played | only game-grain label; **no first-player/seat record** |
+| `games` | per finished game | outcome, my_score, opp_score, turns_played, `first_player_index`, seed | game-grain label; search rows get seat-aware `went_first` backfill |
 | `decision_eval_metrics` | per decision | model calls, retries, latency, token usage (planner/actor split) | reliability only, not quality |
 | `client_decision_metrics` | per decision | engine latency, rejection retries, heuristic fallback | — |
 | `game_eval_summary` | per game | aggregated reliability scorecard | — |
 | `human_feedback` | reviewer | rubric scores, tags, note | — |
 | `move_feedback` | per move | like/neutral/dislike sentiment | — |
 
-**Missing for statistics:** raw feature vectors (only `score_breakdown` is sent
-today — see §2A), candidate-set / regret data, persisted state at decision
-(currently hashed), first-player/seat record, and any per-card events.
+**Current capture status:** the original gaps in this section are now mostly
+covered. Candidate lines carry both `score_breakdown` and raw `features`
+(`CandidateLine.features`, emitted by `TurnSearch._build_candidate_lines`);
+`capture.py` persists candidate-set/regret rows and decision snapshots; game-end
+backfill stores outcome and `went_first`; `card_events` records the per-card event
+stream. Still missing: `turn_snapshots` for WPA-style card value, `tuning_runs`
+for validation history, and an automated SPRT/CMA-ES acceptance loop.
 
 ---
 

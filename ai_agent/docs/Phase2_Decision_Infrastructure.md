@@ -1,5 +1,9 @@
 # Phase 2 — Agent Decision Infrastructure
 
+Status: implemented behind `RIFTBOUND_PIPELINE=staged`, with `legacy` still the
+default/fallback mode. The original design below remains useful for intent and
+verification criteria; source files listed in "Files Changed / Created" now exist.
+
 ## Goal
 
 Replace the single monolithic model call in `agent.decide()` with a small
@@ -40,6 +44,11 @@ turn — nothing holds a stable intent.
 ---
 
 ## New / Changed Components
+
+Implementation note: prompt-module splitting is now externalized to
+`ai_agent/prompts/*.md` and assembled by `system_prompt.py`; the Router chooses
+module names, and the Actor receives a compact typed-legal-action summary derived
+from the current legal command strings.
 
 | Component | Today | Phase 2 |
 |---|---|---|
@@ -124,6 +133,11 @@ correctly deviate from the turn plan.
 ---
 
 ## Work Items
+
+Current status: items 1, 2, 3, 4, 5, and 7 are implemented for the staged path.
+Item 6 is implemented as Actor-facing typed legal-action summaries derived from
+legal command strings (`LegalActionOption`); the canonical Godot contract still
+sends the command-string list for validation/back-compat.
 
 1. `router.py`: `route(brief_state) -> RouteDecision{forced_move?, modules[],
    needs_plan}`. Unit-test the forced-move short-circuit against recorded

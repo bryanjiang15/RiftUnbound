@@ -207,6 +207,14 @@ restricted safe expression over snapshot fields, *not* raw GDScript) and folded
 into the manifest by the exporter. The group is currently **empty** (scaffold
 only); `situational_weights` in the profile is `{}`.
 
+Do not confuse this static scaffold with the **runtime goal overlay** from
+`goal_compiler.py`. `RIFTBOUND_GOALS` can attach per-turn `situational_terms` and
+`card_bonuses` to candidate-line re-ranking without editing
+`Data/AI/situational_features.json` or the base scoring profile. Those terms are
+transient strategy bias, not durable learned features; if a concept proves useful
+across games, promote it through the registry/scaffold workflow above and validate
+it with tuning/self-play.
+
 ### Why situational features (research summary)
 In linear-ML terms these are **feature crosses / conditional indicators**: sparse
 binary (or small-integer) features that fire only in specific states. A linear

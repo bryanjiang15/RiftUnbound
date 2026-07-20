@@ -85,6 +85,8 @@ See `Docs/coding-style.md` for full guidelines. Summary:
 - `Docs/Game Rules/riftbound-implementation-rules.md` — engine behavior, console commands
 - `Docs/Game Rules/riftbound-card-data-schema.md` — JSON schema, effect registry
 - `Docs/Game Rules/simulation-gaps-implementation-plan.md` — known gaps / status
+- `ai_agent/docs/Scoring_Features_Reference.md` — search scoring feature registry and export workflow
+- `ai_agent/docs/Goal_Oriented_Strategist.md` — `RIFTBOUND_GOALS`, `/goals`, and search overlay flow
 
 ## Testing
 
