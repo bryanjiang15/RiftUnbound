@@ -32,6 +32,7 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from . import planner as planner_module
 from . import router as router_module
+from . import search_metrics as search_metrics_module
 from . import skills as skill_module
 from . import strategist as strategist_module
 from .goal_compiler import ProfileOverlay, compile_goals, overlay_delta, overlay_delta_breakdown
@@ -446,6 +447,59 @@ TOOLS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_for",
+            "description": (
+                "Find candidate lines that ACHIEVE specific, concrete conditions "
+                "this turn. Give a list of constraint clauses; each names an entity "
+                "and an absolute quantity to hit (e.g. keep a unit alive, get a "
+                "unit to N Might, hold a battlefield, cap the opponent's hand). "
+                "Lines are ranked by how well they satisfy ALL clauses (weakest "
+                "link), with a per-clause breakdown showing which condition binds — "
+                "use that to refine. Filters the engine's pre-computed lines; it "
+                "does not simulate anything new. A clause = "
+                "{metric, comparator (>=|<=|==), threshold, target}. Metrics:\n"
+                + search_metrics_module.vocabulary_block()
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "constraints": {
+                        "type": "array",
+                        "description": "1-6 condition clauses, ANDed by default.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "metric": {"type": "string", "enum": search_metrics_module.metric_enum()},
+                                "comparator": {"type": "string", "enum": [">=", "<=", "=="]},
+                                "threshold": {"type": "number"},
+                                "target": {
+                                    "type": "string",
+                                    "description": "Entity id fixed by the metric's subject: unit id, battlefield id, 'me'/'opponent', or card id. Omit for this-turn metrics.",
+                                },
+                                "weight": {"type": "string", "enum": ["low", "med", "high"]},
+                                "label": {"type": "string"},
+                            },
+                            "required": ["metric", "comparator", "threshold"],
+                        },
+                    },
+                    "combine": {
+                        "type": "string",
+                        "enum": ["all", "any", "weighted"],
+                        "description": "How to fold clause satisfaction: all=weakest-link (default), any=max, weighted=by clause weight.",
+                    },
+                    "top_n": {"type": "integer", "description": "Max matching lines to return (default 5)."},
+                    "min_satisfaction": {
+                        "type": "number",
+                        "description": "Keep lines at/above this combined satisfaction 0..1 (default any progress; 1.0 = fully satisfied only).",
+                    },
+                },
+                "required": ["constraints"],
+            },
+        },
+    },
 ]
 
 
@@ -475,6 +529,13 @@ def _dispatch_tool(name: str, arguments: dict) -> Any:
         return skill_module.evaluate_position()
     if name == "search_turn":
         return skill_module.search_turn(arguments.get("top_n", 5))
+    if name == "search_for":
+        return skill_module.search_for(
+            arguments.get("constraints", []),
+            combine=arguments.get("combine", "all"),
+            top_n=arguments.get("top_n", 5),
+            min_satisfaction=arguments.get("min_satisfaction", 0.0),
+        )
     return f"Unknown skill: {name}"
 
 
@@ -1045,6 +1106,24 @@ def _line_move_strings(line: CandidateLine) -> list[str]:
     return [_line_move_command(m) for m in line.moves]
 
 
+def _build_search_corpus(lines: Optional[list[CandidateLine]]) -> list[dict]:
+    """Full candidate-line corpus for the search_for tool.
+
+    Unlike _summarize_lines_for_strategist this keeps each line's search_state (the
+    concrete post-line snapshot search_for resolves clauses against) while dropping
+    everything the tool does not read.
+    """
+    out: list[dict] = []
+    for line in lines or []:
+        out.append({
+            "line_id": line.line_id,
+            "moves": _line_move_strings(line),
+            "score": float(line.score),
+            "search_state": line.search_state or {},
+        })
+    return out
+
+
 def _summarize_lines_for_strategist(
     lines: list[CandidateLine], *, top_n: int = 5, top_terms: int = 4
 ) -> list[dict]:
@@ -1133,6 +1212,8 @@ async def build_goal_overlay(
         scout_summaries,
         search_stats.model_dump() if search_stats else {},
     )
+    # Install the full corpus (with per-line search_state) for the search_for tool.
+    skill_module.set_search_corpus(_build_search_corpus(candidate_lines))
     try:
         goal_set, was_cached = await _strategist.goals(
             client=get_client(),
@@ -1146,8 +1227,9 @@ async def build_goal_overlay(
         )
     finally:
         # Clear so a later decision in the same turn (or a turn with no scout)
-        # never serves stale lines through search_turn.
+        # never serves stale lines through search_turn / search_for.
         skill_module.set_search_context(None)
+        skill_module.set_search_corpus(None)
     overlay = compile_goals(goal_set)
     if not was_cached:
         _log_goals(game_id, brief_state, goal_set, overlay)

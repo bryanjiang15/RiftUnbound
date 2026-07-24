@@ -166,6 +166,7 @@ func _add_leaf(leaves: Array, node: Dictionary, sc: GameController, root_snapsho
 	leaf["breakdown"] = scored["breakdown"]
 	leaf["features"] = features
 	leaf["resolved_state"] = _sim.build_delta(root_snapshot, snap, sc.gs)
+	leaf["search_state"] = ScoreModelScript.build_search_state(snap, features, node.get("steps", []))
 	leaves.append(leaf)
 
 
@@ -222,6 +223,7 @@ func _build_candidate_lines(leaves: Array, top_n: int) -> Array:
 			"score_breakdown": leaf.get("breakdown", {}),
 			"features": leaf.get("features", {}),
 			"resolved_state": leaf.get("resolved_state", {}),
+			"search_state": leaf.get("search_state", {}),
 			"opponent_windows": leaf.get("windows", []),
 		})
 	return out

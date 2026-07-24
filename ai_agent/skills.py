@@ -73,6 +73,69 @@ def set_search_context(scout_lines: list[dict] | None, search_stats: dict | None
     _current_scout_stats = search_stats or {}
 
 
+# Full candidate-line corpus (with per-line search_state) the search_for tool
+# filters. Installed alongside the scout summaries; unlike _current_scout_lines
+# this keeps the heavy search_state so predicate clauses can be resolved.
+_current_search_corpus: list[dict] = []
+
+
+def set_search_corpus(corpus: list[dict] | None) -> None:
+    """Install the full candidate-line corpus for the search_for tool.
+
+    Each entry is ``{line_id, moves, score, search_state}``. Called by
+    agent.build_goal_overlay before the strategist runs; cleared (None) after so a
+    later decision without a search never filters stale lines.
+    """
+    global _current_search_corpus
+    _current_search_corpus = corpus or []
+
+
+def search_for(
+    constraints: list[dict] | None = None,
+    combine: str = "all",
+    top_n: int = 5,
+    min_satisfaction: float = 0.0,
+) -> dict[str, Any]:
+    """Find candidate lines that achieve concrete, entity-scoped conditions.
+
+    Each constraint is a clause ``{metric, comparator, threshold, target}`` over
+    the concrete vocabulary (unit Might/health/alive, per-battlefield might &
+    control, player score/hand/runes, this-turn tallies, card_played). Lines are
+    ranked by combined satisfaction (``combine``: all=weakest-link / any / weighted)
+    with a per-clause breakdown so you can see which condition binds. Filters the
+    engine's pre-computed lines for THIS turn — it does not simulate anything new.
+    """
+    from .schemas import PredicateClause
+    from .search_metrics import run_search_for
+
+    if not _current_search_corpus:
+        return {
+            "matches": [],
+            "corpus_size": 0,
+            "note": "No candidate lines available this turn. Use search_turn / evaluate_position instead.",
+        }
+    # Normalize each clause through PredicateClause (comparator + weight synonyms,
+    # type coercion); drop structurally invalid ones rather than crashing.
+    norm: list[dict] = []
+    for c in constraints or []:
+        if not isinstance(c, dict):
+            continue
+        try:
+            norm.append(PredicateClause.model_validate(c).model_dump())
+        except Exception:
+            continue
+    if not norm:
+        return {
+            "matches": [],
+            "corpus_size": len(_current_search_corpus),
+            "note": "search_for needs at least one valid constraint clause {metric, comparator, threshold, target}.",
+        }
+    return run_search_for(
+        _current_search_corpus, norm, combine=combine,
+        top_n=top_n, min_satisfaction=min_satisfaction,
+    )
+
+
 # ── Read Skills ───────────────────────────────────────────────────────────────
 
 
