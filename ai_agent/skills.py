@@ -90,52 +90,6 @@ def set_search_corpus(corpus: list[dict] | None) -> None:
     _current_search_corpus = corpus or []
 
 
-def search_for(
-    constraints: list[dict] | None = None,
-    combine: str = "all",
-    top_n: int = 5,
-    min_satisfaction: float = 0.0,
-) -> dict[str, Any]:
-    """Find candidate lines that achieve concrete, entity-scoped conditions.
-
-    Each constraint is a clause ``{metric, comparator, threshold, target}`` over
-    the concrete vocabulary (unit Might/health/alive, per-battlefield might &
-    control, player score/hand/runes, this-turn tallies, card_played). Lines are
-    ranked by combined satisfaction (``combine``: all=weakest-link / any / weighted)
-    with a per-clause breakdown so you can see which condition binds. Filters the
-    engine's pre-computed lines for THIS turn — it does not simulate anything new.
-    """
-    from .schemas import PredicateClause
-    from .search_metrics import run_search_for
-
-    if not _current_search_corpus:
-        return {
-            "matches": [],
-            "corpus_size": 0,
-            "note": "No candidate lines available this turn. Use search_turn / evaluate_position instead.",
-        }
-    # Normalize each clause through PredicateClause (comparator + weight synonyms,
-    # type coercion); drop structurally invalid ones rather than crashing.
-    norm: list[dict] = []
-    for c in constraints or []:
-        if not isinstance(c, dict):
-            continue
-        try:
-            norm.append(PredicateClause.model_validate(c).model_dump())
-        except Exception:
-            continue
-    if not norm:
-        return {
-            "matches": [],
-            "corpus_size": len(_current_search_corpus),
-            "note": "search_for needs at least one valid constraint clause {metric, comparator, threshold, target}.",
-        }
-    return run_search_for(
-        _current_search_corpus, norm, combine=combine,
-        top_n=top_n, min_satisfaction=min_satisfaction,
-    )
-
-
 # ── Read Skills ───────────────────────────────────────────────────────────────
 
 
@@ -282,24 +236,42 @@ def simulate_move(move: dict) -> dict:
     """
     Return the engine-truth result of playing this move, as structured facts.
 
-    Phase 2.5: outcomes are computed by Godot's rules engine on a clone of the
-    live state (not guessed). Godot pre-simulates each legal move and inlines the
-    result into the brief state keyed by the command string; this skill looks up
-    that SimResult. The returned dict separates the deterministic
-    `resolved_if_unanswered` line (facts the agent may assert) from a
-    `response_window` flag (a hidden opponent choice the agent must hedge).
+    Phase 2: prefers a live POST /engine/simulate against Godot's pinned state.
+    Falls back to the Phase-2.5 pre-sim lookup in brief_state when the engine
+    server is unreachable (§6 fail-safe).
     """
-    bs = _current_brief_state
     command = _move_to_command(move)
+    live = _live_simulate([command])
+    if live is not None:
+        # Match the single-move SimResult shape (response_window singular).
+        windows = live.get("opponent_windows", []) or []
+        result = {
+            "legal": live.get("legal", False),
+            "source": "live_engine",
+        }
+        if live.get("error"):
+            result["error"] = live["error"]
+        if live.get("resolved_if_unanswered") is not None:
+            result["resolved_if_unanswered"] = live["resolved_if_unanswered"]
+        if windows:
+            result["response_window"] = windows[0]
+        if live.get("first_illegal_move") is not None:
+            result["legal"] = False
+        return result
+
+    bs = _current_brief_state
     sims = bs.get("move_simulations", {}) or {}
 
     if command in sims:
-        return sims[command]
+        out = dict(sims[command])
+        out["source"] = "presim_lookup"
+        return out
 
     # Not pre-simulated. Tell the model plainly rather than inventing an outcome.
     legal = command in (bs.get("legal_moves", []) or [])
     return {
         "legal": legal,
+        "source": "unavailable",
         "error": (
             f"No engine simulation available for '{command}'. "
             "Do not assert its outcome as fact — reason from the labeled "
@@ -313,19 +285,23 @@ def simulate_line(moves: list) -> dict:
     Return the engine-truth result of a scripted multi-step line of YOUR OWN
     moves (e.g. move a unit into combat, then play a trick to win it).
 
-    Phase 2.5: Godot pre-simulates auto-detected combat lines (a contested move
-    followed by an affordable Action/Reaction). This looks up the matching
-    LineResult. `resolved_if_unanswered` is the deterministic outcome assuming the
-    opponent does not respond; each entry in `opponent_windows` is a point where
-    the opponent could have answered (hedge those).
+    Phase 2: prefers live /engine/simulate; falls back to pre-sim line lookup.
     """
-    bs = _current_brief_state
     commands = [_move_to_command(m) for m in (moves or [])]
+    live = _live_simulate(commands)
+    if live is not None:
+        out = dict(live)
+        out["source"] = "live_engine"
+        return out
+
+    bs = _current_brief_state
     key = " ; ".join(commands)
     line_sims = bs.get("line_simulations", {}) or {}
 
     if key in line_sims:
-        return line_sims[key]
+        out = dict(line_sims[key])
+        out["source"] = "presim_lookup"
+        return out
 
     # Fall back to chaining single-move sims where possible so the agent still
     # gets the first move's verified outcome rather than nothing.
@@ -337,6 +313,7 @@ def simulate_line(moves: list) -> dict:
             "applied_moves": [first],
             "stopped_reason": "line_not_presimulated",
             "resolved_if_unanswered": move_sims[first].get("resolved_if_unanswered"),
+            "source": "presim_lookup",
             "error": (
                 "Only the first move of this line was simulated by the engine. "
                 "Treat later steps as uncertain and hedge."
@@ -346,11 +323,191 @@ def simulate_line(moves: list) -> dict:
         "legal": False,
         "applied_moves": [],
         "stopped_reason": "not_simulated",
+        "source": "unavailable",
         "error": (
             f"No engine simulation available for the line '{key}'. "
             "Do not assert its outcome as fact."
         ),
     }
+
+
+def _live_simulate(commands: list[str]) -> dict | None:
+    """Try the live engine server; return None to fall back to pre-sim lookup."""
+    if not commands:
+        return None
+    try:
+        from . import engine_client
+
+        return engine_client.simulate(commands)
+    except Exception:
+        # EngineUnavailable or unexpected — fail safe to Phase-1 lookup.
+        return None
+
+
+def search_for(
+    constraints: list[dict] | None = None,
+    combine: str = "all",
+    top_n: int = 5,
+    min_satisfaction: float = 0.0,
+) -> dict[str, Any]:
+    """Find candidate lines that achieve concrete, entity-scoped conditions.
+
+    Each constraint is a clause ``{metric, comparator, threshold, target}`` over
+    the concrete vocabulary (unit Might/health/alive, per-battlefield might &
+    control, player score/hand/runes, this-turn tallies, card_played). Lines are
+    ranked by combined satisfaction (``combine``: all=weakest-link / any / weighted)
+    with a per-clause breakdown so you can see which condition binds.
+
+    Phase 2: prefers a live /engine/search (fresh corpus + search_state), then
+    filters in Python. Falls back to the Phase-1 pre-computed corpus when the
+    engine server is unavailable.
+    """
+    from .schemas import PredicateClause
+    from .search_metrics import run_search_for
+
+    # Normalize each clause through PredicateClause (comparator + weight synonyms,
+    # type coercion); drop structurally invalid ones rather than crashing.
+    norm: list[dict] = []
+    for c in constraints or []:
+        if not isinstance(c, dict):
+            continue
+        try:
+            norm.append(PredicateClause.model_validate(c).model_dump())
+        except Exception:
+            continue
+    if not norm:
+        return {
+            "matches": [],
+            "corpus_size": len(_current_search_corpus),
+            "source": "not_evaluated",
+            "note": "search_for needs at least one valid constraint clause {metric, comparator, threshold, target}.",
+        }
+
+    corpus, source = _search_corpus_for_filter(top_n=max(top_n, 8))
+    if not corpus:
+        return {
+            "matches": [],
+            "corpus_size": 0,
+            "source": source,
+            "note": "No candidate lines available this turn. Use search_turn / evaluate_position instead.",
+        }
+    result = run_search_for(
+        corpus, norm, combine=combine,
+        top_n=top_n, min_satisfaction=min_satisfaction,
+    )
+    result["source"] = source
+    return result
+
+
+def _search_corpus_for_filter(top_n: int = 8) -> tuple[list[dict], str]:
+    """Return (corpus, source) preferring a live engine search."""
+    live = _live_search({
+        "top_n": top_n,
+        "budget": {
+            "node_budget": 120,
+            "time_budget_ms": 500,
+            "max_depth": 8,
+            "beam_width": 6,
+        },
+    })
+    if live is not None and live.get("legal", True) is not False:
+        lines = live.get("candidate_lines", []) or []
+        corpus = [
+            {
+                "line_id": str(line.get("line_id", "")),
+                "moves": list(line.get("moves", []) or []),
+                "score": float(line.get("score", 0.0) or 0.0),
+                "search_state": dict(line.get("search_state", {}) or {}),
+            }
+            for line in lines
+            if isinstance(line, dict)
+        ]
+        if corpus:
+            return corpus, "live_engine"
+    if _current_search_corpus:
+        return list(_current_search_corpus), "presim_corpus"
+    return [], "unavailable"
+
+
+def _live_search(payload: dict) -> dict | None:
+    try:
+        from . import engine_client
+
+        return engine_client.search(payload)
+    except Exception:
+        return None
+
+
+def deepen(
+    line_id: str | None = None,
+    extra_depth: int = 4,
+    moves: list | None = None,
+) -> dict[str, Any]:
+    """Re-search from an existing candidate line with more depth/budget.
+
+    Pass ``line_id`` (resolved against the current search corpus) or an explicit
+    ``moves`` prefix. Trailing ``end turn`` is stripped so the engine continues
+    from the last actionable position along the line.
+    """
+    seed = _resolve_deepen_seed(line_id, moves)
+    if seed is None:
+        return {
+            "legal": False,
+            "candidate_lines": [],
+            "error": (
+                "deepen needs a known line_id from search_for/search_turn "
+                "or an explicit moves prefix."
+            ),
+            "source": "unavailable",
+        }
+    extra = max(1, int(extra_depth or 4))
+    payload = {
+        "seed_moves": seed,
+        "top_n": 5,
+        "budget": {
+            "max_depth": 6 + extra,
+            "node_budget": 80 + extra * 40,
+            "time_budget_ms": 400 + extra * 100,
+            "beam_width": 6,
+        },
+    }
+    live = _live_search(payload)
+    if live is None:
+        return {
+            "legal": False,
+            "candidate_lines": [],
+            "seed_moves": seed,
+            "error": "Live engine unavailable; deepen requires /engine/search.",
+            "source": "unavailable",
+        }
+    out = dict(live)
+    out["seed_moves"] = seed
+    out["source"] = "live_engine"
+    out["extra_depth"] = extra
+    return out
+
+
+def _resolve_deepen_seed(line_id: str | None, moves: list | None) -> list[str] | None:
+    cmds: list[str] = []
+    if moves:
+        cmds = [_move_to_command(m) for m in moves]
+    elif line_id:
+        target = str(line_id)
+        for entry in _current_search_corpus:
+            if str(entry.get("line_id", "")) == target:
+                cmds = [str(m) for m in (entry.get("moves", []) or [])]
+                break
+        if not cmds:
+            for entry in _current_scout_lines:
+                if str(entry.get("line_id", "")) == target:
+                    cmds = [str(m) for m in (entry.get("moves", []) or [])]
+                    break
+    if not cmds:
+        return None
+    # Drop trailing end-turn so search can still expand from the tip.
+    while cmds and cmds[-1].strip().lower() == "end turn":
+        cmds.pop()
+    return cmds or None
 
 
 def _move_to_command(move: dict) -> str:

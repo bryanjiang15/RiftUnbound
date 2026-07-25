@@ -243,7 +243,7 @@ def test_request_plan_falls_back_when_schema_never_matches():
 
 def test_request_plan_logs_tool_trace_as_planner_stage(tmp_path, monkeypatch):
     skill_module.set_state(_RICH_STATE)
-    monkeypatch.setattr(agent_module, "_TOOLS_LOG_PATH", tmp_path / "agent_tools.log")
+    monkeypatch.setattr(agent_module, "_SEARCH_LOG_PATH", tmp_path / "agent_search.log")
     monkeypatch.setattr(agent_module, "_LOG_INPUTS", True)
 
     plan_json = (
@@ -268,7 +268,7 @@ def test_request_plan_logs_tool_trace_as_planner_stage(tmp_path, monkeypatch):
         )
     )
 
-    content = (tmp_path / "agent_tools.log").read_text(encoding="utf-8")
-    assert "Stage: planner" in content
+    content = (tmp_path / "agent_search.log").read_text(encoding="utf-8")
+    assert "planner" in content
     assert "evaluate_position" in content
     assert "intent='pressure_battlefield'" in content

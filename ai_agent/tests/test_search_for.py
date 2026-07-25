@@ -250,5 +250,6 @@ def test_skill_search_for_all_invalid_clauses():
     try:
         res = skills.search_for(constraints=["not-a-dict", 42])
         assert res["matches"] == [] and "at least one valid constraint" in res["note"]
+        assert res["source"] == "not_evaluated"
     finally:
         skills.set_search_corpus(None)

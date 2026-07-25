@@ -56,6 +56,19 @@ from .agent import (
 )
 from .memory import DecisionLogger, Memory
 from .schemas import Decision, DecisionRequest, GoalsRequest, Move
+from .search_log_fmt import (
+    BOLD,
+    CYAN,
+    DIM,
+    MAGENTA,
+    YELLOW,
+    format_banner,
+    format_breakdown_line,
+    format_delta_line,
+    format_line_header,
+    format_stats_line,
+    paint,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -226,10 +239,15 @@ async def _lifespan(app: FastAPI):
             encoding="utf-8",
         )
         with open(_SEARCH_LOG_PATH, "w", encoding="utf-8") as f:
+            started = __import__("datetime").datetime.utcnow().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
             f.write(
-                f"Riftbound AI Agent — Search & Goal Log\nStarted: "
-                f"{__import__('datetime').datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\n"
-                + "═" * 72 + "\n"
+                paint("Riftbound AI Agent — Search & Goal Log", BOLD + CYAN)
+                + "\n"
+                + f"Started: {started} UTC\n"
+                + paint("═" * 72, DIM)
+                + "\n"
             )
     logger.info("Riftbound AI agent service started.")
     _provider = os.environ.get("RIFTBOUND_LLM_PROVIDER", "openai").strip().lower()
@@ -242,6 +260,10 @@ async def _lifespan(app: FastAPI):
         logger.info("OpenAI API key: %s", "set" if os.environ.get("OPENAI_API_KEY") else "NOT SET")
     logger.info("Input logging: %s", "ENABLED → agent_inputs.log" if _LOG_INPUTS else "disabled")
     logger.info("Plan logging: %s", "ENABLED → agent_plans.log" if _LOG_INPUTS else "disabled")
+    logger.info(
+        "Tool logging: %s",
+        "ENABLED → agent_search.log" if _LOG_INPUTS else "disabled",
+    )
     logger.info("Game state logging: %s", "ENABLED → agent_game_state.log" if _LOG_INPUTS else "disabled")
     logger.info("Pipeline mode: %s", _pipeline_mode)
     logger.info("Search mode: %s", "ENABLED" if _search_enabled else "disabled")
@@ -283,22 +305,18 @@ def _log_search_payload(game_id: str, request: DecisionRequest) -> None:
         return
     try:
         mode = request.search_stats.mode if request.search_stats else "main"
-        lines = [
-            "",
-            "═" * 72,
+        title = (
             f"Search payload [{mode}]: game={game_id} "
             f"turn={request.brief_state.turn_number} "
-            f"type={request.brief_state.decision_type}",
-            "═" * 72,
-        ]
+            f"type={request.brief_state.decision_type}"
+        )
+        lines = format_banner(title)
         if request.search_stats:
-            lines.append("Stats:")
-            lines.append(json.dumps(request.search_stats.model_dump(), indent=2))
-        lines.append("Candidate lines:")
+            lines.append(format_stats_line(request.search_stats.model_dump()))
+        lines.append(paint("Candidate lines:", BOLD))
         for line in request.candidate_lines:
             lines.append("")
-            lines.append(f"{line.line_id} | score={line.score:.3f}")
-            lines.append("Steps:")
+            lines.append(format_line_header(line.line_id, float(line.score)))
             commands = [
                 m.to_command() if hasattr(m, "to_command") else str(m)
                 for m in line.moves
@@ -309,18 +327,25 @@ def _log_search_payload(game_id: str, request: DecisionRequest) -> None:
                 context_text = ctx.get("context", "")
                 if kind == "intermediate":
                     note = context_text or "auto-resolved decision"
-                    lines.append(f"  - {cmd}    ← [intermediate] {note}")
+                    lines.append(
+                        f"  - {cmd}    "
+                        f"{paint('← [intermediate]', DIM + YELLOW)} "
+                        f"{paint(note, DIM)}"
+                    )
                 elif context_text:
-                    lines.append(f"  - {cmd}    ({context_text})")
+                    lines.append(f"  - {cmd}    {paint(f'({context_text})', DIM)}")
                 else:
                     lines.append(f"  - {cmd}")
-            lines.append("Breakdown:")
-            lines.append(json.dumps(line.score_breakdown, indent=2, default=str))
-            lines.append("Resolved delta:")
-            lines.append(json.dumps(line.resolved_state, indent=2, default=str))
+            lines.append("  " + format_breakdown_line(line.score_breakdown or {}))
+            lines.append("  " + format_delta_line(line.resolved_state or {}))
             if line.opponent_windows:
-                lines.append("Opponent windows:")
-                lines.append(json.dumps([w.model_dump() for w in line.opponent_windows], indent=2))
+                windows = [w.model_dump() for w in line.opponent_windows]
+                lines.append(
+                    "  "
+                    + paint("Opp windows:", DIM)
+                    + " "
+                    + paint(json.dumps(windows, default=str, separators=(",", ":")), DIM)
+                )
         with open(_SEARCH_LOG_PATH, "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
     except Exception as exc:
@@ -368,16 +393,18 @@ def _log_search_deferral(game_id: str, request: DecisionRequest) -> None:
                 "search ran but returned no candidate lines "
                 "(mid-line execution, or only 'end turn' was legal)"
             )
-        lines = [
-            "",
-            "═" * 72,
+        title = (
             f"Search DEFERRED to {_pipeline_mode} agent: "
-            f"game={game_id} turn={bs.turn_number} type={bs.decision_type}",
-            f"  phase={bs.current_phase} state={bs.current_state} "
-            f"turn_player={bs.turn_player_index} me={bs.my_player_index}",
-            "  Reason: " + "; ".join(reasons),
-            "═" * 72,
-        ]
+            f"game={game_id} turn={bs.turn_number} type={bs.decision_type}"
+        )
+        lines = format_banner(title)
+        lines.extend(
+            [
+                f"  phase={bs.current_phase} state={bs.current_state} "
+                f"turn_player={bs.turn_player_index} me={bs.my_player_index}",
+                "  " + paint("Reason:", MAGENTA) + " " + "; ".join(reasons),
+            ]
+        )
         with open(_SEARCH_LOG_PATH, "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
     except Exception as exc:

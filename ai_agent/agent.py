@@ -39,6 +39,17 @@ from .goal_compiler import ProfileOverlay, compile_goals, overlay_delta, overlay
 from .memory import Memory
 from .prompts import load_prompt
 from .schemas import CandidateLine, Decision, GoalSet, LegalActionOption, Move, Plan, SearchStats
+from .search_log_fmt import (
+    BOLD,
+    CYAN,
+    DIM,
+    GREEN,
+    MAGENTA,
+    RED,
+    YELLOW,
+    format_thin_banner,
+    paint,
+)
 from .system_prompt import build_system_prompt, build_system_prompt_from_modules
 
 logger = logging.getLogger(__name__)
@@ -61,7 +72,6 @@ TRANSIENT_BACKOFF_BASE_S = float(os.environ.get("RIFTBOUND_TRANSIENT_BACKOFF_S",
 
 _INPUT_LOG_PATH = Path(__file__).resolve().parent / "agent_inputs.log"
 _PLAN_LOG_PATH = Path(__file__).resolve().parent / "agent_plans.log"
-_TOOLS_LOG_PATH = Path(__file__).resolve().parent / "agent_tools.log"
 _GAME_STATE_LOG_PATH = Path(__file__).resolve().parent / "agent_game_state.log"
 # Goals + per-line score modifiers are logged here, alongside the engine's
 # candidate-line search payload (main.py writes the lines, agent.py writes the
@@ -458,8 +468,8 @@ TOOLS: list[dict] = [
                 "unit to N Might, hold a battlefield, cap the opponent's hand). "
                 "Lines are ranked by how well they satisfy ALL clauses (weakest "
                 "link), with a per-clause breakdown showing which condition binds — "
-                "use that to refine. Filters the engine's pre-computed lines; it "
-                "does not simulate anything new. A clause = "
+                "use that to refine. Prefers a live engine search when available; "
+                "otherwise filters the turn's pre-computed candidate lines. A clause = "
                 "{metric, comparator (>=|<=|==), threshold, target}. Metrics:\n"
                 + search_metrics_module.vocabulary_block()
             ),
@@ -500,6 +510,45 @@ TOOLS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "deepen",
+            "description": (
+                "Look harder at an existing candidate line: re-run the engine search "
+                "seeded at that line's moves with extra depth/budget. Use when a "
+                "line from search_for / search_turn looks critical and you want "
+                "confirmation or better continuations. Pass line_id from a prior "
+                "result, or an explicit moves prefix."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "line_id": {
+                        "type": "string",
+                        "description": "Candidate line id from search_for / search_turn (e.g. line-1).",
+                    },
+                    "extra_depth": {
+                        "type": "integer",
+                        "description": "Extra search depth to add (default 4).",
+                    },
+                    "moves": {
+                        "type": "array",
+                        "description": "Optional explicit move prefix if line_id is unknown.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "action": {"type": "string"},
+                                "parameters": {"type": "object"},
+                            },
+                            "required": ["action"],
+                        },
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 
@@ -535,6 +584,12 @@ def _dispatch_tool(name: str, arguments: dict) -> Any:
             combine=arguments.get("combine", "all"),
             top_n=arguments.get("top_n", 5),
             min_satisfaction=arguments.get("min_satisfaction", 0.0),
+        )
+    if name == "deepen":
+        return skill_module.deepen(
+            line_id=arguments.get("line_id"),
+            extra_depth=arguments.get("extra_depth", 4),
+            moves=arguments.get("moves"),
         )
     return f"Unknown skill: {name}"
 
@@ -801,45 +856,56 @@ def _log_tools(
     outcome: str,
     stage: str = "actor",
 ) -> None:
-    """Write the tool calls made while resolving one decision to agent_tools.log.
+    """Append Claude/Cursor-style tool calls to the search-and-goal log.
 
-    One entry per decision, keyed by turn / decision_type / current_state, listing
-    every tool the model called (round, name, args) and the terminal outcome
-    (the action chosen, or why it fell back to pass). This makes it possible to
-    see whether a fallback was caused by tool churn or by validator rejection.
+    Each entry lists the tool name, key args, and a one-line ⎿ result summary so
+    you can see what the model investigated alongside the search and goals.
     """
-    if not _LOG_INPUTS:
+    if not _LOG_INPUTS or not tool_trace:
         return
+    from .tool_log_fmt import format_tools_session
+
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    sep = "─" * 72
-    lines = [
-        "",
-        sep,
-        f"Turn {brief_state.get('turn_number', '?')}  "
-        f"Type: {brief_state.get('decision_type', '?')}  "
-        f"State: {brief_state.get('current_state', '?')}  "
-        f"Stage: {stage}  "
-        f"Game: {game_id}  [{ts}]",
-        sep,
-        f"Tool calls: {len(tool_trace)}",
-    ]
-    if tool_trace:
-        for entry in tool_trace:
-            args = entry.get("args", {})
-            args_str = json.dumps(args, default=str) if args else "{}"
-            lines.append(
-                f"  round {entry.get('round', '?')}: "
-                f"{entry.get('name', '?')}({args_str})"
-            )
-    else:
-        lines.append("  (none — model answered without consulting any tool)")
-    lines.append(f"Outcome: {outcome}")
-    lines.append("")
+    lines = format_tools_session(
+        stage=stage,
+        turn=brief_state.get("turn_number", "?"),
+        decision_type=brief_state.get("decision_type", "?"),
+        state=brief_state.get("current_state", "?"),
+        game_id=game_id,
+        ts=ts,
+        tool_trace=tool_trace,
+        outcome=outcome,
+    )
     try:
-        with _TOOLS_LOG_PATH.open("a", encoding="utf-8") as f:
+        with _SEARCH_LOG_PATH.open("a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
     except OSError as exc:
-        logger.warning("Tools log write failed: %s", exc)
+        logger.warning("Search tool log write failed: %s", exc)
+
+
+def _invoke_traced_tool(
+    tool_trace: list[dict],
+    *,
+    round_num: int,
+    name: str,
+    args: dict,
+) -> str:
+    """Dispatch a tool and record its args/result summary on the trace.
+
+    Returns the string content to append as the tool message for the LLM.
+    """
+    from .tool_log_fmt import summarize_tool_result
+
+    result = _dispatch_tool(name, args)
+    summary = summarize_tool_result(name, result)
+    tool_trace.append({
+        "round": round_num,
+        "name": name,
+        "args": args,
+        "summary": summary,
+    })
+
+    return json.dumps(result) if not isinstance(result, str) else result
 
 
 def _log_game_state_event(
@@ -1243,17 +1309,23 @@ def _log_goals(game_id: str, brief_state: dict, goal_set: "GoalSet", overlay: Pr
     if not _LOG_INPUTS:
         return
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    sep = "─" * 72
-    lines = [
-        "",
-        sep,
+    title = (
         f"Turn {brief_state.get('turn_number', '?')}  "
-        f"Type: {brief_state.get('decision_type', '?')}  Game: {game_id}  [{ts}]",
-        f"GoalSet goals={len(goal_set.goals)}: {goal_set.rationale}",
-    ]
+        f"Type: {brief_state.get('decision_type', '?')}  Game: {game_id}  [{ts}]"
+    )
+    lines = format_thin_banner(title)
+    lines.append(
+        paint(f"GoalSet goals={len(goal_set.goals)}:", BOLD + MAGENTA)
+        + " "
+        + goal_set.rationale
+    )
     for g in goal_set.goals:
-        lines.append(f"  - [{g.kind}] {g.id} ({g.priority}) {g.description}".rstrip())
-    lines.append("Compiled overlay:")
+        kind = paint(f"[{g.kind}]", CYAN)
+        gid = paint(g.id, BOLD)
+        pri = paint(f"({g.priority})", YELLOW)
+        desc = f" {g.description}" if g.description else ""
+        lines.append(f"  - {kind} {gid} {pri}{desc}".rstrip())
+    lines.append(paint("Compiled overlay:", DIM))
     lines.extend(f"  · {note}" for note in overlay.notes)
     lines.append("")
     try:
@@ -1280,14 +1352,11 @@ def _log_overlay_scores(
     if not _LOG_INPUTS or overlay is None or overlay.is_empty():
         return
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    sep = "─" * 72
-    lines = [
-        "",
-        sep,
+    title = (
         f"Turn {brief_state.get('turn_number', '?')}  Goal score modifiers  "
-        f"Game: {game_id}  [{ts}]",
-        sep,
-    ]
+        f"Game: {game_id}  [{ts}]"
+    )
+    lines = format_thin_banner(title)
     rows = []
     for line in candidate_lines:
         parts = overlay_delta_breakdown(
@@ -1300,9 +1369,27 @@ def _log_overlay_scores(
         rows.append((float(line.score) + delta, line.line_id, float(line.score), delta, parts))
     rows.sort(key=lambda r: r[0], reverse=True)
     for adj, lid, base, delta, parts in rows:
-        mark = " ◄ chosen" if lid == chosen_id else ""
-        detail = ", ".join(f"{k}{v:+.2f}" for k, v in parts.items()) if parts else "—"
-        lines.append(f"  {lid}: base={base:.2f} {delta:+.2f} → {adj:.2f}  [{detail}]{mark}")
+        chosen = lid == chosen_id
+        mark = paint(" ◄ chosen", BOLD + GREEN) if chosen else ""
+        lid_s = paint(lid, BOLD + CYAN if chosen else CYAN)
+        delta_s = paint(
+            f"{delta:+.2f}",
+            GREEN if delta > 0 else RED if delta < 0 else DIM,
+        )
+        adj_s = paint(
+            f"{adj:.2f}",
+            BOLD + GREEN if chosen else (GREEN if adj > 0 else RED if adj < 0 else DIM),
+        )
+        if parts:
+            detail = ", ".join(
+                f"{k}{paint(f'{v:+.2f}', GREEN if v > 0 else RED if v < 0 else DIM)}"
+                for k, v in parts.items()
+            )
+        else:
+            detail = paint("—", DIM)
+        lines.append(
+            f"  {lid_s}: base={base:.2f} {delta_s} → {adj_s}  [{detail}]{mark}"
+        )
     lines.append("")
     try:
         with _SEARCH_LOG_PATH.open("a", encoding="utf-8") as f:
@@ -1400,6 +1487,7 @@ async def choose_line(
     ]
     _log_input(game_id, brief_state, messages)
     tools = [t for t in TOOLS if t.get("function", {}).get("name") == "get_opponent_history"]
+    tool_trace: list[dict] = []
     for round_num in range(3):
         try:
             response = await _chat_create(
@@ -1420,8 +1508,13 @@ async def choose_line(
         if msg.tool_calls:
             messages.append(msg)  # type: ignore[arg-type]
             for tc in msg.tool_calls:
-                result = _dispatch_tool(tc.function.name, {})
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+                result_text = _invoke_traced_tool(
+                    tool_trace,
+                    round_num=round_num,
+                    name=tc.function.name,
+                    args={},
+                )
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
             continue
         parsed = _parse_line_choice(msg.content or "")
         if parsed and parsed["chosen_line_id"] in legal_ids:
@@ -1430,7 +1523,7 @@ async def choose_line(
             first_move = _move_from_command(commands[0]) if commands else None
             if first_move is not None:
                 _log_overlay_scores(game_id, brief_state, candidate_lines, overlay, chosen_id=chosen.line_id)
-                return Decision(
+                decision = Decision(
                     reasoning=str(parsed.get("reasoning", "Selected searched line.")),
                     move=first_move,
                     confidence="high",
@@ -1438,6 +1531,14 @@ async def choose_line(
                     chosen_line_id=chosen.line_id,
                     selector_source="llm",
                 )
+                _log_tools(
+                    game_id,
+                    brief_state,
+                    tool_trace=tool_trace,
+                    outcome=f"chose {chosen.line_id}",
+                    stage="selector",
+                )
+                return decision
         messages.append({"role": "user", "content": load_prompt("line_selector_retry")})
     # Fallback: pick the highest-scoring line that actually starts with a usable
     # move. A line with no parseable first move cannot be committed (Godot would
@@ -1445,6 +1546,13 @@ async def choose_line(
     # pass without committing a line if none qualify.
     decision = _argmax_line(candidate_lines, source="fallback", overlay=overlay)
     _log_overlay_scores(game_id, brief_state, candidate_lines, overlay, chosen_id=decision.chosen_line_id)
+    _log_tools(
+        game_id,
+        brief_state,
+        tool_trace=tool_trace,
+        outcome=f"fallback chose {decision.chosen_line_id or 'pass'}",
+        stage="selector",
+    )
     return decision
 
 
@@ -1602,11 +1710,12 @@ async def _run_actor_loop(
                     args = json.loads(tc.function.arguments or "{}")
                 except json.JSONDecodeError:
                     args = {}
-                tool_trace.append(
-                    {"round": round_num, "name": tc.function.name, "args": args}
+                result_text = _invoke_traced_tool(
+                    tool_trace,
+                    round_num=round_num,
+                    name=tc.function.name,
+                    args=args,
                 )
-                result = _dispatch_tool(tc.function.name, args)
-                result_text = json.dumps(result) if not isinstance(result, str) else result
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
             continue
 
