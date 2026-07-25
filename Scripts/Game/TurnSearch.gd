@@ -62,6 +62,9 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 	if root_sc == null:
 		return {"candidate_lines": [], "search_stats": _stats(0, 0, 0, 0, beam_width, 0, "clone_failed")}
 	controllers.append(root_sc)
+	# Snapshot the pre-seed root so score features stay relative to the live
+	# decision state (not the post-seed tip). Seeded deepen/search_for still
+	# reports deltas from the true root.
 	var root_snapshot := ScoreModelScript.snapshot(root_sc.gs, _ai_index)
 	var root_hash := ScoreModelScript.structural_hash(root_snapshot)
 	# Ranker for the AI's own forced sub-decisions (e.g. which card to discard):
@@ -73,8 +76,45 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 		return float(_scorer.score_with_breakdown(feats)["score"])
 	var seen: Dictionary = {}
 	seen[root_hash] = true
-	var frontier: Array = [{"sc": root_sc, "steps": [], "windows": [], "score": -INF, "breakdown": {}, "resolved_state": {}}]
+	var seed_steps: Array = []
+	var seed_windows: Array = []
+	var seed_moves: Array = options.get("seed_moves", [])
+	if not seed_moves.is_empty():
+		var seed_err := _apply_seed_moves(root_sc, seed_moves, seed_steps, seed_windows, choice_ranker)
+		if seed_err != "":
+			for sc in controllers:
+				if is_instance_valid(sc):
+					sc.free()
+			return {
+				"legal": false,
+				"error": seed_err,
+				"candidate_lines": [],
+				"search_stats": _stats(0, 0, 0, 0, beam_width, 0, "seed_failed"),
+			}
+		var seed_hash := ScoreModelScript.structural_hash(ScoreModelScript.snapshot(root_sc.gs, _ai_index))
+		seen[seed_hash] = true
+	var frontier: Array = [{
+		"sc": root_sc, "steps": seed_steps, "windows": seed_windows,
+		"score": -INF, "breakdown": {}, "resolved_state": {},
+	}]
 	var leaves: Array = []
+	# Seed already ended the turn / game — nothing left to expand.
+	if not seed_steps.is_empty() and (
+		root_sc.gs.game_over
+		or (_mode == "main" and str(seed_moves[seed_moves.size() - 1]) == "end turn")
+		or (_mode == "reactive" and not _ai_has_response_window(root_sc.gs))
+	):
+		_add_leaf(leaves, frontier[0], root_sc, root_snapshot)
+		var elapsed_seed := Time.get_ticks_msec() - start_ms
+		var seeded_lines := _build_candidate_lines(leaves, top_n)
+		for sc in controllers:
+			if is_instance_valid(sc):
+				sc.free()
+		return {
+			"legal": true,
+			"candidate_lines": seeded_lines,
+			"search_stats": _stats(0, 0, 0, seed_steps.size(), beam_width, elapsed_seed, "seed_leaf"),
+		}
 	while not frontier.is_empty():
 		if nodes_explored >= node_budget:
 			stopped_reason = "node_budget"
@@ -154,7 +194,46 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 	for sc in controllers:
 		if is_instance_valid(sc):
 			sc.free()
-	return {"candidate_lines": candidate_lines, "search_stats": _stats(nodes_explored, branches_expanded, transposition_hits, max_depth_reached, beam_width, elapsed, stopped_reason)}
+	return {
+		"legal": true,
+		"candidate_lines": candidate_lines,
+		"search_stats": _stats(nodes_explored, branches_expanded, transposition_hits, max_depth_reached, beam_width, elapsed, stopped_reason),
+	}
+
+
+# Apply a forced move prefix on the root sim controller before beam expansion.
+# Records scripted + intermediate steps the same way normal expansion does so
+# deepen()/seeded search_for lines stay replayable. Returns "" on success or an
+# error string if a seed command is illegal.
+func _apply_seed_moves(
+	sc: GameController,
+	seed_moves: Array,
+	steps: Array,
+	windows: Array,
+	choice_ranker: Callable,
+) -> String:
+	for raw in seed_moves:
+		var cmd_str := str(raw)
+		if cmd_str.strip_edges() == "":
+			continue
+		var scripted_pre_hash := ScoreModelScript.structural_hash(
+			ScoreModelScript.snapshot(sc.gs, _ai_index)
+		)
+		sc.submit_command(_ai_index, cmd_str)
+		if sc.last_command_error:
+			return "seed move illegal: %s" % cmd_str
+		steps.append({
+			"command": cmd_str, "context": "", "kind": "scripted",
+			"pre_hash": scripted_pre_hash,
+		})
+		var child_windows: Array = []
+		var ai_steps: Array = []
+		_sim.advance_to_quiescence(sc, cmd_str, child_windows, ai_steps, choice_ranker)
+		steps.append_array(ai_steps)
+		windows.append_array(child_windows)
+		if sc.gs.game_over:
+			break
+	return ""
 
 
 func _add_leaf(leaves: Array, node: Dictionary, sc: GameController, root_snapshot: Dictionary) -> void:

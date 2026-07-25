@@ -1,9 +1,9 @@
 # `search_for` Tool Schema — Reference
 
-Status: **proposed / reference for implementation.** This is the contract to
-build `search_for` against (Deliberative Reasoning Toolkit §4.2, Phase 1). It
-also defines the `PredicateClause` type that replaces the weak flat `Goal`
-schema (`ai_agent/schemas.py:349`).
+Status: **implemented (Phase 1–2).** Phase 1 shipped the `PredicateClause` /
+`search_for` contract over pre-computed `search_state` lines. Phase 2 prefers a
+live `/engine/search` corpus when Godot's `EngineServer` is pinned, with the same
+filter semantics and a fail-safe back to the Phase-1 corpus.
 
 Companion: `ai_agent/docs/Deliberative_Reasoning_Toolkit.md` (why this tool
 exists), `ai_agent/docs/Goal_Oriented_Strategist.md` (the compiler/whitelist this

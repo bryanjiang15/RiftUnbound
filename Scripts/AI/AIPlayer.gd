@@ -27,6 +27,8 @@ const MAX_RETRIES := 3         # max rejection retry attempts
 const TurnSearchScript = preload("res://Scripts/Game/TurnSearch.gd")
 const ScoringProfileScript = preload("res://Scripts/Game/ScoringProfile.gd")
 const MulliganHeuristicScript = preload("res://Scripts/AI/MulliganHeuristic.gd")
+const EngineServerScript = preload("res://Scripts/AI/EngineServer.gd")
+const ENGINE_PORT_DEFAULT := 8766
 
 # Resolved in setup() so it can differ per OS (see _agent_base_url()).
 var AGENT_URL := ""
@@ -103,6 +105,11 @@ var _move_seq: int = 0
 const SelfPlayCaptureLogScript = preload("res://Scripts/AI/SelfPlayCaptureLog.gd")
 var _capture_mode: bool = false
 
+# Phase 2: live engine HTTP server so Python tools can simulate/search mid-turn
+# while this seat awaits /goals or /decision. Main loop pumps accept/read/write;
+# heavy work runs off-thread against a per-decision pinned GameState clone.
+var _engine_server = null  # EngineServer instance when live tools are enabled
+
 
 func setup(gc: GameController, pi: int, scoring_profile_path: String = "") -> void:
 	controller = gc
@@ -150,11 +157,43 @@ func setup(gc: GameController, pi: int, scoring_profile_path: String = "") -> vo
 	# In capture mode the server isn't running, so skip the /health handshake.
 	if not _capture_mode:
 		_fetch_search_config()
+		_maybe_start_engine_server()
 	# Phase 1: detect game-over and opponent actions
 	controller.board_updated.connect(_on_board_updated)
 	controller.game_log_message.connect(_on_game_log_message)
 	# Phase 3: per-card statistics
 	controller.card_event.connect(_on_card_event)
+
+
+# Phase 2: stand up the live engine HTTP server unless explicitly disabled.
+# Default ON (Python tools need a callback target); set RIFTBOUND_ENGINE_SERVER=0
+# to skip. Offline capture never starts it (no Python agent in the loop).
+func _maybe_start_engine_server() -> void:
+	var flag := OS.get_environment("RIFTBOUND_ENGINE_SERVER").strip_edges().to_lower()
+	if flag in ["0", "false", "no", "off"]:
+		return
+	var port := ENGINE_PORT_DEFAULT
+	var port_override := OS.get_environment("RIFTBOUND_ENGINE_PORT").strip_edges()
+	if port_override != "" and int(port_override) > 0:
+		port = int(port_override)
+	_engine_server = EngineServerScript.new()
+	add_child(_engine_server)
+	var err: Error = _engine_server.start(port, _scoring_profile_path)
+	if err != OK:
+		_engine_server.queue_free()
+		_engine_server = null
+
+
+func _pin_engine_state(gs: GameState) -> void:
+	if _engine_server == null or gs == null:
+		return
+	_engine_server.pin_state(gs, player_index)
+
+
+func _clear_engine_pin() -> void:
+	if _engine_server == null:
+		return
+	_engine_server.clear_pin()
 
 
 # Ask the agent service whether search mode is enabled, so the engine matches the
@@ -246,6 +285,10 @@ func _request_decision(gs: GameState) -> void:
 	_on_session_changed(_pending_brief_state.get("game_id", ""))
 	_candidate_lines = []
 	_search_stats = {}
+	# Pin a clone of the live state for the duration of this decision so Python
+	# live tools (/engine/simulate, /engine/search) see a stable root while we
+	# await /goals and /decision. Cleared when the decision finishes.
+	_pin_engine_state(gs)
 	if _search_mode and _should_run_search(gs):
 		# Goal handshake: fetch this turn's overlay BEFORE searching so generic
 		# (weight_bias) goals bias line generation, not just selection. Scoped to
@@ -268,6 +311,7 @@ func _request_decision(gs: GameState) -> void:
 					"mode": "main", "max_depth": 8, "node_budget": 150, "time_budget_ms": 400
 				})
 				if gs.game_over:
+					_clear_engine_pin()
 					return
 				scout_lines = scout_result.get("candidate_lines", [])
 				scout_stats = scout_result.get("search_stats", {})
@@ -280,6 +324,7 @@ func _request_decision(gs: GameState) -> void:
 			if not _goals_scout or scout_lines.size() > 1:
 				overlay = await _fetch_goal_overlay(scout_lines, scout_stats)
 				if gs.game_over:
+					_clear_engine_pin()
 					return
 		var searcher: TurnSearch = TurnSearchScript.new(_scoring_profile_path, overlay)
 		var result: Dictionary = searcher.search(gs, player_index, {
@@ -301,6 +346,7 @@ func _request_decision(gs: GameState) -> void:
 	# the post-run importer.
 	if _capture_mode:
 		_decide_offline(gs)
+		_clear_engine_pin()
 		return
 
 	var err = _http.request(AGENT_URL, headers, HTTPClient.METHOD_POST, payload)
@@ -308,6 +354,7 @@ func _request_decision(gs: GameState) -> void:
 		push_warning("AIPlayer: HTTPRequest failed to start (err=%d). Using heuristic." % err)
 		_report_decision_metrics(true, null)
 		_heuristic_fallback(gs)
+		_clear_engine_pin()
 		return
 
 	_decision_start_ms = Time.get_ticks_msec()
@@ -445,12 +492,14 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 	_waiting_for_http = false
 	var gs = controller.gs if controller else null
 	if gs == null or gs.game_over:
+		_clear_engine_pin()
 		return
 
 	if result != HTTPRequest.RESULT_SUCCESS or response_code != 200:
 		push_warning("AIPlayer: HTTP error (result=%d, code=%d). Using heuristic." % [result, response_code])
 		_report_decision_metrics(true, null)
 		_heuristic_fallback(gs)
+		_clear_engine_pin()
 		return
 
 	var text := body.get_string_from_utf8()
@@ -459,6 +508,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		push_warning("AIPlayer: Invalid JSON response. Using heuristic.")
 		_report_decision_metrics(true, null)
 		_heuristic_fallback(gs)
+		_clear_engine_pin()
 		return
 
 	var decision: Dictionary = parsed
@@ -467,6 +517,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		push_warning("AIPlayer: No 'move' in response. Using heuristic.")
 		_report_decision_metrics(true, null)
 		_heuristic_fallback(gs)
+		_clear_engine_pin()
 		return
 
 	var cmd := _move_to_command(move_dict)
@@ -474,6 +525,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		push_warning("AIPlayer: Could not translate move to command. Using heuristic.")
 		_report_decision_metrics(true, null)
 		_heuristic_fallback(gs)
+		_clear_engine_pin()
 		return
 
 	# Store decision for potential rejection context on next call
@@ -502,16 +554,18 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 			_report_decision_metrics(false, false)
 			_retry_count += 1
 			push_warning("AIPlayer: Move rejected — retry %d/%d" % [_retry_count, MAX_RETRIES])
-			await _request_decision(gs)  # may await the goal handshake before re-searching
+			await _request_decision(gs)  # re-pins; may await the goal handshake
 		else:
 			_report_decision_metrics(true, false)
 			push_warning("AIPlayer: Exhausted %d retries — heuristic fallback." % MAX_RETRIES)
 			_heuristic_fallback(gs)
+			_clear_engine_pin()
 	else:
 		_report_decision_metrics(false, true)
 		_report_outcome(true)
 		_report_accepted_ai_state_event(move_dict, cmd, gs)
 		_emit_move_completed(move_dict, gs)
+		_clear_engine_pin()
 	# If the move was accepted the normal _maybe_trigger_ai() → take_turn() cycle
 	# (triggered inside submit_command) handles the next decision.  No extra work needed.
 
