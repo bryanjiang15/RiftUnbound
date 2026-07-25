@@ -31,6 +31,7 @@ from openai import (
 from openai.types.chat import ChatCompletionMessageParam
 
 from . import planner as planner_module
+from . import reasoner as reasoner_module
 from . import router as router_module
 from . import search_metrics as search_metrics_module
 from . import skills as skill_module
@@ -38,7 +39,16 @@ from . import strategist as strategist_module
 from .goal_compiler import ProfileOverlay, compile_goals, overlay_delta, overlay_delta_breakdown
 from .memory import Memory
 from .prompts import load_prompt
-from .schemas import CandidateLine, Decision, GoalSet, LegalActionOption, Move, Plan, SearchStats
+from .schemas import (
+    CandidateLine,
+    Decision,
+    GoalSet,
+    LegalActionOption,
+    Move,
+    Plan,
+    ReasonerEmit,
+    SearchStats,
+)
 from .search_log_fmt import (
     BOLD,
     CYAN,
@@ -101,6 +111,15 @@ def _strategist_model() -> str:
     return os.environ.get("RIFTBOUND_STRATEGIST_MODEL") or _default_model()
 
 
+def _reasoner_model() -> str:
+    """Model used by the Phase-3 search-driving Reasoner."""
+    return (
+        os.environ.get("RIFTBOUND_REASONER_MODEL")
+        or os.environ.get("RIFTBOUND_STRATEGIST_MODEL")
+        or _default_model()
+    )
+
+
 def _is_reasoning_model(model: str) -> bool:
     """True for OpenAI reasoning models (o-series, gpt-5) that emit a thinking
     stream before answering and reject the ``temperature`` sampling param.
@@ -115,6 +134,7 @@ def _is_reasoning_model(model: str) -> bool:
 _client: Optional[AsyncOpenAI] = None
 _planner = planner_module.Planner()
 _strategist = strategist_module.Strategist()
+_reasoner = reasoner_module.Reasoner()
 
 PIPELINE_LEGACY = "legacy"
 PIPELINE_STAGED = "staged"
@@ -855,13 +875,15 @@ def _log_tools(
     tool_trace: list[dict],
     outcome: str,
     stage: str = "actor",
+    reasoning: str = "",
+    final_output: Any = None,
 ) -> None:
     """Append Claude/Cursor-style tool calls to the search-and-goal log.
 
     Each entry lists the tool name, key args, and a one-line ⎿ result summary so
     you can see what the model investigated alongside the search and goals.
     """
-    if not _LOG_INPUTS or not tool_trace:
+    if not _LOG_INPUTS or (not tool_trace and not reasoning and final_output is None):
         return
     from .tool_log_fmt import format_tools_session
 
@@ -875,6 +897,8 @@ def _log_tools(
         ts=ts,
         tool_trace=tool_trace,
         outcome=outcome,
+        reasoning=reasoning,
+        final_output=final_output,
     )
     try:
         with _SEARCH_LOG_PATH.open("a", encoding="utf-8") as f:
@@ -1300,6 +1324,51 @@ async def build_goal_overlay(
     if not was_cached:
         _log_goals(game_id, brief_state, goal_set, overlay)
     return overlay
+
+
+async def run_reasoner(
+    *,
+    brief_state: dict,
+    game_id: str,
+    memory: Memory,
+    eval_metrics: Optional[dict] = None,
+    candidate_lines: Optional[list[CandidateLine]] = None,
+    search_stats: Optional[SearchStats] = None,
+) -> ReasonerEmit:
+    """Run the Phase-3 Reasoner under one bounded live-tool context."""
+    from .tool_budget import ToolBudget, install_budget, reset_budget
+
+    opponent_action_count = memory.count_opponent_material_actions(game_id)
+    timeline = memory.timeline_slice(game_id)
+    scout_summaries = (
+        _summarize_lines_for_strategist(candidate_lines) if candidate_lines else []
+    )
+    skill_module.set_search_context(
+        scout_summaries,
+        search_stats.model_dump() if search_stats else {},
+    )
+    skill_module.set_search_corpus(_build_search_corpus(candidate_lines))
+    budget = ToolBudget(
+        node_limit=max(1, int(os.environ.get("RIFTBOUND_REASONER_NODE_BUDGET", "1500"))),
+        time_limit_ms=max(1, int(os.environ.get("RIFTBOUND_REASONER_TIME_BUDGET_MS", "3000"))),
+    )
+    token = install_budget(budget)
+    try:
+        emit, _was_cached = await _reasoner.reason(
+            client=get_client(),
+            model=_reasoner_model(),
+            game_id=game_id,
+            brief_state=brief_state,
+            memory_summary=timeline,
+            opponent_action_count=opponent_action_count,
+            metrics=eval_metrics,
+            known_lines=scout_summaries,
+        )
+        return emit
+    finally:
+        reset_budget(token)
+        skill_module.set_search_context(None)
+        skill_module.set_search_corpus(None)
 
 
 def _log_goals(game_id: str, brief_state: dict, goal_set: "GoalSet", overlay: ProfileOverlay) -> None:

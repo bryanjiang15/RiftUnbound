@@ -413,6 +413,29 @@ class GoalSet(BaseModel):
     goals: list[Goal] = Field(default_factory=list, max_length=4)
 
 
+# ── Deliberative Reasoner ────────────────────────────────────────────────────
+
+ReasonerEmitKind = Literal["line", "goals"]
+ReasonerConfidence = Literal["commit", "goals"]
+
+
+class ReasonerEmit(BaseModel):
+    """Structured termination contract for the Phase-3 Reasoner.
+
+    A direct line is accepted only after orchestration validates it against
+    engine-observed evidence and the current legal moves. Otherwise callers
+    normalize the result to ``kind="goals"`` and let TurnSearch finish tactics.
+    """
+
+    schema_version: str = "1.0"
+    kind: ReasonerEmitKind = "goals"
+    moves: Optional[list[str]] = None
+    chosen_line_id: Optional[str] = None
+    confidence: ReasonerConfidence = "goals"
+    goal_set: Optional[GoalSet] = None
+    rationale: str = ""
+
+
 # ── search_for predicate ──────────────────────────────────────────────────────
 
 GoalCombine = Literal["all", "any", "weighted"]
@@ -631,3 +654,11 @@ class GoalsRequest(BaseModel):
     # Absent (older engines / scout disabled) → strategist behaves as before.
     candidate_lines: Optional[list[CandidateLine]] = None
     search_stats: Optional[SearchStats] = None
+
+
+class ReasonRequest(GoalsRequest):
+    """Pre-search Phase-3 Reasoner handshake.
+
+    Shares the scout-search input contract with ``GoalsRequest`` but may return
+    either a verified line or a compiled GoalSet overlay.
+    """

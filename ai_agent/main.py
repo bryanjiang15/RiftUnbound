@@ -53,9 +53,12 @@ from .agent import (
     _log_game_state_event,
     build_goal_overlay,
     choose_line,
+    run_reasoner,
 )
+from .goal_compiler import compile_goals
 from .memory import DecisionLogger, Memory
-from .schemas import Decision, DecisionRequest, GoalsRequest, Move
+from .reasoner import empty_reasoner_emit
+from .schemas import Decision, DecisionRequest, GoalsRequest, Move, ReasonRequest
 from .search_log_fmt import (
     BOLD,
     CYAN,
@@ -83,6 +86,7 @@ _pipeline_mode: str = PIPELINE_LEGACY
 _search_enabled: bool = False
 _argmax_enabled: bool = False
 _goals_enabled: bool = False
+_reasoner_enabled: bool = False
 _weight_version_id: int | None = None
 _data_origin: str = "vs_human"
 # When set (0 or 1), only persist the tuning dataset (search_decisions /
@@ -95,6 +99,9 @@ _SEARCH_LOG_PATH = os.path.join(os.path.dirname(__file__), "agent_search.log")
 # Cache of profile-JSON text -> weight_versions.id, so a per-request profile is
 # registered/looked up once instead of hitting the DB on every decision.
 _weight_version_cache: dict[str, int] = {}
+# Goal overlays emitted by the Reasoner must also be reused by /decision for
+# situational/card re-ranking (engine generation only consumes weight multipliers).
+_reasoner_overlays: dict[tuple[str, int], Any] = {}
 
 
 def _resolve_weight_version(profile_json: str | None) -> int | None:
@@ -155,7 +162,7 @@ def _current_git_sha() -> str | None:
 async def _lifespan(app: FastAPI):
     global _memory, _decision_logger, _pipeline_mode, _search_enabled
     global _argmax_enabled, _weight_version_id, _data_origin, _capture_seat
-    global _goals_enabled
+    global _goals_enabled, _reasoner_enabled
     db_path_override = os.environ.get("RIFTBOUND_DB_PATH", "").strip()
     if db_path_override:
         from pathlib import Path
@@ -194,6 +201,18 @@ async def _lifespan(app: FastAPI):
         "yes",
         "on",
     )
+    reasoner_requested = os.environ.get("RIFTBOUND_REASONER", "off").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    _reasoner_enabled = reasoner_requested and _search_enabled and not _argmax_enabled
+    if reasoner_requested and not _reasoner_enabled:
+        logger.warning(
+            "RIFTBOUND_REASONER ignored: it requires RIFTBOUND_SEARCH=on and "
+            "RIFTBOUND_SEARCH_ARGMAX=off."
+        )
     # Provenance tag for captured rows: 'vs_human' (default live play),
     # 'self_play', or 'vs_heuristic'. The self-play harness sets this so the two
     # state distributions are never silently mixed in tuning.
@@ -269,6 +288,7 @@ async def _lifespan(app: FastAPI):
     logger.info("Search mode: %s", "ENABLED" if _search_enabled else "disabled")
     logger.info("Argmax-only selection: %s", "ENABLED" if _argmax_enabled else "disabled")
     logger.info("Goal strategist: %s", "ENABLED" if _goals_enabled else "disabled")
+    logger.info("Phase-3 Reasoner: %s", "ENABLED" if _reasoner_enabled else "disabled")
     logger.info(
         "Search & goal log: %s",
         ("ENABLED → %s" % _SEARCH_LOG_PATH) if (_LOG_INPUTS and _search_enabled)
@@ -458,7 +478,11 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
         # With fewer than two candidate lines there is nothing to bias/select, so
         # skip the strategist overlay (choose_line will short-circuit to the single
         # line). Goals only matter when the search actually offers a choice.
-        if _goals_enabled and not _argmax_enabled and len(request.candidate_lines) > 1:
+        if _reasoner_enabled:
+            overlay = _reasoner_overlays.get(
+                (game_id, int(brief_state.get("turn_number", 0)))
+            )
+        elif _goals_enabled and not _argmax_enabled and len(request.candidate_lines) > 1:
             try:
                 overlay = await build_goal_overlay(
                     brief_state=brief_state,
@@ -831,7 +855,8 @@ async def health() -> dict:
         "status": "ok",
         "version": "1.0.0",
         "search_enabled": _search_enabled,
-        "goals_enabled": _goals_enabled and not _argmax_enabled,
+        "goals_enabled": _goals_enabled and not _argmax_enabled and not _reasoner_enabled,
+        "reasoner_enabled": _reasoner_enabled,
         "pipeline": _pipeline_mode,
     }
 
@@ -863,6 +888,62 @@ async def goals_endpoint(request: GoalsRequest) -> dict:
         logger.warning("Goal overlay (handshake) failed (%s); empty overlay", exc)
         return {"overlay": {}}
     return {"overlay": overlay.to_dict()}
+
+
+@app.post("/reason")
+async def reason_endpoint(request: ReasonRequest) -> dict:
+    """Run the bounded Phase-3 Reasoner before the main turn search."""
+    if _memory is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    turn = int(request.brief_state.turn_number)
+    game_id = request.game_id
+    if not _reasoner_enabled:
+        emit = empty_reasoner_emit(turn, "fallback: reasoner disabled")
+        return {**emit.model_dump(), "overlay": {}}
+
+    brief_state = request.brief_state.model_dump()
+    skill_module.set_state(brief_state)
+    skill_module.set_history_context(_memory, game_id)
+    try:
+        emit = await run_reasoner(
+            brief_state=brief_state,
+            game_id=game_id,
+            memory=_memory,
+            eval_metrics={},
+            candidate_lines=request.candidate_lines,
+            search_stats=request.search_stats,
+        )
+    except Exception as exc:  # noqa: BLE001 — fail safe to base search
+        logger.warning("Reasoner failed (%s); base-profile search", exc)
+        emit = empty_reasoner_emit(turn, "fallback: reasoner failure")
+
+    if emit.kind == "line":
+        logger.info(
+            "Reasoner output: kind=line confidence=%s line=%s moves=%s | %s",
+            emit.confidence,
+            emit.chosen_line_id or "simulated",
+            " ; ".join(emit.moves or []),
+            emit.rationale,
+        )
+    else:
+        goal_ids = [goal.id for goal in (emit.goal_set.goals if emit.goal_set else [])]
+        logger.info(
+            "Reasoner output: kind=goals confidence=%s goals=%s | %s",
+            emit.confidence,
+            goal_ids,
+            emit.rationale,
+        )
+
+    overlay = compile_goals(emit.goal_set) if emit.kind == "goals" and emit.goal_set else None
+    key = (game_id, turn)
+    if overlay is not None and not overlay.is_empty():
+        _reasoner_overlays[key] = overlay
+    else:
+        _reasoner_overlays.pop(key, None)
+    return {
+        **emit.model_dump(),
+        "overlay": overlay.to_dict() if overlay is not None else {},
+    }
 
 
 @app.get("/legal_moves")

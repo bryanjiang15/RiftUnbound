@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -335,10 +336,30 @@ def _live_simulate(commands: list[str]) -> dict | None:
     """Try the live engine server; return None to fall back to pre-sim lookup."""
     if not commands:
         return None
+    from .tool_budget import budget_exhausted_result, current_budget
+
+    budget = current_budget()
+    if budget is not None:
+        if budget.exhausted:
+            return budget_exhausted_result()
+        key = tuple(commands)
+        cached = budget.simulate_cache.get(key)
+        if cached is not None:
+            out = dict(cached)
+            out["cached"] = True
+            out.update(budget.status())
+            return out
     try:
         from . import engine_client
 
-        return engine_client.simulate(commands)
+        started = time.monotonic()
+        result = engine_client.simulate(commands)
+        if budget is not None:
+            budget.engine_time_ms += max(0, int((time.monotonic() - started) * 1000))
+            budget.simulate_cache[tuple(commands)] = dict(result)
+            result = dict(result)
+            result.update(budget.status())
+        return result
     except Exception:
         # EngineUnavailable or unexpected — fail safe to Phase-1 lookup.
         return None
@@ -385,6 +406,14 @@ def search_for(
 
     corpus, source = _search_corpus_for_filter(top_n=max(top_n, 8))
     if not corpus:
+        if source == "budget_exhausted":
+            from .tool_budget import budget_exhausted_result
+
+            return {
+                "matches": [],
+                "corpus_size": 0,
+                **budget_exhausted_result(),
+            }
         return {
             "matches": [],
             "corpus_size": 0,
@@ -396,6 +425,11 @@ def search_for(
         top_n=top_n, min_satisfaction=min_satisfaction,
     )
     result["source"] = source
+    from .tool_budget import current_budget
+
+    budget = current_budget()
+    if budget is not None:
+        result.update(budget.status())
     return result
 
 
@@ -410,6 +444,8 @@ def _search_corpus_for_filter(top_n: int = 8) -> tuple[list[dict], str]:
             "beam_width": 6,
         },
     })
+    if live is not None and live.get("error") == "budget_exhausted":
+        return [], "budget_exhausted"
     if live is not None and live.get("legal", True) is not False:
         lines = live.get("candidate_lines", []) or []
         corpus = [
@@ -430,10 +466,29 @@ def _search_corpus_for_filter(top_n: int = 8) -> tuple[list[dict], str]:
 
 
 def _live_search(payload: dict) -> dict | None:
+    from .tool_budget import budget_exhausted_result, current_budget
+
+    budget = current_budget()
+    actual_payload = payload
+    if budget is not None:
+        clamped = budget.clamp_search_payload(payload)
+        if clamped is None:
+            return budget_exhausted_result()
+        actual_payload = clamped
     try:
         from . import engine_client
 
-        return engine_client.search(payload)
+        started = time.monotonic()
+        result = engine_client.search(actual_payload)
+        if budget is not None:
+            elapsed_ms = max(0, int((time.monotonic() - started) * 1000))
+            requested_nodes = int(
+                (actual_payload.get("budget", {}) or {}).get("node_budget", 0) or 0
+            )
+            budget.record_search(result, elapsed_ms, requested_nodes)
+            result = dict(result)
+            result.update(budget.status())
+        return result
     except Exception:
         return None
 
@@ -480,6 +535,8 @@ def deepen(
             "error": "Live engine unavailable; deepen requires /engine/search.",
             "source": "unavailable",
         }
+    if live.get("error") == "budget_exhausted":
+        return dict(live)
     out = dict(live)
     out["seed_moves"] = seed
     out["source"] = "live_engine"

@@ -160,6 +160,8 @@ def format_tools_session(
     ts: str,
     tool_trace: list[dict[str, Any]],
     outcome: str,
+    reasoning: str = "",
+    final_output: Any = None,
 ) -> list[str]:
     """Full tool-call block embedded in agent_search.log."""
     title = (
@@ -182,6 +184,20 @@ def format_tools_session(
             if i:
                 lines.append("")
             lines.extend(format_tool_call_lines(entry))
+
+    if reasoning.strip():
+        lines.append("")
+        lines.append(paint("Reasoner recommendation:", BOLD + MAGENTA))
+        lines.extend(f"  {line}" for line in reasoning.strip().splitlines())
+
+    if final_output is not None:
+        lines.append("")
+        lines.append(paint("Final output:", BOLD + MAGENTA))
+        if isinstance(final_output, dict):
+            rendered = json.dumps(final_output, indent=2, default=str)
+        else:
+            rendered = str(final_output)
+        lines.extend(f"  {line}" for line in rendered.splitlines())
 
     # Outcome coloring: errors/pass soft-fail vs success.
     out_lower = outcome.lower()
