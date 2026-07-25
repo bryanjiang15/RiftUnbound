@@ -46,8 +46,8 @@ def test_log_plan_disabled_writes_nothing(tmp_path, monkeypatch):
 
 
 def test_log_tools_writes_trace_and_outcome(tmp_path, monkeypatch):
-    log_path = tmp_path / "agent_tools.log"
-    monkeypatch.setattr(agent_module, "_TOOLS_LOG_PATH", log_path)
+    log_path = tmp_path / "agent_search.log"
+    monkeypatch.setattr(agent_module, "_SEARCH_LOG_PATH", log_path)
     monkeypatch.setattr(agent_module, "_LOG_INPUTS", True)
 
     brief_state = {
@@ -67,16 +67,16 @@ def test_log_tools_writes_trace_and_outcome(tmp_path, monkeypatch):
 
     content = log_path.read_text(encoding="utf-8")
     assert "Turn 4" in content
-    assert "State: neutral_open" in content
-    assert "Tool calls: 2" in content
-    assert "evaluate_position({})" in content
+    assert "neutral_open" in content
+    assert "Tool calls (2):" in content
+    assert "evaluate_position" in content
     assert "get_card_detail" in content
     assert "validator budget exhausted" in content
 
 
-def test_log_tools_notes_when_no_tools_called(tmp_path, monkeypatch):
-    log_path = tmp_path / "agent_tools.log"
-    monkeypatch.setattr(agent_module, "_TOOLS_LOG_PATH", log_path)
+def test_log_tools_skips_when_no_tools_called(tmp_path, monkeypatch):
+    log_path = tmp_path / "agent_search.log"
+    monkeypatch.setattr(agent_module, "_SEARCH_LOG_PATH", log_path)
     monkeypatch.setattr(agent_module, "_LOG_INPUTS", True)
 
     agent_module._log_tools(
@@ -86,14 +86,12 @@ def test_log_tools_notes_when_no_tools_called(tmp_path, monkeypatch):
         outcome="play_card (after 0 tool call(s))",
     )
 
-    content = log_path.read_text(encoding="utf-8")
-    assert "Tool calls: 0" in content
-    assert "model answered without consulting any tool" in content
+    assert not log_path.exists()
 
 
 def test_log_tools_disabled_writes_nothing(tmp_path, monkeypatch):
-    log_path = tmp_path / "agent_tools.log"
-    monkeypatch.setattr(agent_module, "_TOOLS_LOG_PATH", log_path)
+    log_path = tmp_path / "agent_search.log"
+    monkeypatch.setattr(agent_module, "_SEARCH_LOG_PATH", log_path)
     monkeypatch.setattr(agent_module, "_LOG_INPUTS", False)
 
     agent_module._log_tools(

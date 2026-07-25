@@ -222,6 +222,101 @@ static func build_score_features(root_snap: Dictionary, leaf_snap: Dictionary, s
 	return features
 
 
+# ── Search state (post-line snapshot for the search_for tool) ─────────────────
+
+
+# Project the leaf snapshot into the concrete, entity-scoped shape the search_for
+# tool queries (docs/schema/search_for_tool_schema.md §5-§6). Distinct from
+# build_score_features: features are heuristics/differentials for the scorer;
+# this is absolute, human-legible board facts keyed by entity, so Python can
+# resolve clauses like "vi-1's Might >= 4" or "opponent hand <= 2" with no game
+# logic of its own. Owner is normalized to "me"/"opponent" (me = ai_index).
+# A destroyed unit is simply absent from `units` (absence = dead).
+static func build_search_state(leaf_snap: Dictionary, features: Dictionary, steps: Array) -> Dictionary:
+	var ai_index := int(leaf_snap.get("ai_index", 0))
+	var units_in: Dictionary = leaf_snap.get("units", {})
+	var bf_ctrl: Dictionary = leaf_snap.get("bf", {})
+
+	# Per-battlefield aggregation, seeded so every battlefield appears even if empty.
+	var bf_agg: Dictionary = {}
+	for bf_id in bf_ctrl:
+		bf_agg[bf_id] = {"my_might": 0, "opp_might": 0, "my_units": 0, "opp_units": 0}
+
+	var units: Dictionary = {}
+	for inst_id in units_in:
+		var u: Dictionary = units_in[inst_id]
+		var mine := int(u.get("owner", -1)) == ai_index
+		var might := int(u.get("might", 0))
+		var damage := int(u.get("damage", 0))
+		var loc := str(u.get("location", ""))
+		var at_bf = null if loc == "base" else loc
+		units[inst_id] = {
+			"owner": "me" if mine else "opponent",
+			"might": might,
+			"damage": damage,
+			"health": maxi(0, might - damage),
+			"battlefield": at_bf,
+			"exhausted": bool(u.get("exhausted", false)),
+		}
+		if at_bf != null and bf_agg.has(loc):
+			if mine:
+				bf_agg[loc]["my_might"] = int(bf_agg[loc]["my_might"]) + might
+				bf_agg[loc]["my_units"] = int(bf_agg[loc]["my_units"]) + 1
+			else:
+				bf_agg[loc]["opp_might"] = int(bf_agg[loc]["opp_might"]) + might
+				bf_agg[loc]["opp_units"] = int(bf_agg[loc]["opp_units"]) + 1
+
+	var battlefields: Dictionary = {}
+	for bf_id in bf_ctrl:
+		var ctrl := int(bf_ctrl[bf_id])
+		var controller = null
+		if ctrl == ai_index:
+			controller = "me"
+		elif ctrl >= 0:
+			controller = "opponent"
+		var agg: Dictionary = bf_agg.get(bf_id, {})
+		battlefields[bf_id] = {
+			"my_might": int(agg.get("my_might", 0)),
+			"opp_might": int(agg.get("opp_might", 0)),
+			"my_units": int(agg.get("my_units", 0)),
+			"opp_units": int(agg.get("opp_units", 0)),
+			"controller": controller,
+			"i_control": ctrl == ai_index,
+		}
+
+	# Card instance ids played over the line (for the card_played predicate).
+	var cards_played: Array = []
+	for step in steps:
+		var cmd := str(step.get("command", ""))
+		if cmd.begins_with("play "):
+			var parts := cmd.split(" ", false)
+			if parts.size() >= 2:
+				cards_played.append(parts[1])
+
+	return {
+		"units": units,
+		"battlefields": battlefields,
+		"players": {
+			"me": {
+				"score": int(leaf_snap.get("my_score", 0)),
+				"cards_in_hand": int(leaf_snap.get("my_hand", 0)),
+				"ready_runes": int(leaf_snap.get("my_ready_runes", 0)),
+			},
+			"opponent": {
+				"score": int(leaf_snap.get("opp_score", 0)),
+				"cards_in_hand": int(leaf_snap.get("opp_hand", 0)),
+				"ready_runes": int(leaf_snap.get("opp_ready_runes", 0)),
+			},
+		},
+		"turn": {
+			"points_scored": int(features.get("points_scored", 0)),
+			"enemy_units_killed": int(features.get("enemy_units_killed", 0)),
+			"battlefields_conquered": int(features.get("battlefields_conquered", 0)),
+		},
+		"cards_played": cards_played,
+	}
+
+
 # ── Positional / per-battlefield feature math ─────────────────────────────────
 
 

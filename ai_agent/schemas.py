@@ -413,6 +413,44 @@ class GoalSet(BaseModel):
     goals: list[Goal] = Field(default_factory=list, max_length=4)
 
 
+# ── search_for predicate ──────────────────────────────────────────────────────
+
+GoalCombine = Literal["all", "any", "weighted"]
+
+
+class PredicateClause(BaseModel):
+    """One concrete, entity-scoped condition for the ``search_for`` tool.
+
+    Shape is shared with ``Goal``'s state_target fields, but ``metric`` is drawn
+    from the concrete-state vocabulary (search_metrics.SEARCH_METRICS), not the
+    scoring whitelist. ``target`` names the entity the metric is about; what it
+    must be is fixed by the metric's subject (unit id / battlefield id /
+    "me"|"opponent" / card id / none). See
+    docs/schema/search_for_tool_schema.md §3.
+    """
+
+    metric: str
+    comparator: GoalComparator = ">="
+    threshold: float = 0.0
+    target: Optional[str] = None
+    weight: GoalPriority = "med"
+    label: Optional[str] = None
+
+    @field_validator("comparator", mode="before")
+    @classmethod
+    def _norm_comparator(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return _COMPARATOR_SYNONYMS.get(v.strip().lower(), v)
+        return ">="
+
+    @field_validator("weight", mode="before")
+    @classmethod
+    def _norm_weight(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return _PRIORITY_SYNONYMS.get(v.strip().lower(), "med")
+        return "med"
+
+
 # ── Move ─────────────────────────────────────────────────────────────────────
 
 ActionType = Literal[
@@ -518,6 +556,10 @@ class CandidateLine(BaseModel):
     score_breakdown: dict[str, Any] = Field(default_factory=dict)
     features: dict[str, Any] = Field(default_factory=dict)
     resolved_state: dict[str, Any] = Field(default_factory=dict)
+    # Concrete post-line board snapshot the search_for tool queries (units /
+    # battlefields / players / turn tallies / cards_played). Emitted by
+    # ScoreModel.build_search_state; see search_metrics.py.
+    search_state: dict[str, Any] = Field(default_factory=dict)
     opponent_windows: list[ResponseWindow] = Field(default_factory=list)
 
 

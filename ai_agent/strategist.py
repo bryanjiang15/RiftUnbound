@@ -283,9 +283,12 @@ async def _request_goals(
                     args = json.loads(tc.function.arguments or "{}")
                 except json.JSONDecodeError:
                     args = {}
-                tool_trace.append({"round": round_index, "name": tc.function.name, "args": args})
-                result = agent_module._dispatch_tool(tc.function.name, args)
-                result_text = json.dumps(result) if not isinstance(result, str) else result
+                result_text = agent_module._invoke_traced_tool(
+                    tool_trace,
+                    round_num=round_index,
+                    name=tc.function.name,
+                    args=args,
+                )
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
             continue
 
