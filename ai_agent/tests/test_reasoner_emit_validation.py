@@ -48,4 +48,3 @@ def test_unverified_line_falls_back_to_base_search():
         reset_context(token)
     assert out.kind == "base_search_fallback"
     assert out.goal_set is None
-

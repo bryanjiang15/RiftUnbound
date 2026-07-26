@@ -100,4 +100,3 @@ def budget_exhausted_result() -> dict[str, Any]:
         "error": "budget_exhausted",
         **status,
     }
-

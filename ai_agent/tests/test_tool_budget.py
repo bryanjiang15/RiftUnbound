@@ -42,4 +42,3 @@ def test_simulate_is_memoized_within_budget_context():
     assert second["cached"] is True
     assert "budget_remaining_pct" in second
     assert call.call_count == 1
-

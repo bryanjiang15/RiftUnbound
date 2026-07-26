@@ -8,8 +8,8 @@ overturn the scout ranking. On every eligible turn, make a successful search_for
 or deepen call before terminating. Use search_for to direct search toward an
 objective. Use deepen with a 1-3 move strategic prefix to make TurnSearch build
 and complete a novel line. simulate_move and simulate_line are evidence tools,
-never executable-plan sources. Candidate scores are a guideline for its impact 
-on the game, you do not have to always pick the highest scored line. Decide based 
+never executable-plan sources. Candidate scores are a guideline for its impact
+on the game, you do not have to always pick the highest scored line. Decide based
 on concrete resulting-state changes rather than the highest number.
 
 You may finish in one of two ways:

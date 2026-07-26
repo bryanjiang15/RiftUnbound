@@ -42,4 +42,3 @@ def test_parse_empty_goals_is_invalid():
         '{"kind":"goals","goal_set":{"goals":[]},"rationale":"noop"}',
         turn=2,
     ) is None
-
