@@ -42,6 +42,11 @@ def summarize_tool_result(name: str, result: Any) -> str:
     if not isinstance(result, dict):
         return _short(result, _RESULT_MAX)
 
+    if name in ("commit_line", "emit_goals"):
+        if result.get("accepted"):
+            return f"accepted terminal={name}"
+        return f"rejected error={_short(result.get('error', 'invalid terminal'), 180)}"
+
     if name == "search_for":
         matches = result.get("matches") or []
         parts = [

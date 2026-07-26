@@ -101,7 +101,18 @@ _SEARCH_LOG_PATH = os.path.join(os.path.dirname(__file__), "agent_search.log")
 _weight_version_cache: dict[str, int] = {}
 # Goal overlays emitted by the Reasoner must also be reused by /decision for
 # situational/card re-ranking (engine generation only consumes weight multipliers).
-_reasoner_overlays: dict[tuple[str, int], Any] = {}
+_reasoner_overlays: dict[tuple[str, int, str], Any] = {}
+
+
+def _reasoner_overlay_key(
+    game_id: str, brief_state: dict[str, Any]
+) -> tuple[str, int, str]:
+    """Scope a Reasoner overlay to the exact decision window it was built for."""
+    return (
+        game_id,
+        int(brief_state.get("turn_number", 0)),
+        str(brief_state.get("decision_type", "unknown")).strip().lower(),
+    )
 
 
 def _resolve_weight_version(profile_json: str | None) -> int | None:
@@ -480,7 +491,7 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
         # line). Goals only matter when the search actually offers a choice.
         if _reasoner_enabled:
             overlay = _reasoner_overlays.get(
-                (game_id, int(brief_state.get("turn_number", 0)))
+                _reasoner_overlay_key(game_id, brief_state)
             )
         elif _goals_enabled and not _argmax_enabled and len(request.candidate_lines) > 1:
             try:
@@ -897,32 +908,53 @@ async def reason_endpoint(request: ReasonRequest) -> dict:
         raise HTTPException(status_code=503, detail="Service not ready")
     turn = int(request.brief_state.turn_number)
     game_id = request.game_id
-    if not _reasoner_enabled:
-        emit = empty_reasoner_emit(turn, "fallback: reasoner disabled")
-        return {**emit.model_dump(), "overlay": {}}
-
     brief_state = request.brief_state.model_dump()
+    key = _reasoner_overlay_key(game_id, brief_state)
+    if not request.root_state_hash:
+        _reasoner_overlays.pop(key, None)
+        emit = empty_reasoner_emit(turn, "fallback: missing root state hash")
+        return {
+            **emit.model_dump(),
+            "overlay": {},
+            "committed_line": None,
+            "root_state_hash": "",
+            "telemetry": {"fallback_reason": "missing_root_state_hash"},
+        }
+    if not _reasoner_enabled:
+        _reasoner_overlays.pop(key, None)
+        emit = empty_reasoner_emit(turn, "fallback: reasoner disabled")
+        return {
+            **emit.model_dump(),
+            "overlay": {},
+            "committed_line": None,
+            "root_state_hash": request.root_state_hash,
+            "telemetry": {"fallback_reason": "reasoner_disabled"},
+        }
+
     skill_module.set_state(brief_state)
     skill_module.set_history_context(_memory, game_id)
     try:
-        emit = await run_reasoner(
+        emit, committed_line, telemetry = await run_reasoner(
             brief_state=brief_state,
             game_id=game_id,
             memory=_memory,
             eval_metrics={},
             candidate_lines=request.candidate_lines,
             search_stats=request.search_stats,
+            root_state_hash=request.root_state_hash,
         )
     except Exception as exc:  # noqa: BLE001 — fail safe to base search
         logger.warning("Reasoner failed (%s); base-profile search", exc)
         emit = empty_reasoner_emit(turn, "fallback: reasoner failure")
+        committed_line = None
+        telemetry = {"fallback_reason": "reasoner_failure", "error": str(exc)}
 
     if emit.kind == "line":
         logger.info(
             "Reasoner output: kind=line confidence=%s line=%s moves=%s | %s",
             emit.confidence,
-            emit.chosen_line_id or "simulated",
-            " ; ".join(emit.moves or []),
+            emit.chosen_line_id or "missing",
+            " ; ".join((committed_line or {}).get("moves", []) or []),
             emit.rationale,
         )
     else:
@@ -935,7 +967,6 @@ async def reason_endpoint(request: ReasonRequest) -> dict:
         )
 
     overlay = compile_goals(emit.goal_set) if emit.kind == "goals" and emit.goal_set else None
-    key = (game_id, turn)
     if overlay is not None and not overlay.is_empty():
         _reasoner_overlays[key] = overlay
     else:
@@ -943,6 +974,9 @@ async def reason_endpoint(request: ReasonRequest) -> dict:
     return {
         **emit.model_dump(),
         "overlay": overlay.to_dict() if overlay is not None else {},
+        "committed_line": committed_line,
+        "root_state_hash": request.root_state_hash,
+        "telemetry": telemetry,
     }
 
 

@@ -1,18 +1,18 @@
 from ai_agent.reasoner import _parse_reasoner_emit
 
 
-def test_parse_direct_line_from_fenced_prose():
+def test_parse_direct_line_requires_registry_reference():
     emit = _parse_reasoner_emit(
         'Result:\n```json\n{"kind":"line","confidence":"commit",'
-        '"moves":["pass","end turn"],"rationale":"verified"}\n```',
+        '"chosen_line_id":"scout-line-1-abc","rationale":"verified"}\n```',
         turn=3,
     )
     assert emit is not None
     assert emit.kind == "line"
-    assert emit.moves == ["pass", "end turn"]
+    assert emit.chosen_line_id == "scout-line-1-abc"
 
 
-def test_parse_goal_emit_drops_only_invalid_nested_goal():
+def test_parse_goal_emit_is_all_or_nothing():
     emit = _parse_reasoner_emit(
         '{"kind":"goals","confidence":"goals","goal_set":{'
         '"turn":3,"rationale":"control",'
@@ -22,7 +22,24 @@ def test_parse_goal_emit_drops_only_invalid_nested_goal():
         ']}}',
         turn=3,
     )
+    assert emit is None
+
+
+def test_parse_goal_emit_normalizes_current_turn():
+    emit = _parse_reasoner_emit(
+        '{"kind":"goals","goal_set":{"turn":0,"goals":['
+        '{"id":"ok","kind":"weight_bias","feature":"battlefield_control"}'
+        ']},"rationale":"control"}',
+        turn=7,
+    )
     assert emit is not None
     assert emit.goal_set is not None
-    assert [goal.id for goal in emit.goal_set.goals] == ["ok"]
+    assert emit.goal_set.turn == 7
+
+
+def test_parse_empty_goals_is_invalid():
+    assert _parse_reasoner_emit(
+        '{"kind":"goals","goal_set":{"goals":[]},"rationale":"noop"}',
+        turn=2,
+    ) is None
 

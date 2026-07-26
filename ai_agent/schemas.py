@@ -415,21 +415,20 @@ class GoalSet(BaseModel):
 
 # ── Deliberative Reasoner ────────────────────────────────────────────────────
 
-ReasonerEmitKind = Literal["line", "goals"]
-ReasonerConfidence = Literal["commit", "goals"]
+ReasonerEmitKind = Literal["line", "goals", "base_search_fallback"]
+ReasonerConfidence = Literal["commit", "goals", "fallback"]
 
 
 class ReasonerEmit(BaseModel):
     """Structured termination contract for the Phase-3 Reasoner.
 
-    A direct line is accepted only after orchestration validates it against
-    engine-observed evidence and the current legal moves. Otherwise callers
-    normalize the result to ``kind="goals"`` and let TurnSearch finish tactics.
+    A direct line references a complete request-registry entry by canonical id.
+    Goal output contains a strict non-empty GoalSet. Infrastructure failures use
+    ``base_search_fallback`` rather than masquerading as model-authored goals.
     """
 
     schema_version: str = "1.0"
     kind: ReasonerEmitKind = "goals"
-    moves: Optional[list[str]] = None
     chosen_line_id: Optional[str] = None
     confidence: ReasonerConfidence = "goals"
     goal_set: Optional[GoalSet] = None
@@ -575,6 +574,7 @@ class CandidateLine(BaseModel):
     line_id: str
     moves: list[Union[Move, str]] = Field(default_factory=list)
     move_contexts: list[dict[str, Any]] = Field(default_factory=list)
+    expected_pre_hashes: list[str] = Field(default_factory=list)
     score: float = 0.0
     score_breakdown: dict[str, Any] = Field(default_factory=dict)
     features: dict[str, Any] = Field(default_factory=dict)
@@ -584,6 +584,13 @@ class CandidateLine(BaseModel):
     # ScoreModel.build_search_state; see search_metrics.py.
     search_state: dict[str, Any] = Field(default_factory=dict)
     opponent_windows: list[ResponseWindow] = Field(default_factory=list)
+    root_state_hash: str = ""
+    legal: bool = True
+    complete: bool = False
+    terminal_reason: str = ""
+    search_mode: str = "main"
+    original_line_id: Optional[str] = None
+    source_lineage: list[str] = Field(default_factory=list)
 
 
 class SearchStats(BaseModel):
@@ -662,3 +669,5 @@ class ReasonRequest(GoalsRequest):
     Shares the scout-search input contract with ``GoalsRequest`` but may return
     either a verified line or a compiled GoalSet overlay.
     """
+
+    root_state_hash: str = ""

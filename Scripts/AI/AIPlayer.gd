@@ -286,6 +286,10 @@ func take_turn() -> void:
 # ── HTTP request ──────────────────────────────────────────────────────────────
 
 func _request_decision(gs: GameState) -> void:
+	# Measure the complete decision pipeline: scout/search, reasoner or goals
+	# handshake, selector request, and local application of the chosen move.
+	# Do not reset this timer in later pipeline stages.
+	_decision_start_ms = Time.get_ticks_msec()
 	_pending_brief_state = BriefStateSerializer.serialize(gs, player_index)
 	_on_session_changed(_pending_brief_state.get("game_id", ""))
 	_candidate_lines = []
@@ -321,13 +325,12 @@ func _request_decision(gs: GameState) -> void:
 				scout_lines = scout_result.get("candidate_lines", [])
 				scout_stats = scout_result.get("search_stats", {})
 			if _reasoner_mode:
-				_decision_start_ms = Time.get_ticks_msec()
 				var reasoner_emit := await _fetch_reasoner_emit(scout_lines, scout_stats)
 				if gs.game_over:
 					_clear_engine_pin()
 					return
 				if reasoner_emit.get("kind", "") == "line" and \
-						_try_commit_reasoner_line(gs, reasoner_emit, scout_lines):
+						_try_commit_reasoner_line(gs, reasoner_emit):
 					_clear_engine_pin()
 					return
 				if reasoner_emit.get("overlay", null) is Dictionary:
@@ -374,7 +377,6 @@ func _request_decision(gs: GameState) -> void:
 		_clear_engine_pin()
 		return
 
-	_decision_start_ms = Time.get_ticks_msec()
 	_waiting_for_http = true
 
 
@@ -442,6 +444,7 @@ func _fetch_reasoner_emit(scout_lines: Array = [], scout_stats: Dictionary = {})
 	var body_dict := {
 		"brief_state": _pending_brief_state,
 		"game_id": _pending_brief_state.get("game_id", "game"),
+		"root_state_hash": _live_hash(controller.gs),
 	}
 	if not scout_lines.is_empty():
 		body_dict["candidate_lines"] = scout_lines.slice(0, 5)
@@ -454,42 +457,46 @@ func _fetch_reasoner_emit(scout_lines: Array = [], scout_stats: Dictionary = {})
 	if err != OK:
 		push_warning("AIPlayer: reasoner handshake failed to start (err=%d); base search." % err)
 		_waiting_for_http = false
-		return {"kind": "goals", "overlay": {}}
+		return {"kind": "base_search_fallback", "overlay": {}}
 	var res = await _goals_http.request_completed
 	_waiting_for_http = false
 	if int(res[0]) != HTTPRequest.RESULT_SUCCESS or int(res[1]) != 200:
 		push_warning("AIPlayer: reasoner handshake error (result=%d, code=%d); base search." % [int(res[0]), int(res[1])])
-		return {"kind": "goals", "overlay": {}}
+		return {"kind": "base_search_fallback", "overlay": {}}
 	var parsed = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
-	return parsed if parsed is Dictionary else {"kind": "goals", "overlay": {}}
+	return parsed if parsed is Dictionary else {"kind": "base_search_fallback", "overlay": {}}
 
 
-# Direct Reasoner commits still pass through engine-side checks. Prefer the
-# original scout line so expected_pre_hashes survive; explicit simulated lines
-# remain valid but have no per-step hash and will be abandoned on engine rejection.
-func _try_commit_reasoner_line(
-	gs: GameState, emit: Dictionary, scout_lines: Array
-) -> bool:
-	var moves: Array = emit.get("moves", [])
-	if moves.is_empty():
+# Reasoner commits carry the complete canonical registry entry. Scout and live
+# search lines use this same hash-protected path; raw model-authored scripts are
+# never accepted.
+func _try_commit_reasoner_line(gs: GameState, emit: Dictionary) -> bool:
+	var committed = emit.get("committed_line", null)
+	if not committed is Dictionary or committed.is_empty():
 		return false
 	var chosen_line_id := str(emit.get("chosen_line_id", ""))
-	var committed: Dictionary = {}
-	if chosen_line_id != "":
-		for line in scout_lines:
-			if str(line.get("line_id", "")) == chosen_line_id:
-				if line.get("moves", []) != moves:
-					return false
-				committed = line
-				break
-		if committed.is_empty():
+	if chosen_line_id == "" or str(committed.get("line_id", "")) != chosen_line_id:
+		return false
+	if not bool(committed.get("legal", false)) or not bool(committed.get("complete", false)):
+		return false
+	var live_root := _live_hash(gs)
+	if str(emit.get("root_state_hash", "")) != live_root or \
+			str(committed.get("root_state_hash", "")) != live_root:
+		push_warning("AIPlayer: reasoner root hash mismatch; base search.")
+		return false
+	var moves: Array = committed.get("moves", [])
+	var contexts: Array = committed.get("move_contexts", [])
+	var hashes: Array = committed.get("expected_pre_hashes", [])
+	if moves.is_empty():
+		return false
+	if moves.size() != contexts.size() or moves.size() != hashes.size():
+		return false
+	for expected in hashes:
+		if str(expected) == "":
 			return false
-	else:
-		committed = {
-			"line_id": "reasoner-direct",
-			"moves": moves,
-			"expected_pre_hashes": [],
-		}
+	if str(hashes[0]) != live_root:
+		push_warning("AIPlayer: reasoner step-0 hash mismatch; base search.")
+		return false
 	var first := str(moves[0])
 	if first not in _legal_moves_for(gs):
 		push_warning("AIPlayer: reasoner line first command is not currently legal; base search.")
@@ -514,7 +521,6 @@ func _try_commit_reasoner_line(
 # Mirrors the accepted path of _on_request_completed. Every searched decision
 # carries candidate lines, so this fully replaces the server for self-play.
 func _decide_offline(gs: GameState) -> void:
-	_decision_start_ms = Time.get_ticks_msec()
 	var chosen := _argmax_local(_candidate_lines)
 	var chosen_line_id := ""
 	var selector_source = null  # null mirrors the server's pass-fallback (_PASS_DECISION)

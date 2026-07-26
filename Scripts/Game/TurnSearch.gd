@@ -54,19 +54,27 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 	var transposition_hits := 0
 	var max_depth_reached := 0
 	_sim.ai_index = ai_index
+	# The response and every candidate line identify the exact live decision
+	# state they were searched from. Seeded searches intentionally retain this
+	# pre-seed identity rather than reporting the state after the forced prefix.
+	var root_snapshot := ScoreModelScript.snapshot(live_gs, _ai_index)
+	var root_hash := ScoreModelScript.structural_hash(root_snapshot)
 	# Track every simulated GameController (a Node, created via .new() and never
 	# added to the tree) so they can be freed when the search ends. Without this,
 	# each expanded branch leaks an orphan Node on every AI decision.
 	var controllers: Array = []
 	var root_sc: GameController = _sim.build_sim_controller(live_gs)
 	if root_sc == null:
-		return {"candidate_lines": [], "search_stats": _stats(0, 0, 0, 0, beam_width, 0, "clone_failed")}
+		return {
+			"legal": false,
+			"root_state_hash": root_hash,
+			"candidate_lines": [],
+			"search_stats": _stats(0, 0, 0, 0, beam_width, 0, "clone_failed"),
+		}
 	controllers.append(root_sc)
 	# Snapshot the pre-seed root so score features stay relative to the live
 	# decision state (not the post-seed tip). Seeded deepen/search_for still
 	# reports deltas from the true root.
-	var root_snapshot := ScoreModelScript.snapshot(root_sc.gs, _ai_index)
-	var root_hash := ScoreModelScript.structural_hash(root_snapshot)
 	# Ranker for the AI's own forced sub-decisions (e.g. which card to discard):
 	# score the settled board of each option so quiescence can pick the best one
 	# inline, without spawning beam branches that would dilute move diversity.
@@ -87,6 +95,7 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 					sc.free()
 			return {
 				"legal": false,
+				"root_state_hash": root_hash,
 				"error": seed_err,
 				"candidate_lines": [],
 				"search_stats": _stats(0, 0, 0, 0, beam_width, 0, "seed_failed"),
@@ -106,12 +115,13 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 	):
 		_add_leaf(leaves, frontier[0], root_sc, root_snapshot)
 		var elapsed_seed := Time.get_ticks_msec() - start_ms
-		var seeded_lines := _build_candidate_lines(leaves, top_n)
+		var seeded_lines := _build_candidate_lines(leaves, top_n, root_hash)
 		for sc in controllers:
 			if is_instance_valid(sc):
 				sc.free()
 		return {
 			"legal": true,
+			"root_state_hash": root_hash,
 			"candidate_lines": seeded_lines,
 			"search_stats": _stats(0, 0, 0, seed_steps.size(), beam_width, elapsed_seed, "seed_leaf"),
 		}
@@ -135,7 +145,12 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 			var sc: GameController = node["sc"]
 			var legal: Array = LegalMoveEnumerator.enumerate(sc.gs, ai_index)
 			if legal.is_empty() or node["steps"].size() >= max_depth or sc.gs.game_over:
-				_add_leaf(leaves, node, sc, root_snapshot)
+				var leaf_reason := ""
+				if node["steps"].size() >= max_depth and not sc.gs.game_over:
+					leaf_reason = "max_depth"
+				elif legal.is_empty() and not sc.gs.game_over:
+					leaf_reason = "dead_end"
+				_add_leaf(leaves, node, sc, root_snapshot, leaf_reason)
 				continue
 			var expanded_any := false
 			for cmd in legal:
@@ -181,14 +196,17 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 				else:
 					next_frontier.append(child_node)
 			if not expanded_any:
-				_add_leaf(leaves, node, sc, root_snapshot)
+				_add_leaf(leaves, node, sc, root_snapshot, "dead_end")
 		if stopped_reason in ["node_budget", "time_budget"]:
 			break
 		frontier = _best_nodes(next_frontier, beam_width)
 	for node in frontier:
-		_add_leaf(leaves, node, node["sc"], root_snapshot)
+		var frontier_reason := stopped_reason
+		if frontier_reason not in ["node_budget", "time_budget"]:
+			frontier_reason = "frontier"
+		_add_leaf(leaves, node, node["sc"], root_snapshot, frontier_reason)
 	var elapsed := Time.get_ticks_msec() - start_ms
-	var candidate_lines := _build_candidate_lines(leaves, top_n)
+	var candidate_lines := _build_candidate_lines(leaves, top_n, root_hash)
 	# Free every simulated controller Node now that candidate lines (built from
 	# snapshots/deltas, not the controllers) are extracted.
 	for sc in controllers:
@@ -196,6 +214,7 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 			sc.free()
 	return {
 		"legal": true,
+		"root_state_hash": root_hash,
 		"candidate_lines": candidate_lines,
 		"search_stats": _stats(nodes_explored, branches_expanded, transposition_hits, max_depth_reached, beam_width, elapsed, stopped_reason),
 	}
@@ -236,17 +255,44 @@ func _apply_seed_moves(
 	return ""
 
 
-func _add_leaf(leaves: Array, node: Dictionary, sc: GameController, root_snapshot: Dictionary) -> void:
+func _add_leaf(
+	leaves: Array,
+	node: Dictionary,
+	sc: GameController,
+	root_snapshot: Dictionary,
+	fallback_reason: String = "",
+) -> void:
 	var snap := ScoreModelScript.snapshot(sc.gs, _ai_index)
 	var features := ScoreModelScript.build_score_features(root_snapshot, snap, node.get("steps", []))
 	var scored: Dictionary = _scorer.score_with_breakdown(features)
 	var leaf := node.duplicate(true)
+	var completion := _completion_status(sc.gs, node.get("steps", []), fallback_reason)
 	leaf["score"] = scored["score"]
 	leaf["breakdown"] = scored["breakdown"]
 	leaf["features"] = features
 	leaf["resolved_state"] = _sim.build_delta(root_snapshot, snap, sc.gs)
 	leaf["search_state"] = ScoreModelScript.build_search_state(snap, features, node.get("steps", []))
+	leaf["complete"] = completion["complete"]
+	leaf["terminal_reason"] = completion["terminal_reason"]
 	leaves.append(leaf)
+
+
+# Completeness is a rules-engine fact, not an inference made by callers from
+# search statistics. Main lines complete only by ending the turn or game;
+# reactive lines complete only when their response window resolves or game ends.
+func _completion_status(gs: GameState, steps: Array, fallback_reason: String) -> Dictionary:
+	if gs.game_over:
+		return {"complete": true, "terminal_reason": "game_over"}
+	if _mode == "reactive" and not _ai_has_response_window(gs):
+		return {"complete": true, "terminal_reason": "response_window_resolved"}
+	if _mode == "main":
+		for step in steps:
+			if str(step.get("command", "")).strip_edges() == "end turn":
+				return {"complete": true, "terminal_reason": "end_turn"}
+	var reason := fallback_reason
+	if reason == "":
+		reason = "dead_end"
+	return {"complete": false, "terminal_reason": reason}
 
 
 # Decide whether a freshly expanded child terminates the line.
@@ -276,7 +322,7 @@ func _best_nodes(nodes: Array, beam_width: int) -> Array:
 	return nodes.slice(0, mini(beam_width, nodes.size()))
 
 
-func _build_candidate_lines(leaves: Array, top_n: int) -> Array:
+func _build_candidate_lines(leaves: Array, top_n: int, root_hash: String) -> Array:
 	leaves.sort_custom(func(a, b): return float(a.get("score", 0.0)) > float(b.get("score", 0.0)))
 	var out: Array = []
 	var count := mini(top_n, leaves.size())
@@ -295,6 +341,11 @@ func _build_candidate_lines(leaves: Array, top_n: int) -> Array:
 			pre_hashes.append(step.get("pre_hash", ""))
 		out.append({
 			"line_id": "line-%d" % (i + 1),
+			"root_state_hash": root_hash,
+			"legal": true,
+			"complete": bool(leaf.get("complete", false)),
+			"terminal_reason": str(leaf.get("terminal_reason", "dead_end")),
+			"search_mode": _mode,
 			"moves": moves,
 			"move_contexts": move_contexts,
 			"expected_pre_hashes": pre_hashes,

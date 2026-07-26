@@ -63,6 +63,10 @@ class ToolBudget:
 
     def status(self) -> dict[str, int | bool]:
         return {
+            "node_limit": self.node_limit,
+            "time_limit_ms": self.time_limit_ms,
+            "nodes_used": self.nodes_used,
+            "engine_time_ms": self.engine_time_ms,
             "nodes_remaining": self.nodes_remaining,
             "time_remaining_ms": self.time_remaining_ms,
             "budget_remaining_pct": self.remaining_pct,
