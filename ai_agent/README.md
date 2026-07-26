@@ -211,7 +211,9 @@ Rows recorded before this feature show zero tokens.
 ## Tuning dataset (search mode)
 
 When `RIFTBOUND_SEARCH` is on, every engine-searched decision is captured for
-later score tuning (see `docs/Statistical_Analysis_Storage.md`):
+later score tuning (see `docs/Statistical_Analysis_Storage.md`). Post-game
+analyst design (counterfactual missed wins / later goals, hypothesis loop):
+`docs/LLM_Data_Analysis_Loop.md`.
 
 - `weight_versions` — the active `Data/AI/scoring_profile.json`, hashed + tagged
   with the current git SHA, recorded on server start.

@@ -1,322 +1,355 @@
-# LLM Data-Analysis & Hypothesis Loop — Design Doc
+# Post-Game Analysis & Hypothesis Loop — Design Doc
 
-Status: design only (no code yet).
-Scope: **how** the LLM inspects the telemetry, forms hypotheses, and proposes
-weight changes / new features — i.e. the *interaction & data-presentation layer*.
+Status: **design** (analyst not built). Data/tuning foundation is largely in place
+— see §0 and companion docs for what already ships.
+Scope: **post-game / offline** analysis — how an LLM (or a human with the same
+tools) inspects telemetry, searches counterfactual lines, forms typed hypotheses,
+and routes them to deterministic validators. Not the live decision loop.
 
-Companion docs (read first):
-- `Statistical_Analysis_Storage.md` — what data exists (schema, endpoints).
-- `Score_Tuning_And_Evolution.md` — the *roles* the LLM plays (§3 hypotheses,
-  §4 feature invention) and the optimizer math (Texel/CMA-ES). **This doc does
-  not repeat those**; it specifies the concrete mechanics that doc left open:
-  how the data reaches the model and what structured decisions come back.
+Companion docs:
+- `Statistical_Analysis_Storage.md` — schema and capture (much of §2–3 shipped).
+- `Score_Tuning_And_Evolution.md` — Texel/CMA-ES, delayed-value features, LLM
+  roles in tuning (hypotheses + feature invention).
+- `Goal_Oriented_Strategist.md` — live per-turn GoalSet → scoring overlay.
+- `Deliberative_Reasoning_Toolkit.md` — live `search_for` / `simulate` / `deepen`
+  and deferred multi-turn `rollout` (engine tools this loop reuses offline).
 
-The guiding principle from the tuning doc holds throughout:
-**the LLM hypothesizes and explains; deterministic tooling decides.** This doc is
-about making that division *operational*.
-
----
-
-## 0. Why a dedicated interaction layer is needed
-
-Three failure modes appear if you "just give the LLM the database":
-
-1. **Context blow-up / numeric degradation.** Thousands of `search_decisions`
-   rows won't fit, and even when a big table fits, LLM reasoning over many raw
-   numeric rows degrades sharply. Table-reasoning research (Chain-of-Table,
-   arXiv:2401.04398; Binder, arXiv:2210.02875) shows models do far better over
-   *small, transformed* tables than over large raw ones. ⇒ never dump rows; feed
-   **schema + aggregates + small slices**.
-
-2. **Spurious correlations / p-hacking.** An LLM asked to "find what predicts
-   winning" over ~30 features will happily report noise as signal. With many
-   candidate hypotheses the false-discovery rate explodes (classic multiple-
-   comparisons problem). ⇒ the LLM must **pre-register** each hypothesis and a
-   deterministic validator must test it on **held-out** data.
-
-3. **Ungrounded numbers.** LLMs are worse than Texel/CMA-ES at picking weight
-   *values* (Score_Tuning §4.3). ⇒ the LLM emits *directions and structured
-   proposals*, never final committed weights.
-
-The whole design below exists to enforce those three constraints.
+Guiding principle (unchanged):
+**the LLM hypothesizes and explains; deterministic tooling decides.**
 
 ---
 
-## 1. How data is presented to the LLM
+## 0. Current architecture (what the analyst looks at)
 
-Layered, from always-on context to on-demand pull. This mirrors how agentic
-data-science systems (Data Interpreter, arXiv:2402.18679) separate a stable
-*plan/context* from *tool-driven* data access.
+The live agent is no longer “LLM picks among scored lines only.” Post-game
+analysis must understand the full stack:
 
-### 1.1 Tier A — always in context (small, curated)
-A compact **"analysis briefing"** assembled deterministically before the LLM
-runs. Target ≤ ~2–3k tokens. Contents:
+```
+TurnSearch (beam, linear ScoringProfile)
+  ↑ optional GoalSet overlay (RIFTBOUND_GOALS) from Strategist
+  ↑ optional live engine tools (search_for / simulate / deepen via EngineServer)
+  → choose_line (LLM | argmax | single-line short-circuit)
+```
 
-- **Schema card** — table names, columns, types, and one-line semantics for
-  `search_decisions`, `candidate_lines`, `decision_snapshots`, `card_events`,
-  `turn_snapshots`, `games`. (Schemas, not rows — this is what text-to-SQL
-  research, Spider/BIRD, shows the model actually needs.)
-- **Feature dictionary** — the ~30 scoring terms, each with its weight,
-  sign, and one-line meaning (generated from `scoring_profile.json` +
-  `Scoring_Features_Reference.md`). The LLM cannot reason about a feature it
-  can't name.
-- **Dataset summary stats** — n games, n decisions, win rate, date range,
-  origin mix (`self_play`/`vs_human`/`vs_heuristic`), weight_version coverage.
-- **Pre-computed headline aggregates** (the high-value views, as small markdown
-  tables):
-  - Feature impact table (from `feature_report.py`): per feature → in-play %,
-    avg |impact|, net direction.
-  - Feature→outcome correlation table: per feature → mean value in won vs lost
-    decisions, plus a simple effect size (see §4).
-  - Card stats table (from `card_report.py`), already min-N gated.
+| Mode | Flags | What post-game can trust |
+|---|---|---|
+| **Argmax self-play** | `SEARCH=on`, `SEARCH_ARGMAX=on` | Pure search + weights. Best for Texel / weight A/B. |
+| **LLM selector** | `SEARCH=on`, goals off | Selection vs eval vs search error (classic triad). |
+| **Goals on** | `SEARCH=on`, `GOALS=on` | Also **goal error** (bad overlay steered generation/selection). |
+| **Future Reasoner** | planned `RIFTBOUND_REASONER` | Also **investigation / commit** error (tool misuse or direct line commit). |
 
-> Present these as **markdown tables**, not JSON or CSV. For the small tables we
-> show the LLM (tens of rows), markdown is the most reliably parsed-and-reasoned
-> format; JSON wastes tokens on punctuation and CSV loses the header alignment
-> cue. Keep numbers rounded (3 sig figs) — false precision wastes tokens and
-> doesn't help reasoning.
+Always stratify aggregates by `origin` (`self_play` / `vs_human` / `vs_heuristic`)
+and `selector_source` (`argmax` / `llm` / `fallback` / `single`). Never mix
+argmax weight-tuning data with goals-on quality data without saying so.
 
-### 1.2 Tier B — on-demand, via a constrained query tool
-The LLM can pull more, but **never writes raw SQL against the live DB**. Instead
-it calls a typed, read-only analysis API (see §2). Results come back as small
-markdown tables, capped at K rows (e.g. 30) with an explicit "N more not shown"
-footer. This is the text-to-SQL safety pattern: a constrained, validated query
-surface rather than arbitrary SQL (avoids both injection and the model writing
-expensive/incorrect joins).
+### 0.1 What already ships (do not re-plan)
 
-### 1.3 Tier C — qualitative drill-down (a few full examples)
-For causal reasoning the LLM needs to *see* representative games, not just
-aggregates — this is what turns "feature X correlates with losing" into a
-trustable mechanism (Score_Tuning §3.1). Provide, on request, a **handful** of
-fully-rendered decisions: the `decision_snapshot` (board state), the
-`candidate_lines` with their `score_breakdown`, the chosen line, and the
-eventual `game_outcome`. Cap at ~3–5 examples per request (token budget +
-keeps reasoning focused). Sample them deliberately: e.g. "highest-regret
-decisions in lost games," not random.
+| Piece | Where |
+|---|---|
+| Tuning tables | `search_decisions`, `candidate_lines`, `decision_snapshots`, `weight_versions`, `card_events` in `memory.py` |
+| Outcome backfill | `/game_over` → `game_outcome`, `final_score_diff`, `went_first` |
+| Self-play harness | `SelfPlaySim.gd` + offline JSONL capture / `import_selfplay_logs.py` |
+| Deterministic reports | `feature_report.py`, `card_report.py`, `texel_tune.py` |
+| Live goal bias | Strategist + `goal_compiler` (`Goal_Oriented_Strategist.md`) |
+| Live conditional search | `skills.search_for` + `EngineServer` (`Deliberative_Reasoning_Toolkit.md` Phases 0–2) |
 
-**Takeaway:** aggregates for *what*, a few concrete games for *why*. Never the
-raw middle (thousands of rows).
+### 0.2 Gaps the analyst still needs
+
+| Gap | Why it matters |
+|---|---|
+| Persist `goal_set` + overlay deltas + achieved-at-leaf | Without this, goal error is invisible in SQL |
+| Persist strategist/actor tool traces (or a compact summary) | Needed for investigation-error triage |
+| `turn_snapshots` | WPA / swing-turn localization |
+| `hypotheses` + `tuning_runs` | Audit trail for the loop below |
+| Typed analysis API + briefing generator | §1–2 (not built) |
+| Offline counterfactual line search | §3 (not built; reuses EngineServer) |
 
 ---
 
-## 2. How the LLM interacts with the data (the tool surface)
+## 1. Why a dedicated analysis layer
 
-Two viable mechanisms; we recommend a **hybrid** matching the maturity ladder.
+Three failure modes if you “just give the LLM the database”:
 
-### 2.1 Recommended: a typed analysis-tool API (start here)
-A small set of read-only, parameterized tools the LLM calls in a ReAct loop. Each
-returns a small markdown table. Examples:
-
-- `feature_outcome_stats(feature?, origin?, min_turn?, max_turn?, seat?)`
-  → per-feature mean-in-wins vs mean-in-losses, effect size, n.
-- `card_stats(sort, min_plays, origin?)` → wraps `card_report.py`.
-- `feature_impact(sort, filters)` → wraps `feature_report.py`.
-- `sample_decisions(filter, order_by, limit≤5)` → Tier-C drill-down rows.
-- `slice_winrate(group_by, filters)` → win rate conditioned on a bucket
-  (e.g. win rate when `reactive_potential ≥ 3` vs `< 3`).
-- `cohort_compare(weight_version_a, weight_version_b)` → A/B summary.
-
-Why start here: bounded, safe, cacheable, and each tool encodes a *correct*
-statistical computation once (the LLM can't get the SQL subtly wrong). This is
-the OPRO/Eureka discipline — the LLM orchestrates; the scoring/measurement is
-deterministic code.
-
-### 2.2 Later: sandboxed code interpreter over a dataframe
-For open-ended exploration the LLM writes Python against a read-only snapshot
-(pandas dataframe of the tables) in a sandbox — the Data Interpreter /
-code-interpreter pattern (arXiv:2402.18679). More powerful (arbitrary
-group-bys, plots, regressions) but needs a sandbox, resource limits, and output
-truncation. Gate this behind the typed API working first.
-
-**Consensus from the field:** prefer *pre-computed correct aggregates + a
-constrained query tool* over free-form SQL for reliability; add the
-code-interpreter only when you need exploratory flexibility, and still feed it a
-**snapshot**, never the live DB.
+1. **Context blow-up.** Thousands of `search_decisions` rows degrade numeric
+   reasoning. Feed **schema + aggregates + small slices**, never raw dumps.
+2. **Spurious correlations.** Many features ⇒ multiple-comparisons explosion.
+   Hypotheses must be **pre-registered** and tested on **held-out** data.
+3. **Ungrounded numbers.** LLMs are weak at weight *values*. Emit **directions
+   and structured proposals**; Texel/CMA-ES + SPRT decide.
 
 ---
 
-## 3. What decisions the LLM makes (typed outputs)
+## 2. How data is presented
 
-The LLM never returns prose-only conclusions. Every analysis run emits one or
-more **typed proposals** drawn from a fixed taxonomy. This is the OPRO/Eureka/
-FunSearch structured-proposer pattern: constrain the model to a schema so the
-output is machine-checkable and routable to a validator.
+### 2.1 Tier A — always in context (≤ ~2–3k tokens)
+Deterministic **analysis briefing**:
 
-### 3.1 Decision taxonomy
-| # | Decision type | When | Routes to |
+- **Schema card** — table names/columns/semantics for tuning tables + `games`.
+- **Feature dictionary** — ~30 scoring terms with weight, sign, one-line meaning
+  (from `scoring_profile.json` + `Scoring_Features_Reference.md`).
+- **Dataset summary** — n games/decisions, win rate, date range, origin mix,
+  `selector_source` mix, weight_version coverage, goals-on fraction (when logged).
+- **Headline aggregates** (markdown tables, ~3 sig figs):
+  - Feature impact (`feature_report.py`)
+  - Feature→outcome effect sizes (wins vs losses)
+  - Card stats (`card_report.py`, min-N gated)
+  - Failure-mode sketch counts (§4) when telemetry allows
+
+### 2.2 Tier B — on-demand typed query tools
+Read-only, parameterized tools; results capped (e.g. ≤30 rows) as markdown.
+**No raw SQL against the live DB.**
+
+### 2.3 Tier C — qualitative + counterfactual drill-down
+A handful of full decisions (board snapshot, candidates + breakdowns, chosen
+line, outcome) **plus**, when useful, engine counterfactuals from §3.
+Sample deliberately (highest-regret losses, late collapses), not at random.
+Cap ~3–5 examples per request.
+
+**Takeaway:** aggregates for *what*, a few concrete games (+ optional
+counterfactual lines) for *why*.
+
+---
+
+## 3. Counterfactual line search (missed wins & later goals)
+
+Highest-value **new** analysis capability. Distinct from live play: budget and
+assumption honesty matter more than latency, and results are diagnostic, not
+moves to ship.
+
+Inspired by chess game review (Stockfish MultiPV / missed mate), Hearthstone
+missed-lethal tools (e.g. LethalCue), and the deferred `rollout` design in
+`Deliberative_Reasoning_Toolkit.md`. TCG research (TCG-Bench, PTCG-Bench)
+repeatedly shows late losses and missed close-outs as the dominant failure mode.
+
+### 3.1 Same-turn: “was there a winning / goal line *now*?”
+
+Offline, on a stored `decision_snapshot` (or pinned engine state):
+
+1. Restore state via `EngineServer`.
+2. `search_for` with concrete predicates (`my_score >= 8`, `points_scored >= 2`,
+   kill/control clauses — see `schema/search_for_tool_schema.md`).
+3. Optional `deepen` / `simulate` on matches.
+4. Compare to the played line → **missed win**, **missed goal**, or **not in
+   beam** (search coverage gap).
+
+This is the cheap, high-precision slice. Prefer it before multi-turn rollouts.
+
+### 3.2 Multi-turn: “was there a better setup for a later goal?”
+
+For swing turns in lost (or high-regret) games, run a **bounded** counterfactual:
+
+```
+restore snapshot S
+propose roots: played line | top candidates | analyst-named hypotheses
+for horizon H ≤ 2 (hard cap):
+  AI TurnSearch from current state
+  opponent reply under LABELED assumptions (known board; named/generic cards)
+  score leaf: win? score proximity? goal predicate? eval features?
+report: line L, horizon H, assumption set A, leaf summary
+```
+
+This is the offline counterpart of deferred live `simulate_opponent` + `rollout`.
+**Every result must carry its assumption set.** Hidden hands and draws make
+“winning in two turns” conditional — report *winning under A*, never as certain
+blunder proof.
+
+### 3.3 Analysis tools (engine-backed)
+
+| Tool | Returns |
+|---|---|
+| `search_for_on_snapshot(game_id, turn, decision_index, constraints, …)` | Same-turn goal/win matches from a logged decision |
+| `counterfactual_rollout(game_id, turn, decision_index, root, horizon, assumptions)` | Projected leaf + PV under labeled assumptions |
+| `compare_to_played(…)` | Diff: played vs counterfactual (score, predicates, regret-style delta) |
+
+Live `search_for` / `simulate` / `deepen` stay for the Reasoner; these wrap the
+same engine for **logged snapshots** and batch review.
+
+### 3.4 When this is useful vs not
+
+| Use | Verdict |
+|---|---|
+| Post-game missed same-turn wins/goals | **Build first** — falsifiable, high signal |
+| Post-game 1–2 turn rollouts on swing turns | **Build second** — fuels feature/goal diagnosis |
+| Live unbounded multi-turn search every decision | **Avoid** — cost + hidden-info noise; keep delayed value in the leaf eval (Score_Tuning §1) |
+
+---
+
+## 4. Failure-mode triage (expanded)
+
+Before proposing weight changes, classify each bad decision. Routing wrong
+causes useless tuning.
+
+| Mode | Signal | Fix elsewhere |
+|---|---|---|
+| **Selection error** | Better candidate in top-N; `regret > 0`; selector=`llm` | Line-selector / prompts |
+| **Search error** | Counterfactual or realized-best line never in beam | Beam/depth/budget; `search_for` coverage |
+| **Eval error** | Best line generated but mis-scored vs outcome | **Weight / feature tuning** |
+| **Goal error** | GoalSet/overlay steered search away from a clearly better line | Strategist prompts / vocabulary; not base weights |
+| **Investigation error** *(Reasoner)* | Tools available but unused/misused; missed `search_for` hit | Reasoner prompts / tool policy |
+| **Commit error** *(Reasoner)* | Direct line commit illegal or dominated by search | Emit-contract / validation |
+| **Horizon / setup miss** | Same-turn eval fine; counterfactual shows better later goal under mild assumptions | Delayed-value **features** or sharper goals — not deeper live search by default |
+
+Classic triad (selection / search / eval) still applies to argmax and
+selector-only games. Goals-on and future Reasoner **add** rows above; they do
+not retire the triad.
+
+---
+
+## 5. Typed analysis tools (DB surface)
+
+Start with a small read-only API (ReAct-callable). Prefer wrapping existing CLIs.
+
+| Tool | Purpose |
+|---|---|
+| `feature_outcome_stats(…)` | Per-feature mean in wins vs losses, effect size, n |
+| `feature_impact(…)` | Wraps `feature_report.py` |
+| `card_stats(…)` | Wraps `card_report.py` |
+| `slice_winrate(group_by, filters)` | Conditional win rate |
+| `cohort_compare(weight_version_a, b)` | A/B summary |
+| `sample_decisions(filter, order_by, limit≤5)` | Tier-C snapshots |
+| `failure_mode_summary(filters)` | Counts from §4 when telemetry allows |
+| + §3.3 engine tools | Counterfactual drill-down |
+
+Later (optional): sandboxed Python over a **read-only dataframe snapshot** for
+open-ended exploration — only after the typed path is trusted.
+
+---
+
+## 6. What the analyst emits (typed proposals)
+
+No prose-only conclusions. Every run emits one or more **pre-registered**
+proposals from a fixed taxonomy.
+
+### 6.1 Decision taxonomy
+
+| # | Type | When | Routes to |
 |---|---|---|---|
-| 1 | **Failure-mode triage** | per bad decision | classifier, not tuner (Score_Tuning §3.3) |
-| 2 | **Weight-direction hypothesis** | a feature looks mis-weighted | Texel/CMA-ES + SPRT gate |
-| 3 | **New-feature proposal** | a recurring loss has no term capturing it | human-reviewed code + re-tune + gate |
-| 4 | **Data-quality / coverage flag** | a stat looks broken or under-sampled | back to data collection, not tuning |
-| 5 | **Planner-bias suggestion** | a multi-turn pattern the per-turn search misses | `planner.py` overlay (Score_Tuning §5) |
+| 1 | **Failure-mode triage** | per bad decision | classifier (§4); not a tuner |
+| 2 | **Counterfactual finding** | missed win / better later line under assumptions | evidence for 3–5; training note |
+| 3 | **Weight-direction hypothesis** | feature mis-weighted | Texel/CMA-ES + SPRT |
+| 4 | **New-feature proposal** | recurring loss has no capturing term | human-reviewed code + re-tune + gate |
+| 5 | **Data-quality / coverage flag** | broken or under-sampled stats | collection, not tuning |
+| 6 | **Goal / search-policy suggestion** | systematic GoalSet or beam miss | strategist prompts, scout settings, budgets — **not** inventing a new overlay mechanism (that already ships) |
 
-Types 2–3 are the tuning core; 1 and 4 prevent tuning the wrong thing; 5 feeds
-the cross-turn layer.
+Types 3–4 are the tuning core. Type 2 is the new high-value evidence channel.
+Type 6 replaces the old “planner-bias suggestion → build an overlay” item: the
+live Goal Strategist already owns overlays.
 
-### 3.2 Proposal schema (every hypothesis is pre-registered)
-The key anti-p-hacking move: the LLM must state the test *before* it's run, in a
-structured form a validator can execute mechanically.
+### 6.2 Proposal schema (pre-register the test)
 
 ```json
 {
-  "id": "hyp-2026-06-25-003",
-  "type": "weight_direction",          // taxonomy above
-  "target": "reactive_potential",      // feature or weight key
-  "claim": "over-weighted; AI hoards ready runes for reactions it never uses",
-  "direction": "decrease",             // increase | decrease | sign_flip | n/a
+  "id": "hyp-2026-07-26-003",
+  "type": "weight_direction",
+  "target": "reactive_potential",
+  "claim": "over-weighted; AI hoards ready runes for unused reactions",
+  "direction": "decrease",
   "predicted_effect": "win rate rises when reactive_potential weight is lowered",
-  "falsifiable_test": {                // how the validator checks it — REQUIRED
-    "method": "cma_es_then_sprt",      // or texel_refit | ab_selfplay | held_out_corr
+  "falsifiable_test": {
+    "method": "cma_es_then_sprt",
     "metric": "selfplay_winrate_vs_baseline",
     "success": "SPRT accepts at +",
     "holdout": "validate on games not used to form the hypothesis"
   },
   "evidence": {
     "aggregate": "mean reactive_potential 2.7 in losses vs 1.1 in wins (n=240)",
-    "example_games": [12, 19, 27],     // Tier-C drill-down the LLM cited
+    "example_games": [12, 19, 27],
+    "counterfactuals": ["cf-12-t4", "cf-19-t6"],
     "effect_size": 0.34
   },
   "confidence": "medium",
-  "risk": "correlated with runes_available; refit may shift that instead"
+  "risk": "correlated with runes_available; prefer joint refit"
 }
 ```
 
-A **new-feature proposal** (type 3) additionally carries:
-```json
-{
-  "feature_name": "lethal_proximity",
-  "concept": "rewards developing toward 8 points / lethal, not just current score",
-  "compute_sketch": "victory_score - my_score, non-linear closeness; from leaf_snap",
-  "expected_sign": "positive",
-  "implements_in": "ScoreModel.build_score_features",
-  "correlated_with": ["score_diff", "point_scored"],   // overfit watch
-  "human_review_required": true
-}
-```
+**New-feature** proposals additionally carry: `feature_name`, `concept`,
+`compute_sketch`, `expected_sign`, `implements_in` (`ScoreModel.build_score_features`),
+`correlated_with`, `human_review_required: true`.
 
-### 3.3 Why typed, pre-registered output matters
-- **Routable**: a dispatcher sends each type to the right validator automatically.
-- **Auditable**: every hypothesis + its test + its result is a row (see §5),
-  so you can later ask "what % of LLM hypotheses validated?" — a direct check on
-  whether the LLM is finding signal or noise.
-- **Anti-p-hacking**: the `falsifiable_test` + `holdout` fields force the
-  proposal to commit to a test on data it didn't see, which is the standard
-  defense against the multiple-comparisons inflation a free-form LLM analysis
-  would cause.
+**Counterfactual findings** carry: snapshot key, root line, horizon, assumption
+set, leaf predicates satisfied, comparison to played line.
 
 ---
 
-## 4. The statistical guardrails (deterministic, not LLM)
+## 7. Statistical guardrails (deterministic)
 
-These run as code around the LLM, because the LLM is the *source* of the
-p-hacking risk, not its mitigation.
-
-1. **Held-out split.** Partition games into *explore* (LLM forms hypotheses) and
-   *confirm* (validator tests them). A hypothesis only "passes" if it holds on
-   confirm data. Pre-register before peeking at confirm (the §3.2 schema enforces
-   this by construction).
-2. **Multiple-comparison correction.** When the LLM emits N hypotheses in a
-   batch, apply Benjamini–Hochberg FDR (or Bonferroni for small N) to the
-   confirm-set tests. Report adjusted significance, not raw.
-3. **Effect size + n, always.** Every aggregate shown to the LLM and every test
-   carries its sample size and an effect size (e.g. standardized mean diff), so
-   "significant but tiny" is visible. Gate per-feature claims behind a min-n
-   (mirrors `card_stats` min-plays).
-4. **Confounder surfacing.** The briefing explicitly lists known correlated
-   feature pairs (`cards_in_hand`↔`card_drawn`, `battlefield_control`↔
-   `battlefields_conquered`, `reactive_potential`↔`runes_available`) so the LLM
-   is warned, and the validator prefers a **joint refit** (Texel/CMA-ES over all
-   weights) over single-feature edits — a single-feature change often just
-   displaces signal onto its correlate.
-5. **Initiative / origin controls.** Use the `went_first` and `origin` columns
-   as covariates or stratifiers so the LLM isn't shown win-rate gaps that are
-   really first-player or opponent-pool artifacts.
-6. **The win-rate gate is final.** No hypothesis becomes a committed weight
-   without the self-play SPRT gate from Score_Tuning §2.3. The LLM's confidence
-   field is advisory only.
+1. **Held-out split** — explore (form hypotheses) vs confirm (test). Pass only on
+   confirm.
+2. **Multiple-comparison correction** — Benjamini–Hochberg FDR (or Bonferroni
+   for small N) on confirm-set tests.
+3. **Effect size + n** on every aggregate; min-n gates (mirror card stats).
+4. **Confounder surfacing** in the briefing (`cards_in_hand`↔`card_drawn`,
+   `battlefield_control`↔`battlefields_conquered`,
+   `reactive_potential`↔`runes_available`). Prefer **joint refit** over
+   single-feature edits.
+5. **Controls** — `went_first`, `origin`, `selector_source`, goals-on when logged.
+6. **SPRT win-rate gate is final** for weight commits. LLM confidence is advisory.
+7. **Assumption labels** — counterfactual wins without an assumption set are
+   invalid evidence.
 
 ---
 
-## 5. The loop (putting it together)
-
-Mirrors the idea→experiment→analysis→iterate loops of automated-discovery
-systems (The AI Scientist, arXiv:2408.06292; Google AI co-scientist's
-generate-debate-evolve; Coscientist, Boiko et al., Nature 2023), specialized to
-weight tuning:
+## 8. The loop
 
 ```
-1. BUILD BRIEFING   deterministic: assemble Tier-A context (§1.1) from current
-                    DB + weight_version, on the EXPLORE split only.
-2. ANALYZE          LLM reads briefing, calls analysis tools (§2) to drill in,
-                    samples a few games (Tier C) for causal grounding.
-3. PROPOSE          LLM emits a ranked list of typed, pre-registered hypotheses
-                    (§3 schema). Rank by expected win-rate impact × confidence.
-4. DEDUP / FILTER   deterministic: drop hypotheses already tried (query the
-                    hypotheses log), enforce schema validity, cap batch size.
-5. VALIDATE         deterministic: run each falsifiable_test on the CONFIRM split
-                    (Texel refit / CMA-ES / A-B self-play); apply FDR (§4).
-6. GATE             SPRT win-rate vs baseline for surviving candidates.
-7. COMMIT / RECORD  accept → new weight_versions row (or human-reviewed feature
-                    PR for type 3). Every attempt → tuning_runs / hypotheses log.
-8. FEED BACK        append (hypothesis → outcome) to the log; next iteration's
-                    briefing includes "previously tried" so the LLM doesn't
-                    repeat itself and can build on what worked (OPRO-style
-                    trajectory-in-context, arXiv:2309.03409).
+1. BUILD BRIEFING     Tier A from EXPLORE split only (§2.1)
+2. ANALYZE            LLM + typed DB tools (§5); sample games (Tier C)
+3. COUNTERFACTUALIZE  on swing / high-regret turns: same-turn search_for,
+                      then optional short rollouts (§3)
+4. TRIAGE             failure modes (§4) before any weight proposal
+5. PROPOSE            ranked typed hypotheses (§6)
+6. DEDUP / FILTER     drop repeats (hypotheses log); schema-validate; cap batch
+7. VALIDATE           falsifiable_test on CONFIRM split; apply FDR (§7)
+8. GATE               SPRT vs baseline for surviving weight/feature candidates
+9. COMMIT / RECORD    accept → weight_versions (or feature PR); all attempts →
+                      tuning_runs / hypotheses log
+10. FEED BACK         next briefing includes previously tried + outcomes
 ```
 
-Step 8 is what makes it a *learning* loop rather than one-shot analysis: the LLM
-sees the running ledger of what it proposed and whether the simulator confirmed
-it — the same "show prior (solution,score) pairs" mechanism OPRO/Eureka use to
-improve proposals over iterations.
+### 8.1 New tables
 
-### 5.1 New tables this loop needs (extends storage doc)
-- **`hypotheses`** — one row per LLM proposal: the full §3.2 JSON, the
-  weight_version it was formed against, explore/confirm split id, status
-  (proposed|validated|rejected|committed), and the validator's measured result.
-  This *is* the audit trail and the "don't repeat" memory.
-- (`tuning_runs` from the storage doc already records the weight-delta + SPRT
-  verdict; link each to its `hypotheses.id`.)
+- **`hypotheses`** — full §6.2 JSON, weight_version, explore/confirm split id,
+  status (`proposed|validated|rejected|committed`), validator result.
+- **`counterfactual_runs`** (optional, or embed under hypotheses evidence) —
+  snapshot key, constraints/root, horizon, assumptions, leaf summary, tool
+  latency.
+- Link `tuning_runs` (storage doc) to `hypotheses.id` when that table lands.
 
 ---
 
-## 6. Maturity ladder (build order)
+## 9. Build order
 
-1. **Deterministic briefing generator** (§1.1) + the read-only analysis tools
-   (§2.1). No LLM yet — just produce the markdown the human currently reads.
-2. **`feature_outcome_stats` + held-out split + FDR** (§4) as plain code. This
-   alone is useful (it's Texel-adjacent diagnosis) and is the validator the LLM
-   will later call.
-3. **LLM analyst, read-only.** Feed briefing + tools; have it emit typed
-   hypotheses (§3) — but only *report* them, don't auto-act. Measure: what
-   fraction validate on confirm data? This calibrates trust before any
-   automation.
-4. **Wire the validator + SPRT gate** so accepted weight-direction hypotheses
-   flow to Texel/CMA-ES automatically (Score_Tuning pipeline).
-5. **`hypotheses` log + feedback-in-context** (§5 step 8) → iterative loop.
-6. **New-feature proposals** (type 3) with human-reviewed code gate
-   (Score_Tuning §4).
-7. **Sandboxed code interpreter** (§2.2) for open-ended exploration, once the
-   typed path is trusted.
+1. **Telemetry for goals/tools** — persist GoalSet, overlay deltas, achieved-at-leaf;
+   compact tool-trace summary; extend `selector_source` when Reasoner lands.
+2. **Deterministic briefing + typed DB tools** (§2.1, §5) wrapping existing
+   reports — useful to humans with no LLM yet.
+3. **Same-turn counterfactual** (§3.1) on logged snapshots via EngineServer.
+4. **Failure-mode summary** (§4) as code over regret + counterfactual hits.
+5. **Read-only LLM analyst** — emit typed hypotheses; measure confirm-set hit
+   rate; do not auto-act.
+6. **Multi-turn counterfactual** (§3.2) with hard horizon/assumption labels.
+7. **Wire validator + SPRT** for weight-direction hypotheses (Texel already
+   exists; CMA-ES + `tuning_runs` still open — Score_Tuning).
+8. **`hypotheses` log + feedback-in-context** → iterative loop.
+9. **New-feature proposals** with human code review (Score_Tuning §4).
+10. Optional sandboxed code interpreter over a DB snapshot.
 
-**Bottom line:** present **schema + aggregates + a few concrete games**, never
-raw rows; let the LLM **query through a typed read-only tool**, not free SQL;
-make it emit **typed, pre-registered, falsifiable hypotheses**; and let
-**deterministic held-out validation + the self-play win-rate gate decide**. The
-LLM's edge is naming missing concepts and explaining *why* a weight is wrong —
-not computing the numbers.
+**Bottom line:** present schema + aggregates + a few games; query through typed
+tools; use engine counterfactuals to find missed wins and later goals under
+labeled assumptions; emit pre-registered hypotheses; let held-out validation and
+self-play SPRT decide. The LLM’s edge is causal diagnosis and naming missing
+concepts — not computing weights or asserting hidden-info certainty.
 
 ---
 
-## 7. References
-- The AI Scientist — Lu et al., arXiv:2408.06292 — https://arxiv.org/abs/2408.06292
-- Google "Towards an AI co-scientist" — https://research.google/blog/accelerating-scientific-breakthroughs-with-an-ai-co-scientist/
-- Coscientist (autonomous chemical research) — Boiko et al., Nature 2023 — https://www.nature.com/articles/s41586-023-06792-0
-- Data Interpreter (LLM agent for data science) — arXiv:2402.18679 — https://arxiv.org/abs/2402.18679
-- Chain-of-Table (table reasoning) — arXiv:2401.04398 — https://arxiv.org/abs/2401.04398
-- Binder (binding language models to tables/programs) — arXiv:2210.02875 — https://arxiv.org/abs/2210.02875
-- Spider text-to-SQL — https://yale-lily.github.io/spider ; BIRD — https://bird-bench.github.io/
-- OPRO "LLMs as Optimizers" (trajectory-in-context proposer) — arXiv:2309.03409 — https://arxiv.org/abs/2309.03409
-- Eureka (LLM reward design + reflection) — arXiv:2310.12931 — https://arxiv.org/abs/2310.12931
-- FunSearch — Nature 2023 — https://github.com/google-deepmind/funsearch
-- Benjamini–Hochberg FDR — Benjamini & Hochberg, 1995, J. R. Statist. Soc. B
+## 10. References
+
+- OPRO — arXiv:2309.03409; Eureka — arXiv:2310.12931; FunSearch — Nature 2023
+- Data Interpreter — arXiv:2402.18679; Chain-of-Table — arXiv:2401.04398
+- Benjamini–Hochberg FDR — 1995, J. R. Statist. Soc. B
+- Chess game review / MultiPV — Stockfish UCI; chess.com-style classification
+- Hearthstone missed lethal / combat sim — LethalCue; HSReplay Bob’s Buddy
+- TCG long-horizon failures — TCG-Bench (EACL 2026 Findings); PTCG-Bench
+  arXiv:2605.29653
+- RAP / ReAct tool loops — arXiv:2305.14992; arXiv:2210.03629 (pattern reuse
+  for the analyst’s tool use, not a second live Reasoner)

@@ -1,13 +1,17 @@
 # Score Tuning & Evolution — Design Doc
 
-Status: design only (no code yet)
+Status: **partially implemented** — Texel (`texel_tune.py`), self-play capture, and
+`weight_versions` ship; CMA-ES, SPRT auto-gate, and the LLM analyst do not.
 Scope: how to **tune** `Data/AI/scoring_profile.json` weights, **evolve** them over
 many games, use an **LLM to propose hypotheses and design new features**, and
 handle **delayed-value** (beyond-horizon) moves.
 
-Companion doc: `Statistical_Analysis_Storage.md` covers **collecting** the data
-(schema, endpoints, card stats). This doc covers **using** that data to improve
-the evaluation. Read that one first for table/field names referenced here.
+Companion docs:
+- `Statistical_Analysis_Storage.md` — collecting the data (schema, endpoints).
+- `LLM_Data_Analysis_Loop.md` — post-game analyst mechanics (briefing, tools,
+  failure-mode triage, counterfactual line search, hypothesis schema).
+- `Goal_Oriented_Strategist.md` — live cross-turn goal overlay (Score_Tuning §5
+  largely shipped there).
 
 ---
 
@@ -178,15 +182,15 @@ FunSearch, Nature 2023; EvoLLM, arXiv:2402.18381).
 
 ### 3.1 Post-game causal hypotheses (highest immediate value)
 Statistics says "`reactive_potential` correlates with winning." The LLM reads the
-logged lines + `score_breakdown` + outcome and says **why**: *"in games 12/19/27
-the AI hoarded ready runes for reactions it never used, passing up board
-development — the eval over-rewards `reactive_potential`."* Turns a number into a
-**trustable diagnosis** and catches **spurious correlations** the regression would
-blindly encode.
+logged lines + `score_breakdown` + outcome (and optional counterfactual lines)
+and says **why**: *"in games 12/19/27 the AI hoarded ready runes for reactions it
+never used, passing up board development — the eval over-rewards
+`reactive_potential`."* Turns a number into a **trustable diagnosis** and catches
+**spurious correlations** the regression would blindly encode.
 
-Inputs: `search_decisions`, `candidate_lines`, `decision_snapshots`, `card_stats`,
-`turn_snapshots` (all from the storage doc). Output: ranked hypotheses, each as a
-structured proposal (feature, direction, rationale, supporting game ids).
+**Mechanics** (briefing, typed tools, proposal schema, counterfactual missed-win /
+later-goal search): see `LLM_Data_Analysis_Loop.md`. This section only states the
+role; that doc owns the interaction layer.
 
 ### 3.2 LLM as proposer in the evolutionary loop (OPRO pattern)
 Replace blind GA mutation with informed proposals:
@@ -202,14 +206,19 @@ lower `point_scored` urgency, raise `unit_might_on_board`"); the simulator keeps
 it honest. Never commit an LLM number without the win-rate gate.
 
 ### 3.3 Failure-mode triage (reasoning, not numbers)
-Before tuning weights at all, the LLM classifies each bad decision using the
-candidate set:
+Before tuning weights at all, classify each bad decision. The classic triad still
+applies to argmax / selector-only games:
+
 - **selection error** — best line was in top-N but not chosen (LLM selector slip),
 - **search error** — realized-best line never generated (raise beam/depth/budget;
   **no weight change**),
 - **eval error** — best line generated but mis-scored (**this** is the tuning
   target).
-Routing this correctly prevents tuning weights to fix a search problem.
+
+With goals / future Reasoner, also triage **goal error**, **investigation /
+commit error**, and **horizon/setup miss** (counterfactual better later goal).
+Full taxonomy: `LLM_Data_Analysis_Loop.md` §4. Routing correctly prevents tuning
+weights to fix a search, goal, or tool-use problem.
 
 ### 3.4 Opponent prior for the hidden-hand gap
 The named blocker ("what will they play next turn") is a hidden-information
@@ -255,58 +264,59 @@ AI-editable `ScoringProfile` schema.
 | Explain *why* a weight is wrong | LLM |
 | Propose *which* weights/directions to try | LLM (validated by self-play) |
 | **Invent *new* features** | **LLM (only option)** |
-| Decide eval-vs-search-vs-selection error | LLM |
+| Decide eval vs search vs selection vs goal/horizon error | LLM (+ counterfactuals) |
 | Final accept/reject | self-play + SPRT |
 
 Guardrail throughout: **the LLM hypothesizes and explains; the simulator decides.**
 
 ---
 
-## 5. Cross-turn planner hook (tying §1 and §3 together)
+## 5. Cross-turn goal overlay (tying §1 and §3 together)
 
-The branch already has a planner (`ai_agent/planner.py`) that sets a per-turn
-intent. Extend it into the cross-turn layer the per-turn search lacks:
+**Shipped** as the Goal-Oriented Strategist (`Goal_Oriented_Strategist.md`):
 
-- LLM identifies a **multi-turn goal** ("assemble combo X", "race to 8 on
-  battlefield-a", "stabilize then win late").
-- Planner emits a **temporary scoring bias** for the game/turn — e.g. boost
-  `reactive_potential` weight because it spotted a defensive win plan.
-- `TurnSearch` executes within the turn under the biased profile.
+- Per-turn LLM Strategist emits a structured `GoalSet` (≤4 goals).
+- `goal_compiler` turns it into a transient scoring-profile overlay (whitelist +
+  clamp); `TurnSearch` / line selection run under `base ⊕ overlay`.
+- Base tuned profile is never mutated — bias is one-turn and fails safe to empty.
 
-This gives a clean separation: **LLM plans ACROSS turns (strategy); search
-optimizes WITHIN a turn (tactics).** The bias is transient and never overwrites
-the tuned base profile — base weights come from §2, the bias is a planner overlay.
+Post-game analysis does **not** reinvent this overlay. It diagnoses bad GoalSets
+(goal error) and proposes base-weight / feature changes; live strategy bias stays
+in the Strategist. Deferred multi-turn engine `rollout` for *analysis* is in
+`LLM_Data_Analysis_Loop.md` §3 / `Deliberative_Reasoning_Toolkit.md` §4.4.
 
 ---
 
 ## 6. Synthesis
 
-| Layer | Handles delayed impact by | Tool | Phase |
+| Layer | Handles delayed impact by | Tool | Status |
 |---|---|---|---|
-| Eval features | encoding long-term value as leaf-score terms | add to `ScoringProfile` | 1 |
-| Weight tuning | labeling positions with final outcome | Texel → CMA-ES | 1→2 |
-| Cross-turn planner | LLM sets multi-turn goal → biases eval | extend `planner.py` | 2 |
-| Feature invention | LLM proposes new delayed-value terms | Eureka-style + gate | 2→3 |
-| Opponent prior | LLM judges hidden-hand threats | `opponent_actions` + LLM | 2 |
+| Eval features | encoding long-term value as leaf-score terms | add to `ScoringProfile` | open (highest play-time ROI) |
+| Weight tuning | labeling positions with final outcome | Texel → CMA-ES | Texel done; CMA-ES / SPRT open |
+| Cross-turn goals | LLM GoalSet → transient overlay | Strategist + compiler | **shipped** (§5) |
+| Post-game analyst | missed wins / later goals → hypotheses | `LLM_Data_Analysis_Loop.md` | design |
+| Feature invention | LLM proposes new delayed-value terms | Eureka-style + gate | open |
+| Opponent prior | LLM judges hidden-hand threats | `opponent_actions` + LLM | open |
 
-**Bottom line:** don't fight the horizon with deeper search. (1) Put delayed value
-into the leaf eval as features, (2) let outcome-based tuning assign delayed credit
-across games, (3) use the LLM as the cross-turn planner / feature-inventor /
-hypothesis-generator that sits ABOVE the per-turn search — the role statistics
-cannot fill — always validated by a self-play win-rate gate.
+**Bottom line:** don't fight the horizon with deeper *live* search. (1) Put delayed
+value into the leaf eval as features, (2) let outcome-based tuning assign delayed
+credit across games, (3) use the live Strategist for cross-turn bias and the
+post-game analyst for counterfactual diagnosis / feature invention — always
+validated by a self-play win-rate gate.
 
 ---
 
 ## 7. Build order
 1. Add delayed-value features to `ScoringProfile` (§1.2) — biggest immediate win.
-2. Texel fitter over logged data (§2.1; `ai_agent/texel_tune.py`) — diagnose
-   zero/sign-flip weights. **Done.**
-3. AI-vs-AI + argmax harness (storage doc) to enable win-rate evaluation.
-4. SPRT gate + `weight_versions` / `tuning_runs` (storage doc).
+2. Texel fitter over logged data (§2.1; `ai_agent/texel_tune.py`) — **Done.**
+3. AI-vs-AI + argmax harness — **Done** (`SelfPlaySim`, offline capture).
+4. `weight_versions` attribution — **Done**; `tuning_runs` + SPRT gate still open.
 5. CMA-ES refiner (§2.2) over self-play win-rate.
-6. LLM post-game hypothesis agent (§3.1) + failure-mode triage (§3.3).
-7. LLM feature-invention loop (§4) + cross-turn planner hook (§5).
-8. (Later) TDLeaf(λ) (§1.4); LLM-in-the-loop evolution (§3.2).
+6. Post-game analyst (`LLM_Data_Analysis_Loop.md`): goal telemetry → briefing →
+   same-turn counterfactuals → failure-mode triage → read-only LLM hypotheses.
+7. LLM feature-invention loop (§4) wired through the analyst’s typed proposals.
+8. (Later) TDLeaf(λ) (§1.4); LLM-in-the-loop evolution (§3.2); multi-turn
+   counterfactual rollouts under labeled assumptions.
 
 ## 8. References (verified)
 - Texel tuning — https://www.chessprogramming.org/Texel%27s_Tuning_Method

@@ -1,95 +1,102 @@
 # Statistical Analysis Storage — Design Doc
 
-Status: design only (no code yet)
-Scope: prepare queryable data storage to support an analysis/tuning agent for the
-search + linear-evaluation AI on `feature/search-based-ai`.
+Status: **core tuning dataset implemented** (`memory.py` / `capture.py`);
+`turn_snapshots`, `tuning_runs`, and goal/tool telemetry are still open.
+Scope: queryable data storage for analysis/tuning of the search + linear-eval AI
+(and, once logged, goal overlays / Reasoner decisions).
+
+Post-game analyst plan: `LLM_Data_Analysis_Loop.md`. Weight-tuning algorithms:
+`Score_Tuning_And_Evolution.md`.
 
 ## Context: the AI being analyzed
 
-- **`Scripts/Game/TurnSearch.gd`** — beam search (beam 8, node budget 80, depth 6,
-  250 ms) over `LegalMoveEnumerator` moves; simulates each line to quiescence;
-  emits top-N full-turn candidate lines.
-- **`Scripts/Game/ScoringProfile.gd` + `Data/AI/scoring_profile.json`** — a **linear
-  weighted-sum** evaluation. Feature dict from
-  `ScoreModel.build_score_features(root_snap, leaf_snap, steps)` (static func in
-  `Scripts/Game/ScoreModel.gd`) → weighted sum + **per-term
-  `score_breakdown`**. A dominating `win_game=1000` term with a shaping clamp.
-- **`ai_agent/agent.py::choose_line`** — LLM demoted to a **policy selector** over
-  engine-scored lines (returns `chosen_line_id`).
-- Because eval is **linear**, `score_breakdown` is already an exact additive
-  per-feature attribution — no SHAP/ablation needed.
+- **`Scripts/Game/TurnSearch.gd`** — beam search over `LegalMoveEnumerator`;
+  simulates lines to quiescence; emits top-N candidate lines with `features` +
+  `score_breakdown`.
+- **`Scripts/Game/ScoringProfile.gd` + `Data/AI/scoring_profile.json`** — linear
+  weighted-sum eval via `ScoreModel.build_score_features` → per-term
+  `score_breakdown` (exact additive attribution; no SHAP needed). Optional
+  transient GoalSet overlay (`RIFTBOUND_GOALS`).
+- **Line selection** — `choose_line` (LLM), argmax (`RIFTBOUND_SEARCH_ARGMAX`),
+  or single-line short-circuit. Strategist may bias generation/selection; a
+  future Reasoner may commit lines directly
+  (`Deliberative_Reasoning_Toolkit.md`).
+- Live investigation tools: `search_for` / `simulate` / `deepen` via
+  `EngineServer` (Phases 0–2 done).
 
 ## Goal of the data layer
 
 Capture enough structured, queryable data to drive:
 1. **Credit assignment** — which moves had the biggest +/- impact.
-2. **Eval weight tuning** — which features are mis-weighted (Texel-style logistic
-   regression of eval→outcome; TDLeaf-style leaf error).
-3. **Failure-mode separation** — distinguish selection error vs search error vs
-   eval error (see below).
+2. **Eval weight tuning** — which features are mis-weighted (Texel / CMA-ES).
+3. **Failure-mode separation** — selection vs search vs eval, plus goal /
+   investigation / horizon misses when those modes are on
+   (`LLM_Data_Analysis_Loop.md` §4).
 4. **Per-card statistics** — play/draw rates and impact.
+5. **Counterfactual review** — restore `decision_snapshots` for offline
+   `search_for` / short rollouts.
 
-Three failure modes the schema must keep distinguishable:
-- **Selection error** — best line was in top-N but the LLM picked another
-  (`regret > 0` with a better candidate present).
-- **Search error** — the realized-best line was never generated into top-N. No
-  weight change fixes this; tune beam/depth/budget.
-- **Eval error** — best line was generated but mis-scored. Only this one is fixed
-  by weight tuning.
-
----
-
-## 1. What is ALREADY stored (`ai_agent/agent_memory.db`, see `memory.py`)
-
-> **Note:** `agent_memory.db` has already been deleted, so there is no legacy data
-> to migrate or preserve. The database rebuilds fresh from `CREATE TABLE` on next
-> startup — new tuning tables/columns can be added directly to the schema without
-> `ALTER TABLE` migration steps. (Tables below describe the schema the rebuilt DB
-> recreates, not surviving data.)
-
-| Table | Grain | Key contents | Gap for tuning |
-|---|---|---|---|
-| `decisions` | per AI decision | turn, decision_index, decision_type, `brief_state_hash` (HASH ONLY), reasoning, `move_json`, accepted, rejection_reason, outcome_summary | state not reconstructable; no features/breakdown |
-| `opponent_actions` | per visible opp action | turn, action text | — |
-| `games` | per finished game | outcome, my_score, opp_score, turns_played | only game-grain label; **no first-player/seat record** |
-| `decision_eval_metrics` | per decision | model calls, retries, latency, token usage (planner/actor split) | reliability only, not quality |
-| `client_decision_metrics` | per decision | engine latency, rejection retries, heuristic fallback | — |
-| `game_eval_summary` | per game | aggregated reliability scorecard | — |
-| `human_feedback` | reviewer | rubric scores, tags, note | — |
-| `move_feedback` | per move | like/neutral/dislike sentiment | — |
-
-**Missing for statistics:** raw feature vectors (only `score_breakdown` is sent
-today — see §2A), candidate-set / regret data, persisted state at decision
-(currently hashed), first-player/seat record, and any per-card events.
+Core triad (always):
+- **Selection error** — better line in top-N (`regret > 0`), selector picked another.
+- **Search error** — realized-best / counterfactual win never in beam.
+- **Eval error** — best line generated but mis-scored (weight/feature target).
 
 ---
 
-## 2. New tables to add
+## 1. What is stored (`ai_agent/agent_memory.db`, see `memory.py`)
+
+Schema is created on startup (`CREATE TABLE IF NOT EXISTS`). Default path is
+overridable via `RIFTBOUND_DB_PATH` (self-play often uses `ai_agent/selfplay.db`).
+
+### 1.1 Decision / reliability tables (pre-search agent)
+
+| Table | Grain | Key contents |
+|---|---|---|
+| `decisions` | per AI decision | turn, decision_type, `brief_state_hash`, reasoning, `move_json`, accepted, rejection_reason |
+| `opponent_actions` | per visible opp action | turn, action text |
+| `games` | per finished game | outcome, scores, turns, `first_player_index`, seed |
+| `decision_eval_metrics` | per decision | model calls, retries, latency, token usage (planner/actor) |
+| `client_decision_metrics` | per decision | engine latency, rejection retries, heuristic fallback |
+| `game_eval_summary` | per game | aggregated reliability scorecard |
+| `human_feedback` / `move_feedback` | reviewer | rubric / like-dislike |
+
+### 1.2 Tuning dataset (search mode — **shipped**)
+
+Captured when `RIFTBOUND_SEARCH=on` via `capture.py` (live `/decision` or offline
+self-play import). Details in §2.
+
+| Table | Grain |
+|---|---|
+| `search_decisions` | per searched decision (features, breakdown, regret, origin, selector, outcome backfill) |
+| `candidate_lines` | per candidate per decision |
+| `decision_snapshots` | full BriefState + scalars at decision |
+| `weight_versions` | profile hash/json + git SHA |
+| `card_events` | per card lifecycle event (base `definition_id` stamped) |
+
+**Still missing for full analysis:** GoalSet / overlay / tool-trace persistence,
+`turn_snapshots`, `tuning_runs`, `hypotheses`.
+
+---
+
+## 2. Tuning tables (schema reference)
 
 ### A. `search_decisions` — core tuning dataset (one row per searched decision)
 - `id` PK
 - `game_id, turn, decision_index, decision_type, mode` (main|reactive)
+- `my_player_index` — deciding seat (self-play separation)
 - `chosen_line_id`
 - `chosen_line_score`, `best_candidate_score`
 - `regret` = best − chosen
 - `score_margin` = best − 2nd-best
 - `chosen_breakdown_json` — per-term `score_breakdown`
-- `chosen_features_json` — flat `build_score_features` dict (Texel/regression input).
-  **⚠ Not currently in the payload.** `CandidateLine` (`schemas.py`) and
-  `TurnSearch._build_candidate_lines` only emit `score_breakdown` (= weight ×
-  feature, per term), NOT the raw feature dict. You cannot recover features by
-  dividing `breakdown ÷ weight`, because that is undefined at **weight = 0** — and
-  zero-weight features are exactly what Texel must diagnose. **Required engine
-  change:** add a `features` field to `CandidateLine` and emit the raw
-  `build_score_features` dict from `_build_candidate_lines` (the leaf already holds
-  it — see `_add_leaf`).
+- `chosen_features_json` — raw `build_score_features` dict (**shipped** on
+  `CandidateLine.features`; required for Texel — do not reverse from breakdown at
+  weight = 0)
 - `num_candidates`
-- `search_stats_json` — nodes_explored, branches, transposition_hits,
-  max_depth_reached, beam_width, elapsed_ms, stopped_reason
-- `selector_source` (`llm`|`fallback`), `selector_reasoning`
-- backfilled at game end: `game_outcome`, `final_score_diff`
-- `went_first` — was the deciding seat the first player this game (controls for
-  initiative bias in tuning)
+- `search_stats_json` — nodes/branches/beam/elapsed/stopped_reason
+- `selector_source` (`llm`|`fallback`|`argmax`|`single`), `selector_reasoning`
+- `origin` (`self_play`|`vs_human`|`vs_heuristic`)
+- backfilled at game end: `game_outcome`, `final_score_diff`, `went_first`
 - `weight_version_id` FK → `weight_versions`
 - `timestamp`
 
@@ -98,7 +105,7 @@ Lets you detect search vs eval vs selection error and ask "was the realized-best
 line even generated?"
 - `id` PK, `search_decision_id` FK
 - `line_id`, `rank`, `score`, `chosen` (bool)
-- `moves_json`, `breakdown_json`, `resolved_state_json`
+- `moves_json`, `breakdown_json`, `features_json`, `resolved_state_json`
 
 ### C. `decision_snapshots` — full queryable state at each decision
 Replaces hash-only. Store compact normalized `BriefState` JSON + extracted scalar
@@ -200,23 +207,18 @@ ever unavoidable, only strip the counter the allocator itself appended, not any
 
 ## Data-source notes (where each field comes from)
 
-- `chosen_breakdown_json`, candidate set, `search_stats`: already computed in
-  Godot (`TurnSearch` / `ScoreModel`) and sent in the
-  `DecisionRequest.candidate_lines` payload — currently **discarded** server-side
-  after `choose_line`. Capture at the `/decision` endpoint.
-- `chosen_features_json` (the raw feature dict): **NOT in the payload today.**
-  `CandidateLine` carries only `score_breakdown`, not the raw features. Requires
-  the engine change noted in §2A (add a `features` field to `CandidateLine` /
-  `_build_candidate_lines`) before Texel/regression can run. Do not attempt to
-  reverse it from the breakdown (fails at weight = 0).
-- `decision_snapshots`: from `request.brief_state` (already arrives full; only the
-  hash is persisted today).
-- `card_events`: **not currently emitted** — requires new Godot events (a
-  `/card_event` endpoint or piggyback on `/game_state_event`). Stamp the base
-  `definition_id` from the allocator onto each event (see §3 join-key note); do not
-  reverse it from `instance_id`.
-- `game_outcome` backfill: `/game_over` already fires with winner/scores/turns;
-  also emit the starting seat (`first_player_index`) so `went_first` can be set.
+- `chosen_breakdown_json`, `chosen_features_json`, candidate set, `search_stats`:
+  computed in Godot (`TurnSearch` / `ScoreModel`), sent on
+  `DecisionRequest.candidate_lines` (including `features`), persisted by
+  `capture.py` at `/decision` (or offline import).
+- `decision_snapshots`: from `request.brief_state` (full JSON + extracted scalars).
+- `card_events`: emitted from Godot and stored with base `definition_id` (see §3
+  join-key note); do not reverse from `instance_id`.
+- `game_outcome` / `went_first` / `first_player_index`: `/game_over` backfill
+  (seat-aware for two-seat self-play under one `game_id`).
+- GoalSet / overlay / tool traces: written to debug logs when
+  `RIFTBOUND_LOG_INPUTS=1` today; **not yet** in SQL (open item for post-game
+  triage).
 
 ---
 
@@ -315,18 +317,24 @@ attribution.
 
 ---
 
-## Suggested build order (when implementation is greenlit)
-0. **Engine prerequisite:** add a `features` field to `CandidateLine` and emit the
-   raw `build_score_features` dict from `TurnSearch._build_candidate_lines`. Without
-   this the tuning dataset has no usable feature vectors (see §2A). Stamp the base
-   `definition_id` from the allocator onto card events at the same time.
-1. `weight_versions` + record current profile on server start.
-2. `search_decisions` + `candidate_lines` + `decision_snapshots`, captured in
-   `/decision` (add `selector_source`, `origin`, and `went_first` columns).
-3. Game-end backfill in `/game_over` (`game_outcome`, `final_score_diff`, and
-   `first_player_index` → `went_first`).
-4. `turn_snapshots`.
-5. `card_events` (needs Godot emission) + `card_stats` view.
-6. Argmax short-circuit (`RIFTBOUND_SEARCH_ARGMAX`) + headless self-play harness
-   with seeded decks.
-7. `tuning_runs` (once a tuner exists).
+## Suggested build order
+
+**Done**
+0. `CandidateLine.features` + raw `build_score_features` emission; base
+   `definition_id` on card events.
+1. `weight_versions` + per-seat profile attribution.
+2. `search_decisions` + `candidate_lines` + `decision_snapshots` (`selector_source`,
+   `origin`, `went_first`, `chosen_features_json`).
+3. `/game_over` backfill (`game_outcome`, `final_score_diff`, `first_player_index`).
+4. `card_events` + `card_report.py` / `card_stats` aggregates (WPA still needs
+   `turn_snapshots`).
+5. Argmax short-circuit + headless self-play (`SelfPlaySim`) + offline JSONL
+   capture / `import_selfplay_logs.py`.
+6. Texel proposer (`texel_tune.py`) + `feature_report.py`.
+
+**Open (next for post-game analysis)**
+7. Persist GoalSet + overlay deltas + achieved-at-leaf; compact tool-trace summary
+   (required for goal / investigation triage — see `LLM_Data_Analysis_Loop.md` §0.2).
+8. `turn_snapshots` (WPA / swing-turn detection).
+9. `tuning_runs` + SPRT gate records.
+10. `hypotheses` (+ optional `counterfactual_runs`) for the analyst audit trail.

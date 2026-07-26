@@ -178,17 +178,23 @@ hard-coded "not yet tracked" placeholder.
 
 ---
 
-## Long-Term Memory (Not Yet Implemented)
+## Long-Term Memory / Post-Game Analysis
 
-Cross-game knowledge is explicitly marked out of scope in `memory.py:14`:
-> *"Cross-game knowledge is intentionally out of scope for now."*
+Cross-game *lesson injection into the live prompt* is still out of scope for the
+decision agent. Separately, a **tuning / post-game analysis** path now exists in
+design and partial implementation:
 
-There is no:
-- Post-game analysis or reflection
-- Persistent strategic lessons
-- Card performance statistics
-- Opponent pattern tracking
-- Any mechanism that causes decisions in game N+1 to benefit from game N
+| Piece | Status |
+|---|---|
+| Search tuning dataset (`search_decisions`, etc.) | **Shipped** — see `Statistical_Analysis_Storage.md` / README |
+| Card event stats (`card_events`, `card_report.py`) | **Shipped** (WPA needs `turn_snapshots`) |
+| Texel weight proposer | **Shipped** (`texel_tune.py`) |
+| Post-game LLM analyst + counterfactual line search | **Design** — `LLM_Data_Analysis_Loop.md` |
+| Persistent strategic lessons in the live prompt | Not started (`Memory_Roadmap.md`) |
+| Opponent pattern tracking across games | Not started |
+
+Nothing yet makes game N+1’s *live* decisions automatically benefit from game N
+lessons; weight/profile updates from the analysis loop are the intended bridge.
 
 ---
 

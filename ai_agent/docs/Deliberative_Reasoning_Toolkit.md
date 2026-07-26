@@ -166,13 +166,18 @@ the resolved state + an assumption into `simulate_opponent` → see the answer.
 
 ### 4.4 `rollout(my_move, horizon)` — multi-turn lookahead (DEFERRED)
 > **Deferred** — depends on 4.3 (needs a modeled opponent turn to thread
-> forward). Sequenced after opponent modeling.
+> forward). Sequenced after opponent modeling for *live* use.
 
 Alternates AI-search and assumption-driven opponent-search for `horizon` turns
 (default 2), threading each resolved state into the next. Returns the projected
 position after the horizon (as `evaluate_position` features) plus the principal
 variation. Bounded expectimax with LLM-chosen roots and assumptions. Budget-capped
 hard (horizon ≤ 3, per-ply node budget) so it cannot blow the turn clock.
+
+**Post-game reuse:** the same machinery (restore snapshot → short horizon under
+labeled assumptions) is the multi-turn counterfactual path in
+`LLM_Data_Analysis_Loop.md` §3. Prefer shipping offline analysis first; live
+Reasoner rollout stays gated behind opponent modeling + SPRT.
 
 ### 4.5 `branch(move)` — enumerate what could happen (DEFERRED)
 > **Deferred** — composes 4.3, so it follows opponent modeling.
