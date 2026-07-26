@@ -68,6 +68,9 @@ var _goals_http: HTTPRequest = null
 # /health (goals_enabled); when true the engine fetches a per-turn goal overlay
 # before running the main search so generic goals bias line generation.
 var _goals_mode: bool = false
+# Phase 3: the service may replace the strategist+selector split with a bounded
+# Reasoner handshake that can commit a verified line or return a goal overlay.
+var _reasoner_mode: bool = false
 # Phase 1 (search-grounded strategist): when goals are on, run a cheap base-profile
 # "scout" search before the /goals handshake and ship its top lines so the
 # strategist grounds its goals in the engine's actual best lines. Toggle with
@@ -214,6 +217,8 @@ func _on_config_completed(result: int, response_code: int, _headers: PackedStrin
 		_search_mode = bool(parsed["search_enabled"])
 	if parsed is Dictionary and parsed.has("goals_enabled"):
 		_goals_mode = bool(parsed["goals_enabled"])
+	if parsed is Dictionary and parsed.has("reasoner_enabled"):
+		_reasoner_mode = bool(parsed["reasoner_enabled"])
 
 
 # Mirror the Python agent's truthy-env parsing so both sides agree on whether
@@ -281,6 +286,10 @@ func take_turn() -> void:
 # ── HTTP request ──────────────────────────────────────────────────────────────
 
 func _request_decision(gs: GameState) -> void:
+	# Measure the complete decision pipeline: scout/search, reasoner or goals
+	# handshake, selector request, and local application of the chosen move.
+	# Do not reset this timer in later pipeline stages.
+	_decision_start_ms = Time.get_ticks_msec()
 	_pending_brief_state = BriefStateSerializer.serialize(gs, player_index)
 	_on_session_changed(_pending_brief_state.get("game_id", ""))
 	_candidate_lines = []
@@ -297,7 +306,7 @@ func _request_decision(gs: GameState) -> void:
 		# The fetch must never abort the turn: search always runs and logs, even if
 		# the overlay comes back empty.
 		var overlay: Dictionary = {}
-		if _goals_mode and not _capture_mode:
+		if (_goals_mode or _reasoner_mode) and not _capture_mode:
 			# Phase 1: run a cheap base-profile scout search first and hand its top
 			# lines to the strategist via /goals, so goals are grounded in the
 			# engine's actual best lines rather than a static snapshot. Base profile
@@ -315,13 +324,24 @@ func _request_decision(gs: GameState) -> void:
 					return
 				scout_lines = scout_result.get("candidate_lines", [])
 				scout_stats = scout_result.get("search_stats", {})
+			if _reasoner_mode:
+				var reasoner_emit := await _fetch_reasoner_emit(scout_lines, scout_stats)
+				if gs.game_over:
+					_clear_engine_pin()
+					return
+				if reasoner_emit.get("kind", "") == "line" and \
+						_try_commit_reasoner_line(gs, reasoner_emit):
+					_clear_engine_pin()
+					return
+				if reasoner_emit.get("overlay", null) is Dictionary:
+					overlay = reasoner_emit["overlay"]
 			# Only consult the strategist when the scout found a real choice. With
 			# ≤1 line there is nothing for goals to bias or select, so skip the
 			# /goals round-trip (planning) entirely and search under the base
 			# profile — the /decision selector then short-circuits to that one line.
 			# When the scout is disabled we can't know the count yet, so keep the
 			# handshake to preserve existing behaviour.
-			if not _goals_scout or scout_lines.size() > 1:
+			if not _reasoner_mode and (not _goals_scout or scout_lines.size() > 1):
 				overlay = await _fetch_goal_overlay(scout_lines, scout_stats)
 				if gs.game_over:
 					_clear_engine_pin()
@@ -357,7 +377,6 @@ func _request_decision(gs: GameState) -> void:
 		_clear_engine_pin()
 		return
 
-	_decision_start_ms = Time.get_ticks_msec()
 	_waiting_for_http = true
 
 
@@ -417,13 +436,91 @@ func _fetch_goal_overlay(scout_lines: Array = [], scout_stats: Dictionary = {}) 
 	return {}
 
 
+# Phase-3 pre-search handshake. The response is either a verified line or a
+# GoalSet-derived overlay. Any transport/schema failure returns an empty goals
+# result so _request_decision continues with the base-profile search.
+func _fetch_reasoner_emit(scout_lines: Array = [], scout_stats: Dictionary = {}) -> Dictionary:
+	var url := _agent_base_url() + "/reason"
+	var body_dict := {
+		"brief_state": _pending_brief_state,
+		"game_id": _pending_brief_state.get("game_id", "game"),
+		"root_state_hash": _live_hash(controller.gs),
+	}
+	if not scout_lines.is_empty():
+		body_dict["candidate_lines"] = scout_lines.slice(0, 5)
+		body_dict["search_stats"] = scout_stats
+	var headers := PackedStringArray(["Content-Type: application/json"])
+	_waiting_for_http = true
+	var err := _goals_http.request(
+		url, headers, HTTPClient.METHOD_POST, JSON.stringify(body_dict)
+	)
+	if err != OK:
+		push_warning("AIPlayer: reasoner handshake failed to start (err=%d); base search." % err)
+		_waiting_for_http = false
+		return {"kind": "base_search_fallback", "overlay": {}}
+	var res = await _goals_http.request_completed
+	_waiting_for_http = false
+	if int(res[0]) != HTTPRequest.RESULT_SUCCESS or int(res[1]) != 200:
+		push_warning("AIPlayer: reasoner handshake error (result=%d, code=%d); base search." % [int(res[0]), int(res[1])])
+		return {"kind": "base_search_fallback", "overlay": {}}
+	var parsed = JSON.parse_string((res[3] as PackedByteArray).get_string_from_utf8())
+	return parsed if parsed is Dictionary else {"kind": "base_search_fallback", "overlay": {}}
+
+
+# Reasoner commits carry the complete canonical registry entry. Scout and live
+# search lines use this same hash-protected path; raw model-authored scripts are
+# never accepted.
+func _try_commit_reasoner_line(gs: GameState, emit: Dictionary) -> bool:
+	var committed = emit.get("committed_line", null)
+	if not committed is Dictionary or committed.is_empty():
+		return false
+	var chosen_line_id := str(emit.get("chosen_line_id", ""))
+	if chosen_line_id == "" or str(committed.get("line_id", "")) != chosen_line_id:
+		return false
+	if not bool(committed.get("legal", false)) or not bool(committed.get("complete", false)):
+		return false
+	var live_root := _live_hash(gs)
+	if str(emit.get("root_state_hash", "")) != live_root or \
+			str(committed.get("root_state_hash", "")) != live_root:
+		push_warning("AIPlayer: reasoner root hash mismatch; base search.")
+		return false
+	var moves: Array = committed.get("moves", [])
+	var contexts: Array = committed.get("move_contexts", [])
+	var hashes: Array = committed.get("expected_pre_hashes", [])
+	if moves.is_empty():
+		return false
+	if moves.size() != contexts.size() or moves.size() != hashes.size():
+		return false
+	for expected in hashes:
+		if str(expected) == "":
+			return false
+	if str(hashes[0]) != live_root:
+		push_warning("AIPlayer: reasoner step-0 hash mismatch; base search.")
+		return false
+	var first := str(moves[0])
+	if first not in _legal_moves_for(gs):
+		push_warning("AIPlayer: reasoner line first command is not currently legal; base search.")
+		return false
+	_committed_line = committed
+	_committed_line_index = 0
+	_submit(first)
+	if controller.last_command_error:
+		_drop_committed_line()
+		_report_decision_metrics(false, false)
+		return false
+	_committed_line_index = 1
+	_report_decision_metrics(false, true)
+	ai_move_completed.emit(first, gs.turn_number, _move_seq)
+	_move_seq += 1
+	return true
+
+
 # ── Offline decision (no server) ──────────────────────────────────────────────
 
 # Reproduce the server's argmax selection locally and apply it, with no HTTP.
 # Mirrors the accepted path of _on_request_completed. Every searched decision
 # carries candidate lines, so this fully replaces the server for self-play.
 func _decide_offline(gs: GameState) -> void:
-	_decision_start_ms = Time.get_ticks_msec()
 	var chosen := _argmax_local(_candidate_lines)
 	var chosen_line_id := ""
 	var selector_source = null  # null mirrors the server's pass-fallback (_PASS_DECISION)
@@ -879,6 +976,11 @@ func _play_committed_step(gs: GameState) -> bool:
 			_drop_committed_line()
 			return false
 	var cmd := str(moves[idx])
+	# Explicit Reasoner simulations may not carry TurnSearch pre-hashes. In that
+	# case re-check every command against the live legal set before replaying it.
+	if hashes.is_empty() and cmd not in _legal_moves_for(gs):
+		_drop_committed_line()
+		return false
 	_submit(cmd)
 	_committed_line_index += 1
 	if controller.last_command_error:

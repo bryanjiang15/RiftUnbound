@@ -21,6 +21,7 @@ static func run(assertions) -> void:
 	_test_scrapheap_on_play(assertions)
 	_test_rhasa_cost_reduction(assertions)
 	_test_gust_might_filter(assertions)
+	_test_gust_rechecks_might_on_resolution(assertions)
 	_test_fight_or_flight_move_base(assertions)
 	_test_gentlemens_duel_applies_buffed_fight_damage(assertions)
 	_test_brazen_buccaneer_discount(assertions)
@@ -461,6 +462,39 @@ static func _test_gust_might_filter(assertions) -> void:
 	h3.controller.submit_command(0, "play gust target stalwart-poro")
 	assertions.assert_true(h3.controller.last_command_error, "gust rejects explicit invalid target")
 	assertions.assert_log_contains(h3.controller, "Invalid target 'stalwart-poro'", "gust direct target is filter checked")
+
+
+static func _test_gust_rechecks_might_on_resolution(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "SHOWDOWN_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"hand": ["gust"], "pool": {"energy": 1}, "deck_size": 5, "rune_deck_size": 12},
+			{"hand": ["en-garde"], "pool": {"energy": 1},
+			 "battlefield-a": [{"id": "flame-chompers", "owner": 1}],
+			 "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.gs().focus_player_index = 0
+	h.gs().board.active_showdown_bf = 0
+
+	h.controller.submit_command(0, "react gust target flame-chompers")
+	h.controller.submit_command(1, "react en-garde target flame-chompers")
+	h.controller.submit_command(0, "pass")
+	h.controller.submit_command(1, "pass")
+	assertions.assert_eq(h.find_unit("flame-chompers").get_current_might(), 5,
+		"reaction raises Gust target above 3 Might")
+
+	h.controller.submit_command(0, "pass")
+	h.controller.submit_command(1, "pass")
+	var chompers = h.find_unit("flame-chompers")
+	assertions.assert_true(chompers != null and chompers.is_at_battlefield(),
+		"gust does not return a target that became invalid before resolution")
+	assertions.assert_true(h.gs().players[1].get_hand_instance("flame-chompers") == null,
+		"invalid Gust target remains at the battlefield")
+	assertions.assert_log_contains(h.controller, "target is no longer valid",
+		"gust logs that its target failed resolution-time validation")
 
 
 static func _test_fight_or_flight_move_base(assertions) -> void:

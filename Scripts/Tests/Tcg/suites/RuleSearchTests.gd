@@ -20,6 +20,9 @@ static func run(assertions) -> void:
 	_test_line_steps_parallel_and_labeled(assertions)
 	_test_reactive_search_in_showdown_window(assertions)
 	_test_discard_picks_best_card(assertions)
+	_test_seeded_end_turn_line_is_complete(assertions)
+	_test_budget_cutoff_line_is_incomplete(assertions)
+	_test_jinx_seed_search_captures_auto_choices(assertions)
 
 
 # A forced discard during search must be resolved greedily — keeping the card
@@ -107,6 +110,114 @@ static func _test_anytime_budget_returns_lines(assertions) -> void:
 	var result: Dictionary = searcher.search(h.gs(), 0, {"node_budget": 1, "time_budget_ms": 500, "beam_width": 4})
 	assertions.assert_true(not result.get("candidate_lines", []).is_empty(), "anytime node budget still returns a candidate")
 	assertions.assert_eq(result.get("search_stats", {}).get("stopped_reason", ""), "node_budget", "budget stop reason is reported")
+
+
+static func _test_seeded_end_turn_line_is_complete(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture("res://Scripts/Tests/Tcg/fixtures/search_reorderable.json")
+	var root_hash := _hash(h.gs(), 0)
+	var searcher = TurnSearchScript.new()
+	var result: Dictionary = searcher.search(h.gs(), 0, {
+		"seed_moves": ["end turn"],
+		"node_budget": 10,
+		"time_budget_ms": 1000,
+	})
+	assertions.assert_eq(str(result.get("root_state_hash", "")), root_hash,
+		"seeded search response retains the pre-seed root hash")
+	var lines: Array = result.get("candidate_lines", [])
+	assertions.assert_eq(lines.size(), 1, "terminal seed returns one candidate line")
+	if lines.is_empty():
+		return
+	var line: Dictionary = lines[0]
+	assertions.assert_eq(str(line.get("root_state_hash", "")), root_hash,
+		"seeded line retains the pre-seed root hash")
+	assertions.assert_true(bool(line.get("legal", false)), "seeded end-turn line is legal")
+	assertions.assert_true(bool(line.get("complete", false)), "seeded end-turn line is complete")
+	assertions.assert_eq(str(line.get("terminal_reason", "")), "end_turn",
+		"seeded end-turn line reports its engine terminal")
+	assertions.assert_eq(str(line.get("search_mode", "")), "main",
+		"seeded line reports main search mode")
+	assertions.assert_eq(line.get("moves", []), ["end turn"], "seeded move is preserved")
+	assertions.assert_eq(line.get("expected_pre_hashes", []), [root_hash],
+		"seeded move keeps its pre-move hash")
+
+
+static func _test_budget_cutoff_line_is_incomplete(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture("res://Scripts/Tests/Tcg/fixtures/search_reorderable.json")
+	var root_hash := _hash(h.gs(), 0)
+	var searcher = TurnSearchScript.new()
+	# Zero expansion budget deterministically promotes the root frontier node to
+	# an investigable candidate, but it must never masquerade as a full turn.
+	var result: Dictionary = searcher.search(h.gs(), 0, {
+		"node_budget": 0,
+		"time_budget_ms": 1000,
+	})
+	assertions.assert_eq(str(result.get("root_state_hash", "")), root_hash,
+		"budget-cutoff response reports its root hash")
+	var lines: Array = result.get("candidate_lines", [])
+	assertions.assert_true(not lines.is_empty(), "budget cutoff still returns a frontier candidate")
+	if lines.is_empty():
+		return
+	var line: Dictionary = lines[0]
+	assertions.assert_true(bool(line.get("legal", false)), "budget frontier candidate remains legal")
+	assertions.assert_true(not bool(line.get("complete", true)),
+		"budget frontier candidate is explicitly incomplete")
+	assertions.assert_eq(str(line.get("terminal_reason", "")), "node_budget",
+		"budget frontier candidate reports node-budget cutoff")
+	assertions.assert_eq(str(line.get("search_mode", "")), "main",
+		"budget frontier candidate reports search mode")
+	assertions.assert_eq(str(line.get("root_state_hash", "")), root_hash,
+		"budget frontier candidate reports root hash")
+
+
+static func _test_jinx_seed_search_captures_auto_choices(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{
+				"pool": {"energy": 10, "power": {"fury": 1}},
+				"hand": ["jinx-demolitionist", "fury-rune", "fury-rune", "void-seeker"],
+				"deck_size": 10, "rune_deck_size": 12,
+			},
+			{"deck_size": 10, "rune_deck_size": 12},
+		],
+	})
+	var root_hash := _hash(h.gs(), 0)
+	var searcher = TurnSearchScript.new()
+	var result: Dictionary = searcher.search(h.gs(), 0, {
+		"seed_moves": ["play jinx-demolitionist"],
+		"node_budget": 80,
+		"time_budget_ms": 1000,
+		"beam_width": 8,
+		"max_depth": 8,
+		"top_n": 8,
+	})
+	var found_complete_auto_choice_line := false
+	for line in result.get("candidate_lines", []):
+		if not bool(line.get("complete", false)):
+			continue
+		var moves: Array = line.get("moves", [])
+		var contexts: Array = line.get("move_contexts", [])
+		var hashes: Array = line.get("expected_pre_hashes", [])
+		var intermediate_choices := 0
+		for i in range(contexts.size()):
+			if str(contexts[i].get("kind", "")) == "intermediate" and str(moves[i]).begins_with("choose "):
+				intermediate_choices += 1
+		if (
+			not moves.is_empty()
+			and str(moves[0]) == "play jinx-demolitionist"
+			and intermediate_choices == 2
+			and moves.size() == contexts.size()
+			and moves.size() == hashes.size()
+			and str(line.get("root_state_hash", "")) == root_hash
+		):
+			found_complete_auto_choice_line = true
+			break
+	assertions.assert_true(found_complete_auto_choice_line,
+		"Jinx seed search returns a complete hashed line with both auto-discard choices")
 
 
 static func _test_scoring_breakdown(assertions) -> void:

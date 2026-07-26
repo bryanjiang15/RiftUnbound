@@ -31,6 +31,7 @@ from openai import (
 from openai.types.chat import ChatCompletionMessageParam
 
 from . import planner as planner_module
+from . import reasoner as reasoner_module
 from . import router as router_module
 from . import search_metrics as search_metrics_module
 from . import skills as skill_module
@@ -38,7 +39,16 @@ from . import strategist as strategist_module
 from .goal_compiler import ProfileOverlay, compile_goals, overlay_delta, overlay_delta_breakdown
 from .memory import Memory
 from .prompts import load_prompt
-from .schemas import CandidateLine, Decision, GoalSet, LegalActionOption, Move, Plan, SearchStats
+from .schemas import (
+    CandidateLine,
+    Decision,
+    GoalSet,
+    LegalActionOption,
+    Move,
+    Plan,
+    ReasonerEmit,
+    SearchStats,
+)
 from .search_log_fmt import (
     BOLD,
     CYAN,
@@ -101,6 +111,15 @@ def _strategist_model() -> str:
     return os.environ.get("RIFTBOUND_STRATEGIST_MODEL") or _default_model()
 
 
+def _reasoner_model() -> str:
+    """Model used by the Phase-3 search-driving Reasoner."""
+    return (
+        os.environ.get("RIFTBOUND_REASONER_MODEL")
+        or os.environ.get("RIFTBOUND_STRATEGIST_MODEL")
+        or _default_model()
+    )
+
+
 def _is_reasoning_model(model: str) -> bool:
     """True for OpenAI reasoning models (o-series, gpt-5) that emit a thinking
     stream before answering and reject the ``temperature`` sampling param.
@@ -115,6 +134,7 @@ def _is_reasoning_model(model: str) -> bool:
 _client: Optional[AsyncOpenAI] = None
 _planner = planner_module.Planner()
 _strategist = strategist_module.Strategist()
+_reasoner = reasoner_module.Reasoner()
 
 PIPELINE_LEGACY = "legacy"
 PIPELINE_STAGED = "staged"
@@ -515,11 +535,11 @@ TOOLS: list[dict] = [
         "function": {
             "name": "deepen",
             "description": (
-                "Look harder at an existing candidate line: re-run the engine search "
-                "seeded at that line's moves with extra depth/budget. Use when a "
-                "line from search_for / search_turn looks critical and you want "
-                "confirmation or better continuations. Pass line_id from a prior "
-                "result, or an explicit moves prefix."
+                "Ask TurnSearch to build or extend a complete engine line. Pass a "
+                "canonical line_id from search_for/deepen, OR propose a short 1-3 "
+                "move strategic prefix in moves; the engine applies it, resolves "
+                "intermediate choices, and searches the continuation with hashes. "
+                "This is the only way to turn a novel model idea into a committable line."
             ),
             "parameters": {
                 "type": "object",
@@ -855,13 +875,15 @@ def _log_tools(
     tool_trace: list[dict],
     outcome: str,
     stage: str = "actor",
+    reasoning: str = "",
+    final_output: Any = None,
 ) -> None:
     """Append Claude/Cursor-style tool calls to the search-and-goal log.
 
     Each entry lists the tool name, key args, and a one-line ⎿ result summary so
     you can see what the model investigated alongside the search and goals.
     """
-    if not _LOG_INPUTS or not tool_trace:
+    if not _LOG_INPUTS or (not tool_trace and not reasoning and final_output is None):
         return
     from .tool_log_fmt import format_tools_session
 
@@ -875,6 +897,8 @@ def _log_tools(
         ts=ts,
         tool_trace=tool_trace,
         outcome=outcome,
+        reasoning=reasoning,
+        final_output=final_output,
     )
     try:
         with _SEARCH_LOG_PATH.open("a", encoding="utf-8") as f:
@@ -1184,8 +1208,19 @@ def _build_search_corpus(lines: Optional[list[CandidateLine]]) -> list[dict]:
         out.append({
             "line_id": line.line_id,
             "moves": _line_move_strings(line),
+            "move_contexts": list(line.move_contexts),
+            "expected_pre_hashes": list(line.expected_pre_hashes),
             "score": float(line.score),
+            "score_breakdown": line.score_breakdown or {},
+            "features": line.features or {},
+            "resolved_state": line.resolved_state or {},
             "search_state": line.search_state or {},
+            "opponent_windows": [window.model_dump() for window in line.opponent_windows],
+            "root_state_hash": line.root_state_hash,
+            "legal": line.legal,
+            "complete": line.complete,
+            "terminal_reason": line.terminal_reason,
+            "search_mode": line.search_mode,
         })
     return out
 
@@ -1213,10 +1248,19 @@ def _summarize_lines_for_strategist(
         out.append({
             "line_id": line.line_id,
             "moves": _line_move_strings(line),
+            "steps": _render_line_steps(line),
+            "move_contexts": list(line.move_contexts),
+            "expected_pre_hashes": list(line.expected_pre_hashes),
             "score": round(float(line.score), 3),
             "top_score_terms": {k: round(v, 3) for k, v in drivers},
             "contested": bool(line.opponent_windows),
             "opponent_windows": len(line.opponent_windows),
+            "root_state_hash": line.root_state_hash,
+            "legal": line.legal,
+            "complete": line.complete,
+            "terminal_reason": line.terminal_reason,
+            "search_mode": line.search_mode,
+            "search_state": line.search_state or {},
         })
     return out
 
@@ -1300,6 +1344,71 @@ async def build_goal_overlay(
     if not was_cached:
         _log_goals(game_id, brief_state, goal_set, overlay)
     return overlay
+
+
+async def run_reasoner(
+    *,
+    brief_state: dict,
+    game_id: str,
+    memory: Memory,
+    eval_metrics: Optional[dict] = None,
+    candidate_lines: Optional[list[CandidateLine]] = None,
+    search_stats: Optional[SearchStats] = None,
+    root_state_hash: str = "",
+) -> tuple[ReasonerEmit, dict[str, Any] | None, dict[str, Any]]:
+    """Run the Phase-3 Reasoner under one bounded live-tool context."""
+    from .tool_budget import ToolBudget, install_budget, reset_budget
+    from .reasoner_context import (
+        ReasonerTurnContext,
+        install_context,
+        reset_context,
+    )
+
+    opponent_action_count = memory.count_opponent_material_actions(game_id)
+    timeline = memory.timeline_slice(game_id)
+    budget = ToolBudget(
+        node_limit=max(1, int(os.environ.get("RIFTBOUND_REASONER_NODE_BUDGET", "1500"))),
+        time_limit_ms=max(1, int(os.environ.get("RIFTBOUND_REASONER_TIME_BUDGET_MS", "3000"))),
+    )
+    context = ReasonerTurnContext(
+        game_id=game_id,
+        brief_state=brief_state,
+        root_state_hash=root_state_hash,
+        memory=memory,
+        memory_summary=timeline,
+        scout_stats=search_stats.model_dump() if search_stats else {},
+        budget=budget,
+    )
+    raw_scout = [line.model_dump() for line in (candidate_lines or [])]
+    context.scout_lines = context.registry.register_many(raw_scout, source="scout")
+    context.search_corpus = list(context.scout_lines)
+    context_token = install_context(context)
+    budget_token = install_budget(budget)
+    try:
+        emit, _was_cached = await _reasoner.reason(
+            client=get_client(),
+            model=_reasoner_model(),
+            game_id=game_id,
+            brief_state=brief_state,
+            memory_summary=timeline,
+            opponent_action_count=opponent_action_count,
+            metrics=eval_metrics,
+            known_lines=context.scout_lines,
+            root_state_hash=root_state_hash,
+        )
+        context.telemetry["cache_hit"] = _was_cached
+        committed = (
+            context.registry.get(emit.chosen_line_id)
+            if emit.kind == "line"
+            else None
+        )
+        context.telemetry["registry_unique_sequences"] = (
+            context.registry.unique_sequence_count
+        )
+        return emit, committed, dict(context.telemetry)
+    finally:
+        reset_budget(budget_token)
+        reset_context(context_token)
 
 
 def _log_goals(game_id: str, brief_state: dict, goal_set: "GoalSet", overlay: ProfileOverlay) -> None:

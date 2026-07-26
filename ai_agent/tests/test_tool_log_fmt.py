@@ -77,3 +77,28 @@ def test_format_tools_session_outcome():
     assert "strategist" in plain
     assert "● evaluate_position" in plain
     assert "→ goals=2" in plain
+
+
+def test_format_reasoner_session_includes_recommendation_and_final_output():
+    lines = format_tools_session(
+        stage="reasoner",
+        turn=2,
+        decision_type="main_phase",
+        state="Neutral Open",
+        game_id="g1",
+        ts="2026-01-01T00:00:00Z",
+        tool_trace=[],
+        outcome="emit=line after 2 tool call(s)",
+        reasoning="The simulated scoring line is clearly best.",
+        final_output={
+            "kind": "line",
+            "confidence": "commit",
+            "moves": ["play card-1", "end turn"],
+        },
+    )
+    plain = "\n".join(_strip_ansi(line) for line in lines)
+    assert "Reasoner recommendation:" in plain
+    assert "The simulated scoring line is clearly best." in plain
+    assert "Final output:" in plain
+    assert '"kind": "line"' in plain
+    assert "play card-1" in plain

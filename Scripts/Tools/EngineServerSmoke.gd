@@ -11,7 +11,7 @@ extends SceneTree
 # Run:
 #   Godot --headless --path . --script res://Scripts/Tools/EngineServerSmoke.gd
 
-const TcgTestHarness = preload("res://Scripts/Tests/Tcg/TcgTestHarness.gd")
+const HarnessScript = preload("res://Scripts/Tests/Tcg/TcgTestHarness.gd")
 const EngineServerScript = preload("res://Scripts/AI/EngineServer.gd")
 
 var _server = null
@@ -20,7 +20,7 @@ var _failures: Array = []
 
 func _initialize() -> void:
 	print("=== EngineServer Smoke (Godot ", Engine.get_version_info()["string"], ") ===")
-	var h = TcgTestHarness.new()
+	var h = HarnessScript.new()
 	h.load_fixture("res://Scripts/Tests/Tcg/fixtures/search_winning_line.json")
 	var gs: GameState = h.gs()
 
@@ -110,15 +110,15 @@ func _http(port: int, method: String, path: String, body: Dictionary = {}) -> Di
 					if int(got2[0]) == OK:
 						buf.append_array(got2[1])
 			# Heuristic: if Content-Length satisfied, stop.
-			var text := buf.get_string_from_utf8()
-			var sep := text.find("\r\n\r\n")
-			if sep >= 0:
-				var headers := text.substr(0, sep).to_lower()
+			var partial_text := buf.get_string_from_utf8()
+			var partial_sep := partial_text.find("\r\n\r\n")
+			if partial_sep >= 0:
+				var headers := partial_text.substr(0, partial_sep).to_lower()
 				var cl := 0
 				for line in headers.split("\r\n"):
 					if line.begins_with("content-length:"):
 						cl = int(line.substr("content-length:".length()).strip_edges())
-				var body_len := buf.size() - (sep + 4)
+				var body_len := buf.size() - (partial_sep + 4)
 				if body_len >= cl:
 					break
 		OS.delay_msec(2)
@@ -172,8 +172,18 @@ func _check_search(port: int) -> void:
 		_fail("search returned no lines: %s" % str(r.get("search_stats", r)))
 		return
 	var first: Dictionary = lines[0]
-	if first.has("search_state") and first.has("moves"):
-		_ok("search %d lines; first has search_state" % lines.size())
+	var required := [
+		"moves", "move_contexts", "expected_pre_hashes", "search_state",
+		"root_state_hash", "legal", "complete", "terminal_reason", "search_mode",
+	]
+	var has_contract := true
+	for key in required:
+		if not first.has(key):
+			has_contract = false
+	var parallel: bool = first.get("moves", []).size() == first.get("move_contexts", []).size() \
+		and first.get("moves", []).size() == first.get("expected_pre_hashes", []).size()
+	if has_contract and parallel and str(r.get("root_state_hash", "")) == str(first.get("root_state_hash", "")):
+		_ok("search %d lines; executable line contract present" % lines.size())
 	else:
 		_fail("search line missing fields: %s" % str(first.keys()))
 
@@ -190,18 +200,18 @@ func _check_seeded_search(port: int) -> void:
 		_fail("seeded: no base line")
 		return
 	var moves: Array = lines[0].get("moves", [])
-	var seed: Array = []
+	var seed_moves: Array = []
 	for m in moves:
 		if str(m) == "end turn":
 			break
-		seed.append(str(m))
-		if seed.size() >= 1:
+		seed_moves.append(str(m))
+		if seed_moves.size() >= 1:
 			break
-	if seed.is_empty():
+	if seed_moves.is_empty():
 		_ok("seeded skipped (base line had no prefix moves)")
 		return
 	var r := _http(port, "POST", "/engine/search", {
-		"seed_moves": seed,
+		"seed_moves": seed_moves,
 		"top_n": 3,
 		"budget": {"node_budget": 40, "time_budget_ms": 800, "max_depth": 6, "beam_width": 4},
 	})
@@ -213,9 +223,12 @@ func _check_seeded_search(port: int) -> void:
 		_fail("seeded returned no lines")
 		return
 	var first_moves: Array = out_lines[0].get("moves", [])
-	var prefix_ok := first_moves.size() >= seed.size()
-	for i in range(seed.size()):
-		if str(first_moves[i]) != str(seed[i]):
+	if str(r.get("root_state_hash", "")) != str(base.get("root_state_hash", "")):
+		_fail("seeded search changed the pinned root identity")
+		return
+	var prefix_ok := first_moves.size() >= seed_moves.size()
+	for i in range(seed_moves.size()):
+		if str(first_moves[i]) != str(seed_moves[i]):
 			# Intermediate auto-steps may insert between scripted seeds; check
 			# that each seed command appears in order.
 			prefix_ok = false
@@ -224,11 +237,11 @@ func _check_seeded_search(port: int) -> void:
 		# Softer check: every seed command appears in the deepened line.
 		var joined := " | ".join(first_moves)
 		prefix_ok = true
-		for s in seed:
+		for s in seed_moves:
 			if joined.find(str(s)) < 0:
 				prefix_ok = false
 				break
 	if prefix_ok:
-		_ok("seeded line preserves seed %s" % str(seed))
+		_ok("seeded line preserves seed %s" % str(seed_moves))
 	else:
-		_fail("seeded line missing seed %s in %s" % [str(seed), str(first_moves)])
+		_fail("seeded line missing seed %s in %s" % [str(seed_moves), str(first_moves)])

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -90,11 +91,42 @@ def set_search_corpus(corpus: list[dict] | None) -> None:
     _current_search_corpus = corpus or []
 
 
+def _reasoner_context() -> Any:
+    from .reasoner_context import current_context
+
+    return current_context()
+
+
+def _brief_state() -> dict:
+    context = _reasoner_context()
+    return context.brief_state if context is not None else _current_brief_state
+
+
+def _scout_lines() -> list[dict]:
+    context = _reasoner_context()
+    return context.scout_lines if context is not None else _current_scout_lines
+
+
+def _scout_stats() -> dict:
+    context = _reasoner_context()
+    return context.scout_stats if context is not None else _current_scout_stats
+
+
+def _search_corpus() -> list[dict]:
+    context = _reasoner_context()
+    return context.search_corpus if context is not None else _current_search_corpus
+
+
 # ── Read Skills ───────────────────────────────────────────────────────────────
 
 
 def get_full_state() -> str:
     """Return the full board description for this seat as text."""
+    context = _reasoner_context()
+    if context is not None:
+        return context.brief_state.get("full_state_text", "") or json.dumps(
+            context.brief_state, indent=2
+        )
     return _current_full_state_text or json.dumps(_current_brief_state, indent=2)
 
 
@@ -104,7 +136,7 @@ def get_zone(zone_id: str) -> str:
     zone_id examples: "my_hand", "my_base_units", "battlefield-a",
                       "opponent_base_units", "my_runes"
     """
-    bs = _current_brief_state
+    bs = _brief_state()
     if not bs:
         return "No state available."
 
@@ -152,7 +184,7 @@ def get_opponent_history() -> str:
     Return a description of what the opponent has done this game: current
     public snapshot plus the tracked log of visible opponent actions.
     """
-    bs = _current_brief_state
+    bs = _brief_state()
     lines = [
         "Opponent public info:",
         f"  Score: {bs.get('opponent_score', '?')}",
@@ -160,8 +192,11 @@ def get_opponent_history() -> str:
         f"  Base units: {_format_units(bs.get('opponent_base_units', []))}",
     ]
     recent = ""
-    if _current_memory is not None and _current_game_id:
-        recent = _current_memory.opponent_actions_text(_current_game_id)
+    context = _reasoner_context()
+    memory = context.memory if context is not None else _current_memory
+    game_id = context.game_id if context is not None else _current_game_id
+    if memory is not None and game_id:
+        recent = memory.opponent_actions_text(game_id)
     lines.append(recent or "  (No opponent actions recorded yet this game.)")
     return "\n".join(lines)
 
@@ -229,6 +264,9 @@ def get_keyword(name: str) -> str:
 
 def list_legal_moves() -> list[str]:
     """Return the current enumerated legal moves (populated per-trigger from Godot)."""
+    context = _reasoner_context()
+    if context is not None:
+        return list(context.brief_state.get("legal_moves", []) or [])
     return _current_legal_moves
 
 
@@ -259,7 +297,7 @@ def simulate_move(move: dict) -> dict:
             result["legal"] = False
         return result
 
-    bs = _current_brief_state
+    bs = _brief_state()
     sims = bs.get("move_simulations", {}) or {}
 
     if command in sims:
@@ -294,7 +332,7 @@ def simulate_line(moves: list) -> dict:
         out["source"] = "live_engine"
         return out
 
-    bs = _current_brief_state
+    bs = _brief_state()
     key = " ; ".join(commands)
     line_sims = bs.get("line_simulations", {}) or {}
 
@@ -335,10 +373,30 @@ def _live_simulate(commands: list[str]) -> dict | None:
     """Try the live engine server; return None to fall back to pre-sim lookup."""
     if not commands:
         return None
+    from .tool_budget import budget_exhausted_result, current_budget
+
+    budget = current_budget()
+    if budget is not None:
+        if budget.exhausted:
+            return budget_exhausted_result()
+        key = tuple(commands)
+        cached = budget.simulate_cache.get(key)
+        if cached is not None:
+            out = dict(cached)
+            out["cached"] = True
+            out.update(budget.status())
+            return out
     try:
         from . import engine_client
 
-        return engine_client.simulate(commands)
+        started = time.monotonic()
+        result = engine_client.simulate(commands)
+        if budget is not None:
+            budget.engine_time_ms += max(0, int((time.monotonic() - started) * 1000))
+            budget.simulate_cache[tuple(commands)] = dict(result)
+            result = dict(result)
+            result.update(budget.status())
+        return result
     except Exception:
         # EngineUnavailable or unexpected — fail safe to Phase-1 lookup.
         return None
@@ -378,13 +436,21 @@ def search_for(
     if not norm:
         return {
             "matches": [],
-            "corpus_size": len(_current_search_corpus),
+            "corpus_size": len(_search_corpus()),
             "source": "not_evaluated",
             "note": "search_for needs at least one valid constraint clause {metric, comparator, threshold, target}.",
         }
 
     corpus, source = _search_corpus_for_filter(top_n=max(top_n, 8))
     if not corpus:
+        if source == "budget_exhausted":
+            from .tool_budget import budget_exhausted_result
+
+            return {
+                "matches": [],
+                "corpus_size": 0,
+                **budget_exhausted_result(),
+            }
         return {
             "matches": [],
             "corpus_size": 0,
@@ -395,7 +461,23 @@ def search_for(
         corpus, norm, combine=combine,
         top_n=top_n, min_satisfaction=min_satisfaction,
     )
+    context = _reasoner_context()
+    if context is not None:
+        enriched: list[dict[str, Any]] = []
+        for match in result.get("matches", []) or []:
+            registered = context.registry.get(str(match.get("line_id", "")))
+            if registered is not None:
+                registered.update(match)
+                enriched.append(registered)
+            else:
+                enriched.append(match)
+        result["matches"] = enriched
     result["source"] = source
+    from .tool_budget import current_budget
+
+    budget = current_budget()
+    if budget is not None:
+        result.update(budget.status())
     return result
 
 
@@ -410,30 +492,69 @@ def _search_corpus_for_filter(top_n: int = 8) -> tuple[list[dict], str]:
             "beam_width": 6,
         },
     })
+    if live is not None and live.get("error") == "budget_exhausted":
+        return [], "budget_exhausted"
     if live is not None and live.get("legal", True) is not False:
         lines = live.get("candidate_lines", []) or []
+        context = _reasoner_context()
+        if context is not None:
+            call_index = int(context.telemetry.get("search_for_calls", 0)) + 1
+            context.telemetry["search_for_calls"] = call_index
+            lines = context.registry.register_many(
+                lines, source=f"search-for-{call_index}"
+            )
         corpus = [
             {
                 "line_id": str(line.get("line_id", "")),
                 "moves": list(line.get("moves", []) or []),
                 "score": float(line.get("score", 0.0) or 0.0),
                 "search_state": dict(line.get("search_state", {}) or {}),
+                "move_contexts": list(line.get("move_contexts", []) or []),
+                "expected_pre_hashes": list(line.get("expected_pre_hashes", []) or []),
+                "root_state_hash": str(line.get("root_state_hash", "")),
+                "legal": bool(line.get("legal", True)),
+                "complete": bool(line.get("complete", False)),
+                "terminal_reason": str(line.get("terminal_reason", "")),
+                "search_mode": str(line.get("search_mode", "main")),
+                "opponent_windows": list(line.get("opponent_windows", []) or []),
             }
             for line in lines
             if isinstance(line, dict)
         ]
         if corpus:
+            if context is not None:
+                context.search_corpus = list(corpus)
             return corpus, "live_engine"
-    if _current_search_corpus:
-        return list(_current_search_corpus), "presim_corpus"
+    current_corpus = _search_corpus()
+    if current_corpus:
+        return list(current_corpus), "presim_corpus"
     return [], "unavailable"
 
 
 def _live_search(payload: dict) -> dict | None:
+    from .tool_budget import budget_exhausted_result, current_budget
+
+    budget = current_budget()
+    actual_payload = payload
+    if budget is not None:
+        clamped = budget.clamp_search_payload(payload)
+        if clamped is None:
+            return budget_exhausted_result()
+        actual_payload = clamped
     try:
         from . import engine_client
 
-        return engine_client.search(payload)
+        started = time.monotonic()
+        result = engine_client.search(actual_payload)
+        if budget is not None:
+            elapsed_ms = max(0, int((time.monotonic() - started) * 1000))
+            requested_nodes = int(
+                (actual_payload.get("budget", {}) or {}).get("node_budget", 0) or 0
+            )
+            budget.record_search(result, elapsed_ms, requested_nodes)
+            result = dict(result)
+            result.update(budget.status())
+        return result
     except Exception:
         return None
 
@@ -480,7 +601,19 @@ def deepen(
             "error": "Live engine unavailable; deepen requires /engine/search.",
             "source": "unavailable",
         }
+    if live.get("error") == "budget_exhausted":
+        return dict(live)
     out = dict(live)
+    context = _reasoner_context()
+    if context is not None:
+        call_index = int(context.telemetry.get("deepen_calls", 0)) + 1
+        context.telemetry["deepen_calls"] = call_index
+        registered = context.registry.register_many(
+            out.get("candidate_lines", []) or [],
+            source=f"deepen-{call_index}",
+        )
+        out["candidate_lines"] = registered
+        context.search_corpus = list(registered)
     out["seed_moves"] = seed
     out["source"] = "live_engine"
     out["extra_depth"] = extra
@@ -493,12 +626,17 @@ def _resolve_deepen_seed(line_id: str | None, moves: list | None) -> list[str] |
         cmds = [_move_to_command(m) for m in moves]
     elif line_id:
         target = str(line_id)
-        for entry in _current_search_corpus:
+        context = _reasoner_context()
+        if context is not None:
+            registered = context.registry.get(target)
+            if registered is not None:
+                cmds = [str(m) for m in (registered.get("moves", []) or [])]
+        for entry in _search_corpus():
             if str(entry.get("line_id", "")) == target:
                 cmds = [str(m) for m in (entry.get("moves", []) or [])]
                 break
         if not cmds:
-            for entry in _current_scout_lines:
+            for entry in _scout_lines():
                 if str(entry.get("line_id", "")) == target:
                     cmds = [str(m) for m in (entry.get("moves", []) or [])]
                     break
@@ -541,7 +679,8 @@ def search_turn(top_n: int = 5) -> dict[str, Any]:
     - REDIRECT it when every top line ignores a winning idea you can see.
     If no scout search ran, 'lines' is empty — fall back to evaluate_position.
     """
-    if not _current_scout_lines:
+    scout_lines = _scout_lines()
+    if not scout_lines:
         return {
             "lines": [],
             "note": (
@@ -550,8 +689,8 @@ def search_turn(top_n: int = 5) -> dict[str, Any]:
             ),
         }
     return {
-        "lines": _current_scout_lines[: max(1, int(top_n or 5))],
-        "search_stats": _current_scout_stats,
+        "lines": scout_lines[: max(1, int(top_n or 5))],
+        "search_stats": _scout_stats(),
         "note": (
             "Scores are mechanical (base profile). A high-scoring line is the "
             "search's current best guess; set goals to sharpen or redirect it."
@@ -564,7 +703,7 @@ def evaluate_position() -> dict[str, Any]:
     Return a heuristic assessment of the current position.
     Higher score_advantage means better for the AI seat.
     """
-    bs = _current_brief_state
+    bs = _brief_state()
     if not bs:
         return {"error": "No state available."}
 

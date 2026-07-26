@@ -3,6 +3,8 @@ class_name ChainProcessor
 # Manages the Chain (stack) per §8 of the implementation rules.
 # FEPR: Finalize → Execute → Pass priority → Resolve
 
+const TargetResolverScript = preload("res://Scripts/Game/TargetResolver.gd")
+
 static func on_card_added_to_chain(gs: GameState) -> Array:
 	# When a card is placed on the chain, state becomes Closed
 	var log_lines: Array[String] = []
@@ -106,6 +108,11 @@ static func _execute_chain_item(item: ChainItem, gs: GameState, ability_resolver
 				elif not item.targets.is_empty():
 					target = item.targets[0]
 				var owner_pi = card.owner_index
+				if params.get("targeting", "") == "choose_one" and not _target_is_still_valid(
+					target, params, card, gs, owner_pi
+				):
+					log_lines.append("> %s's target is no longer valid — effect does not resolve" % card.display_name())
+					continue
 				var cost = ab.get("cost", {})
 				if not cost.is_empty():
 					var computed = CostCalculator.compute_ability_cost(cost, card, target, gs)
@@ -155,10 +162,31 @@ static func _execute_chain_item(item: ChainItem, gs: GameState, ability_resolver
 	elif item.item_type == ChainItem.ItemType.ABILITY:
 		var target = item.targets[0] if not item.targets.is_empty() else null
 		var ctx = {"player_index": item.source_card.owner_index if item.source_card else 0}
+		var params: Dictionary = item.ability_def.get("effect_params", {})
+		if params.get("targeting", "") == "choose_one" and not _target_is_still_valid(
+			target, params, item.source_card, gs, int(ctx.player_index)
+		):
+			return ["> Ability's target is no longer valid — effect does not resolve"]
 		var ab_lines = ability_resolver.resolve_ability(item.ability_def, item.source_card, target, gs, ctx)
 		log_lines.append_array(ab_lines)
 
 	return log_lines
+
+
+static func _target_is_still_valid(
+	target: CardInstance,
+	params: Dictionary,
+	source: CardInstance,
+	gs: GameState,
+	player_index: int
+) -> bool:
+	if target == null:
+		return false
+	var filter := str(params.get("target", ""))
+	var valid = TargetResolverScript.filter_with_params(
+		filter, params, source, gs, {"player_index": player_index}
+	)
+	return target in valid
 
 
 static func _return_to_open(gs: GameState) -> Array:

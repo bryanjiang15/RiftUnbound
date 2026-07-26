@@ -1,10 +1,12 @@
 # Deliberative Reasoning Toolkit — Design
 
-Status: **Phase 0–2 implemented** (Reasoner / Phase 3 not yet). This doc specifies how to turn the
-Riftbound agent from a *search-biasing* system into a *search-driving* one — an
-LLM that investigates the game tree with live tools (conditional line search,
-on-demand simulation, opponent modeling, multi-turn rollout) inside a ReAct
-reasoning loop.
+Status: **Phase 0–3 implemented** (Phase 3 corrective contracts and
+deterministic regressions are complete; the 20-turn behavioral sample and
+Phase 4 self-play gate are not yet). This doc specifies
+how to turn the Riftbound agent from a *search-biasing* system into a
+*search-driving* one — an LLM that investigates the game tree with live tools
+(conditional line search, on-demand simulation, opponent modeling, multi-turn
+rollout) inside a ReAct reasoning loop.
 
 Companion docs:
 - `Goal_Oriented_Strategist.md` — the current strategist/overlay design this
@@ -13,6 +15,9 @@ Companion docs:
   generalizes into live simulation.
 - `Scoring_Features_Reference.md` — the linear eval and feature registry the new
   tools return facts against.
+- `Reasoner_Investigation_Improvements.md` — post-Phase-3 corrective plan for
+  scout anchoring, shallow investigation, no-op GoalSets, and non-scout line
+  commitment. Follow that doc before running the Phase 4 SPRT gate.
 
 ---
 
@@ -270,8 +275,8 @@ All Reasoner work lands on a **separate branch** behind `RIFTBOUND_REASONER`
 | **0** | ✅ **DONE** — spike (`Scripts/Tools/ReasonerThreadSpike.gd`, §3.1) confirmed: engine is thread-safe, `TCPServer` serves headless, main loop stays free. Decision: engine server runs sims on a **worker thread**. | De-risks the whole live-tool path | — |
 | **1** | ✅ **DONE** — `search_for` over pre-computed lines with per-line `search_state` (Python `SEARCH_METRICS` filter; fuller than the original “per common predicate” sketch). | Conditional search, no Godot server | — |
 | **2** | ✅ **DONE** — Godot `EngineServer` (`POST /engine/simulate`, `/engine/search`); live `simulate` / `deepen` / `search_for` with Phase-1 fail-safe fallback. | Live "what if X?" | Phase 0 |
-| **3** | Reasoner stage (§5a) on its own branch: ReAct loop over the AI-only tools (4.1, 4.2, 4.6), per-turn tool budget (§6), emits chosen line or `GoalSet`. | **The deep-planning payoff** | Phase 2 |
-| **4** | SPRT self-play gate — Reasoner seat vs. current strategist+actor seat; commit only on a significant win-rate lift (`Goal_Oriented_Strategist.md §8`). | Evidence it helped | Phase 3 |
+| **3** | ✅ **DONE (deterministic contracts)** — Reasoner stage (§5a) now uses request-scoped engine-line registries, native `commit_line` / `emit_goals` terminals, strict non-empty goals, complete root/hash-matched replay, and a successful `search_for` / `deepen` gate. Deterministic Python/Godot regressions pass; the live behavioral sample remains — see `Reasoner_Investigation_Improvements.md`. | **The deep-planning payoff** | Phase 2 |
+| **4** | SPRT self-play gate — Reasoner seat vs. current strategist+actor seat; commit only on a significant win-rate lift (`Goal_Oriented_Strategist.md §8`). Run only after the corrective plan’s acceptance criteria pass. | Evidence it helped | Phase 3 + corrective plan |
 | **5+** *(deferred)* | Opponent modeling: `simulate_opponent` (4.3, assumption-driven) → `branch` (4.5) → `rollout` (4.4), each behind the same gate. | Adversarial + multi-turn reasoning | Phase 3 |
 
 ## 8. Open questions
@@ -281,9 +286,12 @@ All Reasoner work lands on a **separate branch** behind `RIFTBOUND_REASONER`
   stall, no deadlock. The main loop only pumps the cheap `TCPServer` accept/read/
   write; heavy work is off-thread. Remaining sub-task: free every sim controller
   per request (the spike's leak lesson).
-- **Emit contract** — when should the Reasoner commit a line directly vs. emit a
-  `GoalSet` and let the search finish? Needs a clear rule (e.g. commit only when
-  a `simulate`'d line dominates and is uncontested; else hand off a `GoalSet`).
+- ~~**Emit contract**~~ — **RESOLVED.** Commit only a complete, legal,
+  root-matched engine registry entry by canonical `line_id`, with parallel
+  commands, contexts, and pre-hashes. Contested is not disqualifying: commit the
+  complete unanswered line and rely on hash divergence to abandon/replan after
+  interaction. Use a strict non-empty `GoalSet` when tactics intentionally
+  remain open. Simulation arguments and AI-authored scripts are never commits.
 - **Opponent assumptions UX (deferred, 4.3)** — resolved in principle: simulate
   on the known board, let the LLM name hidden-card assumptions per query, label
   every result with its assumption set. Open sub-question: seed a *default*
