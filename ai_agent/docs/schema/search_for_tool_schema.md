@@ -1,9 +1,10 @@
 # `search_for` Tool Schema — Reference
 
-Status: **implemented (Phase 1–2).** Phase 1 shipped the `PredicateClause` /
-`search_for` contract over pre-computed `search_state` lines. Phase 2 prefers a
-live `/engine/search` corpus when Godot's `EngineServer` is pinned, with the same
-filter semantics and a fail-safe back to the Phase-1 corpus.
+Status: **implemented (Phase 1–3).** Phase 1 shipped the `PredicateClause` /
+`search_for` contract over candidate-line `search_state` snapshots. Phase 2
+prefers a live `/engine/search` corpus when Godot's `EngineServer` is pinned,
+with the same filter semantics and a fail-safe back to the Phase-1 corpus. Phase
+3 uses this contract inside the Reasoner loop.
 
 Companion: `ai_agent/docs/Deliberative_Reasoning_Toolkit.md` (why this tool
 exists), `ai_agent/docs/Goal_Oriented_Strategist.md` (the compiler/whitelist this
@@ -201,7 +202,6 @@ Metrics are grouped by the **subject** they attach to. Each row states what
 | `score` | the target player's victory points | continuous |
 | `cards_in_hand` | the target player's hand size | continuous |
 | `ready_runes` | the target player's ready (unexhausted) runes | continuous |
-| `playable_cards` | cards in hand the target player can currently pay for (Action/Reaction if it's not their turn) | continuous |
 
 ### This-turn outcomes — no `target` (always me, this turn)
 | metric | meaning | kind |
@@ -232,34 +232,43 @@ Every example condition is now expressible in the vocabulary:
 | vi-1 ends ≥ 4 Might | `unit_might`, target `vi-1`, `>= 4` | ✅ in vocabulary |
 | Opponent hand ≤ 2 | `cards_in_hand`, target `opponent`, `<= 2` | ✅ in vocabulary |
 
-**The cost moved from "composition" to "the engine must expose a post-line state
+**The cost moved from "composition" to "the engine emits a post-line state
 snapshot."** Unlike the old plan (reuse the scalar scoring `features`), these
-concrete metrics mostly are **not** in `features` today. The engine must emit, per
-candidate line, a structured **post-line snapshot**:
+concrete metrics mostly are **not** scorer features. `TurnSearch._add_leaf()`
+builds both the raw scoring `features` and a separate `search_state` snapshot via
+`ScoreModel.build_search_state()`, and `_build_candidate_lines()` attaches both
+to each `CandidateLine`.
 
-- **units**: `{instance_id, owner, might, damage, alive, battlefield}`
+- **units**: `{instance_id -> {owner, might, damage, health, battlefield, exhausted}}`
 - **battlefields**: `{id, my_might, opp_might, my_units, opp_units, controller}`
-- **players**: `{me|opponent → score, hand_size, ready_runes, playable_cards}`
+- **players**: `{me|opponent -> score, cards_in_hand, ready_runes}`
 - **this-turn tallies**: `points_scored, enemy_units_killed, battlefields_conquered`
 - **cards played**: list of card instance ids played in the line
 
-This is a bigger engine job than reusing features, but it is the right foundation:
-one snapshot resolves *every* metric above, and new metrics are read off the same
-snapshot with no schema change. Source it from the line's `resolved_state` /
-`ScoreModel` post-resolution state (GDScript), attach it to `CandidateLine`.
+This is the right foundation: one snapshot resolves every implemented metric
+above, and new metrics are read off the same snapshot whenever the required
+quantity is already present. If a new metric needs a quantity that is not in
+`search_state`, add it in `ScoreModel.build_search_state()` before adding the
+Python resolver.
 
 Adding a future metric = (1) ensure the quantity is in the snapshot (often already
 there), (2) add one row to the §5 registry. The enum regenerates; the clause
 "just works".
 
-## 7. Implementation surface (Phase 1)
+## 7. Implementation surface
 
-**Engine (GDScript) — the load-bearing piece:**
-- Emit a **post-line state snapshot** (§6) per candidate line and attach it to
-  `CandidateLine`. Build it from the line's post-resolution state
-  (`resolved_state` / `ScoreModel`), NOT from the scalar scoring `features`.
+**Engine (GDScript) — implemented:**
+- `ScoreModel.build_search_state(leaf_snap, features, steps)` projects the
+  post-line state into concrete unit, battlefield, player, turn, and card-played
+  facts. A destroyed unit is absent from `units`, which is how `unit_alive`
+  resolves to false.
+- `TurnSearch._add_leaf()` stores `features`, `resolved_state`, `search_state`,
+  `complete`, and `terminal_reason` on each leaf.
+- `TurnSearch._build_candidate_lines()` serializes `search_state`,
+  `expected_pre_hashes`, `complete`, and `terminal_reason` into each
+  `CandidateLine`.
 
-**Python:**
+**Python — implemented:**
 - A `SEARCH_METRICS` registry (the §5 table): metric → `{subject, kind (bool/
   continuous), resolver}`. This is the search vocabulary, distinct from
   `STATE_TARGET_METRICS` (which stays for the scoring overlay).
@@ -280,11 +289,12 @@ there), (2) add one row to the §5 registry. The enum regenerates; the clause
 - `combine` **default** — is weakest-link `min` right, or should the default be
 `weighted` so a strong line with one weak clause still surfaces? (Lean `min`
 for honesty; the `note` surfaces near-misses regardless.)
-- **Snapshot scope** — how much post-line state to attach per line? Full snapshot
-is simplest and resolves every metric, but fattens the corpus. Attach lazily
-(only entities named in the corpus) if payload size bites.
+- **Snapshot growth** — the current snapshot is intentionally compact. Add fields
+only when a new metric needs them; keep payload size in mind because the whole
+candidate corpus crosses the Godot/Python boundary.
 - **Does** `search_for` **also need a "sort by" knob** (satisfaction vs. engine
 score) or is "satisfaction desc, then score desc" always right? (Start fixed.)
-- **`unit_health` semantics** — remaining health = Might − damage; confirm that's
-the quantity the engine tracks (vs. a separate health stat).
+- **Future player metrics** — `playable_cards` was proposed but is not currently
+in `SEARCH_METRICS` or `ScoreModel.build_search_state()`. Add engine support
+before documenting it as a valid predicate.
 

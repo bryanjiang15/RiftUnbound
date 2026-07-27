@@ -1,8 +1,9 @@
 # Riftbound AI Agent Service
 
-A Python-based OpenAI reasoning agent that plays Riftbound against a human.
-Godot sends compact game state JSON; the agent reasons using GPT-4o with
-tool-calling skills, then returns a structured decision that Godot validates.
+A Python-based LLM reasoning agent that plays Riftbound against a human.
+Godot sends compact game state JSON; the agent reasons with the configured
+provider/model and tool-calling skills, then returns a structured decision that
+Godot validates.
 
 ## Quick Start
 
@@ -39,6 +40,9 @@ uvicorn ai_agent.main:app --port 8765 --reload
 | `RIFTBOUND_SEARCH` | `off` | No | Enables engine search mode. When on, Godot runs `TurnSearch` and posts candidate lines; the server selects a line (via `choose_line`) and captures the tuning dataset (`search_decisions` / `candidate_lines` / `decision_snapshots`). |
 | `RIFTBOUND_SEARCH_ARGMAX` | `off` | No | When on (with search enabled), skips the LLM line-selector round-trip and returns the top-scored line directly. Decisions are tagged `selector_source='argmax'`. Use for bulk data generation / weight tuning. |
 | `RIFTBOUND_GOALS` | `off` | No | Enables the goal-oriented strategist: once per turn an LLM emits a structured GoalSet that is compiled into a transient scoring-profile overlay biasing line selection (`ai_agent/docs/Goal_Oriented_Strategist.md`). Requires `RIFTBOUND_SEARCH=on`; ignored under `RIFTBOUND_SEARCH_ARGMAX`. Off keeps the proven base-profile search as the floor. |
+| `RIFTBOUND_REASONER` | `off` | No | Enables the Phase-3 Reasoner pre-search handshake. Requires `RIFTBOUND_SEARCH=on` and `RIFTBOUND_SEARCH_ARGMAX=off`; otherwise `/health` reports `reasoner_enabled=false` and the server logs that the flag was ignored. The Reasoner can either commit a verified engine line or return a GoalSet overlay for the final search. |
+| `RIFTBOUND_ENGINE_PORT` | `8766` | No | Port the Python live-engine tools use for Godot's local `EngineServer` (`/engine/*`). Must match the engine process when changed. |
+| `RIFTBOUND_ENGINE_TIMEOUT_S` | `8.0` | No | Timeout for each Python call to the live Godot engine server. Values below `0.5` are clamped. |
 | `RIFTBOUND_DATA_ORIGIN` | `vs_human` | No | Provenance tag stamped on captured `search_decisions` rows: `vs_human`, `self_play`, or `vs_heuristic`. Keeps state distributions separable so they are never silently mixed in tuning. |
 | `RIFTBOUND_CAPTURE_SEAT` | (unset) | No | When `0` or `1`, persist the tuning dataset (`search_decisions` / `candidate_lines` / `decision_snapshots`) for **only that seat's** decisions. Use in two-profile self-play to store data from just the profile under test (put it on this seat). Unset/invalid = capture both seats. |
 | `RIFTBOUND_DB_PATH` | (default `ai_agent/agent_memory.db`) | No | Override the SQLite database path. Useful to write self-play data to a dedicated file (e.g. `ai_agent/selfplay.db`) instead of the live-play DB. |
@@ -61,9 +65,12 @@ Notes:
   overlay deltas. It is written only when `RIFTBOUND_LOG_INPUTS=1` and
   `RIFTBOUND_SEARCH=on`; enable both when debugging search selection or
   `RIFTBOUND_GOALS`.
-- The HTTP port is **not** an environment variable. The service is started with
-  `uvicorn ... --port 8765`, and the Godot client hardcodes `AGENT_PORT := 8765`
-  (`Scripts/AI/AIPlayer.gd`). Change both together if you need a different port.
+- The FastAPI service port is set by the `uvicorn ... --port` argument. Godot
+  defaults to `8765` and can be pointed at another agent port with
+  `RIFTBOUND_AGENT_PORT`; change both sides together.
+- The Godot `EngineServer` is a separate localhost-only callback server
+  (default `127.0.0.1:8766`) used by Python live tools. Keep
+  `RIFTBOUND_ENGINE_PORT` aligned in both processes if you override it.
 
 ### Example
 
@@ -74,6 +81,21 @@ export RIFTBOUND_AI_MODEL=gpt-4o-mini
 export RIFTBOUND_PIPELINE=staged
 export RIFTBOUND_LOG_INPUTS=1
 uvicorn ai_agent.main:app --port 8765 --reload
+```
+
+### Example (Reasoner + live engine tools)
+
+```bash
+# Python service: enable search, Reasoner, and logs for live-tool debugging.
+export OPENAI_API_KEY=sk-...
+export RIFTBOUND_SEARCH=on
+export RIFTBOUND_REASONER=on
+export RIFTBOUND_LOG_INPUTS=1
+uvicorn ai_agent.main:app --port 8765 --reload
+
+# Godot side: AIPlayer starts EngineServer by default on port 8766.
+# If you changed ports, set RIFTBOUND_AGENT_PORT and/or RIFTBOUND_ENGINE_PORT
+# in the Godot process to match the Python service.
 ```
 
 ### Example (Azure OpenAI)
@@ -95,25 +117,44 @@ uvicorn ai_agent.main:app --port 8765 --reload
 |---|---|---|
 | `/decision` | POST | Main entry — receives BriefState, returns Decision |
 | `/goals` | POST | Pre-search handshake — receives BriefState, returns this turn's compiled goal overlay (empty unless `RIFTBOUND_GOALS=on`) |
-| `/health` | GET | Liveness check |
+| `/reason` | POST | Phase-3 Reasoner pre-search handshake. Returns a verified committed line, a GoalSet overlay, or a base-search fallback payload. |
+| `/health` | GET | Liveness/config check. Returns `search_enabled`, `goals_enabled`, `reasoner_enabled`, and `pipeline`. |
+| `/outcome` | POST | Godot reports whether the last returned move was accepted or rejected. |
+| `/game_over` | POST | Records game result and backfills search/tuning rows with outcome, score diff, and initiative. |
+| `/decision_metrics` | POST | Engine-observed latency/retry/fallback metrics for one AI decision. |
+| `/human_feedback` | POST | Human rubric feedback from the evaluation UI. |
+| `/move_feedback` | POST | Per-move like/neutral/dislike feedback. |
+| `/eval_report` | GET | Aggregate reliability and feedback report. |
+| `/card_stats` | GET | Per-card aggregate statistics from captured card lifecycle events. |
+| `/opponent_action` | POST | Visible opponent action log for context injection. |
+| `/card_event` | POST | Card lifecycle event capture (`drawn`, `played`, `discarded`, `died`, etc.). |
+| `/game_state_event` | POST | Optional debug timeline snapshots when `RIFTBOUND_LOG_INPUTS=1`. |
 | `/legal_moves` | GET | Current enumerated legal moves (debug) |
 | `/state` | GET | Full board state text (debug) |
 | `/card/{id}` | GET | Card definition lookup |
 | `/rule?q=...` | GET | Rules passage search |
 | `/position` | GET | Heuristic position evaluation |
 
+Godot's local `EngineServer` is not part of the public FastAPI service. It binds
+to `127.0.0.1` and exposes `GET /engine/health`, `POST /engine/simulate`, and
+`POST /engine/search` only so Python tools can call back into the pinned rules
+engine during a decision.
+
 ## Architecture
 
 ```
 Godot (GameController)
   └─ AIPlayer.gd
-       ├─ GET /health at setup: adopt server search/goals flags
-       ├─ optional TurnSearch scout + POST /goals before main search
+       ├─ GET /health at setup: adopt server search/goals/reasoner flags
+       ├─ optional local EngineServer on 127.0.0.1:8766 for live tools
+       ├─ optional TurnSearch scout + POST /reason or /goals before main search
+       │     └─ Python live tools call back to /engine/simulate and /engine/search
        └─ POST /decision with BriefState and candidate lines
              │
              ▼
         FastAPI (main.py)
              ├─ agent.py: legacy loop, line selector, goal overlay build
+             ├─ reasoner.py / engine_client.py: bounded Reasoner + live engine tools
              ├─ planner.py / strategist.py: cached per-turn LLM stages
              ├─ skills.py: read tools, simulations, scout search context
              └─ memory.py / capture.py: SQLite decision and tuning data
@@ -135,6 +176,8 @@ ai_agent/
   main.py              FastAPI service, env flags, logging, capture hooks
   memory.py            SQLite episodic event log
   capture.py           Search/tuning dataset persistence helpers
+  engine_client.py     HTTP client for Godot EngineServer live tools
+  reasoner.py          Phase-3 Reasoner loop and emit contract
   agent_memory.db      Created at runtime (gitignored)
 ```
 
@@ -168,13 +211,19 @@ Every response from `/decision` has this shape:
     }
   },
   "confidence": "high",
-  "alternatives_considered": "Could end turn, but board presence is more valuable."
+  "alternatives_considered": "Could end turn, but board presence is more valuable.",
+  "chosen_line_id": "line-1",
+  "selector_source": "llm"
 }
 ```
 
 Godot's `AIPlayer.gd` translates `move` into a console command string
 (`play noxus-hopeful to battlefield-a`) and submits it through the same
 `submit_command()` path that a human player uses.
+
+`chosen_line_id` and `selector_source` are optional. They are present when search
+mode selected an engine candidate line (`selector_source` is `llm`, `fallback`,
+or `argmax`) and absent for normal non-search decisions.
 
 ## Memory
 
@@ -240,7 +289,10 @@ RIFTBOUND_DATA_ORIGIN=self_play RIFTBOUND_DB_PATH=ai_agent/selfplay.db \
 # 2. Run N games against it (Godot headless).
 #    RIFTBOUND_AGENT_PORT points the engine at the server above;
 #    RIFTBOUND_AI_THINK_DELAY=0 removes the per-move readability delay.
-RIFTBOUND_SEARCH=on RIFTBOUND_AGENT_PORT=8766 RIFTBOUND_AI_THINK_DELAY=0 \
+#    Disable EngineServer here because live Reasoner tools are not used and the
+#    agent server is also bound to 8766 in this example.
+RIFTBOUND_SEARCH=on RIFTBOUND_AGENT_PORT=8766 RIFTBOUND_ENGINE_SERVER=0 \
+RIFTBOUND_AI_THINK_DELAY=0 \
   <godot> --headless --path . --script res://Scripts/Tools/SelfPlaySim.gd -- \
     --games 50 --seed 1000 --turn-cap 200
 ```
@@ -285,7 +337,8 @@ Each `TurnSearch` scores under its seat's profile, and argmax selection uses tho
 engine-computed scores, so the two seats genuinely play different weights.
 
 ```bash
-RIFTBOUND_SEARCH=on RIFTBOUND_AGENT_PORT=8766 RIFTBOUND_AI_THINK_DELAY=0 \
+RIFTBOUND_SEARCH=on RIFTBOUND_AGENT_PORT=8766 RIFTBOUND_ENGINE_SERVER=0 \
+RIFTBOUND_AI_THINK_DELAY=0 \
   <godot> --headless --path . --script res://Scripts/Tools/SelfPlaySim.gd -- \
     --games 50 --seed 1000 \
     --p1-profile res://Data/AI/candidate_profile.json \
@@ -312,7 +365,8 @@ RIFTBOUND_CAPTURE_SEAT=0 \
   uvicorn ai_agent.main:app --port 8766
 
 # Engine: seat 0 = candidate (captured), seat 1 = baseline (not captured).
-RIFTBOUND_SEARCH=on RIFTBOUND_AGENT_PORT=8766 RIFTBOUND_AI_THINK_DELAY=0 \
+RIFTBOUND_SEARCH=on RIFTBOUND_AGENT_PORT=8766 RIFTBOUND_ENGINE_SERVER=0 \
+RIFTBOUND_AI_THINK_DELAY=0 \
   <godot> --headless --path . --script res://Scripts/Tools/SelfPlaySim.gd -- \
     --games 50 --seed 1000 \
     --p1-profile res://Data/AI/candidate_profile.json \
@@ -341,5 +395,7 @@ Engine-side env vars consumed by `Scripts/AI/AIPlayer.gd`:
 | `RIFTBOUND_AGENT_PORT` | `8765` | Agent server port the engine connects to. |
 | `RIFTBOUND_AI_THINK_DELAY` | `0.5` | Per-decision delay (seconds); set `0` for bulk runs. |
 | `RIFTBOUND_SEARCH` | `off` | Pre-handshake search default (the server's `/health` is authoritative). |
+| `RIFTBOUND_ENGINE_SERVER` | `on` | Starts the local Godot `EngineServer` for live Python tools. Set `0`, `false`, `no`, or `off` to disable. Offline self-play capture never starts it. |
+| `RIFTBOUND_ENGINE_PORT` | `8766` | Port for Godot's local `EngineServer`; must match Python's `RIFTBOUND_ENGINE_PORT`. |
 | `RIFTBOUND_GOALS_SCOUT` | `on` | When goals are enabled, run a cheap base-profile scout search before `POST /goals` and send the top lines so the Strategist grounds goals in real candidate lines. Set to `0`, `false`, `no`, or `off` to disable the scout and use a snapshot-only strategist. |
 | `RIFTBOUND_SELFPLAY_CAPTURE` | (unset) | When set (a log path, or `1`/`on` for the default `res://out/selfplay_capture.jsonl`), run fully offline: compute argmax locally, skip the server, and append every server-bound payload to the JSONL log for `import_selfplay_logs.py`. Forces search mode on. |

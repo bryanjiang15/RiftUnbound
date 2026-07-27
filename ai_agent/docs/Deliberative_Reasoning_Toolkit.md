@@ -1,4 +1,4 @@
-# Deliberative Reasoning Toolkit — Design
+# Deliberative Reasoning Toolkit — Architecture
 
 Status: **Phase 0–3 implemented** (Phase 3 corrective contracts and
 deterministic regressions are complete; the 20-turn behavioral sample and
@@ -21,24 +21,24 @@ Companion docs:
 
 ---
 
-## 1. Motivation — why the agent feels static
+## 1. Motivation — why the pre-Reasoner agent felt static
 
-The agent today is a three-stage LLM + beam-search hybrid, but **the LLM never
-drives the search — it only biases and selects it.** From
+Before the Reasoner work, the agent was a three-stage LLM + beam-search hybrid,
+but **the LLM never drove the search — it only biased and selected it.** From
 `Goal_Oriented_Strategist.md`'s core principle:
 
 > LLM picks WHAT to want; the compiler decides HOW MUCH; the search decides HOW.
 
-That division is elegant, but it makes every LLM tool a **passive lookup**, not
-an **active investigation**. Three hard walls follow:
+That division is elegant, but it made every LLM tool a **passive lookup**, not
+an **active investigation**. Three hard walls motivated the work:
 
 | Wall | Where it lives | Effect |
 |---|---|---|
-| **No agent-driven simulation** | `skills.simulate_move` / `simulate_line` only *look up* a pre-computed `SimResult` (`skills.py:233`, `:264`). If Godot didn't pre-sim that exact command, the tool returns an error. | The LLM cannot ask "what if I do X?" for anything the engine didn't guess in advance. |
+| **No agent-driven simulation** | Pre-Phase-2 `skills.simulate_move` / `simulate_line` only looked up pre-computed `SimResult` entries. | The LLM could not ask "what if I do X?" for anything the engine did not guess in advance. |
 | **No opponent modeling** | `MoveSimulator.advance_to_quiescence` forces the opponent to `pass` at every response window (`MoveSimulator.gd:180-181`). Every line is `resolved_if_unanswered`. | The LLM cannot see what the opponent does back. Contested lines are labeled but never resolved. |
 | **No horizon past this turn** | `TurnSearch` stops each line at `end turn` (`TurnSearch.gd:183`). | The LLM cannot reason about "where am I in two turns?" |
 
-So when the strategist "reasons," it reads a fixed menu (`search_turn` →
+So when only the strategist "reasons," it reads a fixed menu (`search_turn` →
 pre-computed scout lines; `evaluate_position` → a static heuristic) and picks
 weights. It cannot branch its own inquiry. That is why it feels static: it is
 doing `read → weight → select` **once**, where a reasoning agent does
@@ -48,7 +48,7 @@ doing `read → weight → select` **once**, where a reasoning agent does
 
 The research consensus (ReAct 2210.03629; Tree-of-Thoughts 2305.10601; RAP /
 Reasoning-via-Planning 2305.14992; LATS 2310.04406; AlphaZero-style MCTS+value;
-Voyager 2305.16291) converges on patterns we are missing:
+Voyager 2305.16291) converges on patterns this project targets:
 
 1. **The LLM as a search *controller*, not a search *bias*.** The model proposes
    candidate actions, a simulator evaluates them, and the model *reads the
@@ -56,7 +56,7 @@ Voyager 2305.16291) converges on patterns we are missing:
    called repeatedly**, not a one-shot pre-compute.
 2. **World-model rollouts as tools (RAP).** The LLM calls "simulate this action,
    return the resulting state," then plans against the returned state. We own the
-   world model (`MoveSimulator`); we just don't expose it live.
+   world model (`MoveSimulator`); Phase 2 exposes it live through `EngineServer`.
 3. **Adversarial rollouts.** Strong game agents model the opponent as an active
    minimizer (expectimax / MCTS opponent nodes / self-play). Cheap version: run
    *our own* search from the opponent's seat to get their best response, then
@@ -69,11 +69,10 @@ Voyager 2305.16291) converges on patterns we are missing:
 
 ## 3. The central architectural obstacle: control inversion
 
-**Today the control arrow points one way: Godot → Python.** Godot's `AIPlayer`
-is the master loop. It runs the scout search, POSTs `/goals`, runs the main
-search, then POSTs `/decision` (`AIPlayer.gd:244-314`). Python is a reasoning
-service over *pushed* state; it has no way to run the rules engine — the engine
-is GDScript inside the running Godot process.
+**The original control arrow pointed one way: Godot → Python.** Godot's
+`AIPlayer` is still the master loop, but it now pins a cloned decision state and
+starts a local `EngineServer` by default. Python can call back into that pinned
+GDScript rules engine while `/reason`, `/goals`, or `/decision` is in flight.
 
 Every tool in §4 requires the opposite arrow: **Python must call back into the
 engine mid-reasoning.** This is the one hard problem; the tools themselves are
@@ -86,11 +85,10 @@ thin wrappers once it is solved. Four ways to solve it:
 | **C. Pre-expand a bigger budget up front** | Ship a deeper, wider pre-computed tree (more scout lines, opponent responses at each window) in the `/decision` payload; the LLM navigates *that* with lookup tools. | No new plumbing, but it is "static" again — just a bigger menu. Good **interim step**, not the destination. |
 | **D. Port the engine to Python** | Reimplement `MoveSimulator`/rules in Python so tools run in-process. | Rejected: duplicates the rules engine, guarantees drift, enormous surface. |
 
-**Recommendation: build C as an interim (widen the pre-computed tree, add
-opponent responses), then A as the real mechanism** (a Godot-side engine server
-so tools are live). C ships value immediately and de-risks the tool schemas; A
-removes the pre-compute ceiling. The rest of this doc assumes A for the tool
-contracts but notes where C can back a tool with no live call.
+**Implemented path:** Phase 1 shipped the pre-computed candidate corpus and
+`search_state` schema; Phase 2 shipped Option A, a Godot-side engine server, so
+tools can be live. The live path keeps the GDScript engine as the source of truth
+and falls back to the Phase-1 corpus when the callback server is unavailable.
 
 ### 3.1 Phase 0 spike result — Option A is viable (engine is thread-safe)
 
@@ -129,11 +127,11 @@ uncertainty markers (`opponent_windows`, `unknown_cards`) it must hedge. Each is
 a Python skill (`skills.py`) + an OpenAI tool schema (`agent.TOOLS`) + an engine
 backend (live via §3-A, or a pre-computed lookup via §3-C).
 
-### 4.1 `simulate(moves[])` — live, not lookup
+### 4.1 `simulate(moves[])` — live first, lookup fallback
 Generalizes today's `simulate_line`. Runs `MoveSimulator.simulate_line` on a
-fresh clone of the live state for **any** sequence, not just pre-simmed ones.
-Returns `resolved_if_unanswered` + `opponent_windows`. This is the primitive the
-LLM uses to test a hypothesis it formed from reading the board.
+fresh clone of the pinned live state for **any** sequence, not just pre-simmed
+ones. Returns `resolved_if_unanswered` + `opponent_windows`. This is the
+primitive the LLM uses to test a hypothesis it formed from reading the board.
 
 ### 4.2 `search_for(goal, constraints, budget)` — conditional line search
 Runs `TurnSearch` with a **leaf predicate filter**: return only lines satisfying
@@ -194,16 +192,16 @@ the flat depth-12 beam.
 
 ## 5. The reasoning loop — the Reasoner stage (chosen: 5a)
 
-Today: strategist runs *before* the search (to bias generation), actor runs
-*after* (to select). A deliberation loop that both searches and simulates blurs
-that seam.
+Baseline strategist path: strategist runs *before* the search (to bias
+generation), actor runs *after* (to select). A deliberation loop that both
+searches and simulates blurs that seam.
 
 **Decision (2026-07): build 5a — collapse strategist + actor into one Reasoner
-stage — on a separate branch.** The Reasoner owns the live tools (§4) and runs a
-ReAct loop, emitting either a `GoalSet` (to bias a final search) or a chosen line
-directly. It is a larger rewrite than upgrading the strategist in place, but it
-removes the artificial pre-search / post-search split: a single stage that
-investigates, then decides, is the honest shape of "the LLM drives the search."
+stage.** The Reasoner owns the live tools (§4) and runs a ReAct loop, emitting
+either a `GoalSet` (to bias a final search) or a chosen line directly. It is a
+larger rewrite than upgrading the strategist in place, but it removes the
+artificial pre-search / post-search split: a single stage that investigates, then
+decides, is the honest shape of "the LLM drives the search."
 
 > The rejected alternative (5b) kept the strategist/actor split and only upgraded
 > the strategist's tools. Simpler, but it leaves selection stranded downstream of
@@ -212,10 +210,11 @@ investigates, then decides, is the honest shape of "the LLM drives the search."
 > a line directly when it is confident, or fall back to a `GoalSet` when it wants
 > the search to finish the tactics.
 
-**Branch plan:** develop 5a on a dedicated branch off `main`. The Reasoner runs
-behind a new flag (e.g. `RIFTBOUND_REASONER`) so `main`'s
-strategist+actor path stays intact and the two can be A/B'd in self-play (§7
-Phase 5) before either replaces the other.
+**Runtime flag:** the Reasoner runs behind `RIFTBOUND_REASONER`. The service only
+enables it when `RIFTBOUND_SEARCH=on` and `RIFTBOUND_SEARCH_ARGMAX=off`; otherwise
+`/health` reports `reasoner_enabled=false` and the engine continues through the
+base search/selector path. This keeps the strategist+actor path available for
+A/B testing and fallback.
 
 Loop shape, per turn, cached like the current strategist (opponent-action
 invalidated):
@@ -256,7 +255,7 @@ risk and needs hard caps:
 4. **Opponent-hand honesty.** Never present a hidden-information rollout as
    certain. Every `simulate_opponent`/`rollout`/`branch` result carries an
    explicit `hidden_info` marker and returns a response distribution.
-5. **Fails safe to today's agent.** Any tool error, budget exhaustion, or engine
+5. **Fails safe to the baseline agent.** Any tool error, budget exhaustion, or engine
    unavailability degrades to the current path: empty overlay → base-profile
    search → `choose_line`. No new failure can crash a turn.
 6. **Determinism for tests.** Live tools must be seedable/mockable so
@@ -265,10 +264,10 @@ risk and needs hard caps:
 
 ## 7. Phasing
 
-Near-term work is the **AI-only** tools plus the Reasoner. Opponent modeling
+Near-term work was the **AI-only** tools plus the Reasoner. Opponent modeling
 (4.3–4.5) is **deferred** by decision — the AI-only loop must prove out first.
-All Reasoner work lands on a **separate branch** behind `RIFTBOUND_REASONER`
-(§5), so `main`'s strategist+actor path is untouched and A/B-able.
+The Reasoner remains behind `RIFTBOUND_REASONER` (§5), so the
+strategist+actor path is still available and A/B-able.
 
 | Phase | Deliverable | Ships value | Depends on |
 |---|---|---|---|
