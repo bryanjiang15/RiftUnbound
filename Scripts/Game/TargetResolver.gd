@@ -11,6 +11,15 @@ static func get_valid_targets(filter: String, source: CardInstance, gs: GameStat
 				results.append(source)
 		"friendly_unit":
 			results.append_array(_friendly_units(owner, gs))
+		"other_friendly_unit":
+			for u in _friendly_units(owner, gs):
+				if source == null or u != source:
+					results.append(u)
+		"other_unit":
+			for ps in gs.players:
+				for u in _friendly_units(ps.player_index, gs):
+					if source == null or u != source:
+						results.append(u)
 		"enemy_unit":
 			results.append_array(_enemy_units(owner, gs))
 		"unit_at_battlefield":

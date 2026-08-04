@@ -320,6 +320,15 @@ func _execute_start_of_turn() -> void:
 				_log("> P%d scores 1 point (Hold: %s). Score: P1=%d, P2=%d" % [
 					turn_pi + 1, bf.display_name, gs.players[0].score, gs.players[1].score
 				])
+				for line in trigger_dispatcher.emit("hold", {
+					"battlefield_index": i,
+					"player_index": turn_pi,
+					"controller": self,
+				}, gs, self):
+					_log(line)
+					if not gs.pending_prompt.is_empty():
+						board_updated.emit()
+						return
 
 	# Hold scoring can reach the victory score — check the win condition now,
 	# otherwise the game would continue into Channel/Draw/Main without ending.
@@ -650,17 +659,21 @@ func _cmd_play(player_index: int, args: Array) -> void:
 	if not _validate_explicit_target_for_card(card, target_id, player_index, hidden_bf_idx):
 		return
 
-	# Units may normally deploy to controlled Battlefields. Ambush is the exception
-	# that permits direct Battlefield deployment outside that normal control check.
+	# Units may normally deploy to controlled Battlefields. Ambush/Invade are exceptions.
 	if card.definition.card_type == "unit" and destination.begins_with("battlefield"):
 		var bf_idx = gs.board.get_battlefield_index(destination)
 		if bf_idx < 0:
 			_log("[ERROR] Unknown battlefield '%s'" % destination)
 			return
 		var bf = gs.board.battlefields[bf_idx]
-		if bf.controller_index != player_index and not card.has_keyword("ambush"):
-			_log("[ERROR] Units can only be played to controlled Battlefields unless they have Ambush.")
-			return
+		if bf.controller_index != player_index:
+			if card.has_keyword("invade"):
+				if bf.units[1 - player_index].is_empty():
+					_log("[ERROR] %s can only be played to an occupied enemy battlefield." % card.definition.name)
+					return
+			elif not card.has_keyword("ambush"):
+				_log("[ERROR] Units can only be played to controlled Battlefields unless they have Ambush.")
+				return
 
 	var optional_disc_ab = _find_optional_discard_discount_ability(card)
 	if not optional_disc_ab.is_empty() and gs.pending_prompt.is_empty():
@@ -1120,6 +1133,13 @@ func _cmd_move(player_index: int, args: Array) -> void:
 			if not unit.has_keyword("ganking"):
 				_log("[ERROR] %s cannot Gank (no Ganking keyword)." % unit.instance_id)
 				return
+		if is_at_bf and destination == "base":
+			var from_bf = gs.board.battlefields[unit.battlefield_index]
+			if from_bf.card_def != null:
+				for kw in from_bf.card_def.keywords:
+					if kw.get("id", "") == "no_move_to_base":
+						_log("[ERROR] Units can't move from %s to base." % from_bf.display_name)
+						return
 
 		# Execute move
 		unit.exhaust()
@@ -1261,6 +1281,9 @@ func _cmd_react(player_index: int, args: Array) -> void:
 		return
 	if not card.definition.is_reaction:
 		_log("[ERROR] %s is not a Reaction card." % card.definition.name)
+		return
+
+	if not _react_counter_limits_ok(card):
 		return
 
 	# Validate any inline target before paying costs (legality is checked at play
@@ -1560,6 +1583,8 @@ func _cmd_choose(player_index: int, args: Array) -> void:
 			_handle_choose_optional(player_index, choice)
 		"choose_battlefield":
 			_handle_choose_battlefield(player_index, choice)
+		"choose_mode":
+			_handle_choose_mode(player_index, choice)
 		_:
 			_log("[ERROR] Unknown prompt type: %s" % prompt_type)
 
@@ -1857,6 +1882,30 @@ func _valid_trigger_targets(ab: Dictionary, source: Variant, ctx: Dictionary) ->
 
 
 func _handle_choose_battlefield(player_index: int, choice: String) -> void:
+	var prompt = gs.pending_prompt.duplicate()
+	if prompt.has("move_destination_resume"):
+		var valid: Array = prompt.get("valid_choices", [])
+		if not valid.is_empty() and not choice in valid and not str(choice) in valid:
+			_log("[ERROR] '%s' is not a valid destination." % choice)
+			return
+		var resume: Dictionary = prompt.get("move_destination_resume", {})
+		var target: CardInstance = resume.get("target")
+		var params: Dictionary = resume.get("params", {}).duplicate()
+		params["destination"] = choice
+		gs.pending_prompt.clear()
+		for line in ability_resolver._move_unit(params, target, gs, {"player_index": player_index, "controller": self}):
+			_log(line)
+		# Finish mid-resolution spell (Charm): trash source and reopen if chain empty.
+		var source_card: CardInstance = resume.get("chain_source_card")
+		if source_card != null and source_card.definition.card_type == "spell":
+			var owner = source_card.owner_index
+			if not source_card in gs.players[owner].trash:
+				gs.players[owner].move_to_trash(source_card)
+		if gs.chain.is_empty():
+			for line in ChainProcessor._return_to_open(gs):
+				_log(line)
+		_run_cleanup()
+		return
 	var bf_idx = gs.board.get_battlefield_index(choice)
 	if bf_idx < 0:
 		_log("[ERROR] Unknown battlefield '%s'." % choice)
@@ -1871,6 +1920,46 @@ func _handle_choose_battlefield(player_index: int, choice: String) -> void:
 		for line in ShowdownProcessor.begin_showdown(bf_idx, gs.turn_player_index, gs):
 			_log(line)
 	_run_cleanup()
+
+
+func _handle_choose_mode(player_index: int, choice: String) -> void:
+	var prompt = gs.pending_prompt.duplicate()
+	var valid: Array = prompt.get("valid_choices", [])
+	if not choice in valid:
+		_log("[ERROR] Choose one of: %s" % ", ".join(valid))
+		return
+	var resume: Dictionary = prompt.get("mode_resume", {})
+	var params: Dictionary = resume.get("params", {})
+	var source = resume.get("source")
+	var owner: int = int(resume.get("owner", player_index))
+	gs.pending_prompt.clear()
+	if choice == "draw":
+		for line in ability_resolver._draw({"amount": int(params.get("draw_amount", 1))}, source, gs, owner):
+			_log(line)
+	else:
+		for line in ability_resolver._channel_rune({
+			"amount": int(params.get("channel_amount", 1)),
+			"exhausted": params.get("exhausted", true),
+		}, gs, owner):
+			_log(line)
+	_run_cleanup()
+
+
+func _react_counter_limits_ok(card: CardInstance) -> bool:
+	for ab in card.definition.abilities:
+		if ab.get("effect_type", "") != "counter_spell":
+			continue
+		var params: Dictionary = ab.get("effect_params", {})
+		if params.is_empty():
+			return true
+		if gs.chain.is_empty():
+			_log("[ERROR] Nothing on the chain to counter.")
+			return false
+		var item = gs.chain[gs.chain.size() - 1]
+		if not AbilityResolver._chain_item_matches_counter_limits(item, params):
+			_log("[ERROR] Top of chain costs too much for %s to counter." % card.definition.name)
+			return false
+	return true
 
 
 func _cmd_hide(player_index: int, args: Array) -> void:

@@ -52,6 +52,12 @@ func emit(event: String, ctx: Dictionary, gs: GameState, controller: GameControl
 				continue
 			else:
 				CostCalculatorScript.pay_cost(owner_pi, computed, source if source is CardInstance else null, gs)
+		var params = ab.get("effect_params", {})
+		if params.get("targeting", "") == "choose_one" and controller != null:
+			var prompt_line = _prompt_mandatory_target(source, ab, ctx, gs)
+			if not prompt_line.is_empty():
+				log_lines.append(prompt_line)
+				return log_lines
 		var target = _resolve_trigger_target(ab, source, ctx, gs)
 		var effect_ctx = ctx.duplicate()
 		effect_ctx["controller"] = controller
@@ -158,7 +164,7 @@ func _collect_sources(event: String, ctx: Dictionary, gs: GameState) -> Array:
 					results.append({"source": ps.legend, "ability": ab})
 
 	for i in range(gs.board.battlefields.size()):
-		if event in ["on_conquer", "on_defend"] and bf_idx >= 0 and i != bf_idx:
+		if event in ["on_conquer", "on_defend", "hold"] and bf_idx >= 0 and i != bf_idx:
 			continue
 		var bf = gs.board.battlefields[i]
 		if bf.card_def:
@@ -177,6 +183,8 @@ func _collect_sources(event: String, ctx: Dictionary, gs: GameState) -> Array:
 			for ab in perm.definition.abilities:
 				if event == "on_play" and ctx.get("skip_played_card_source", false) and not _is_play_observer_ability(ab):
 					continue
+				if event == "on_conquer" and not _unit_conquers_here(perm, ctx):
+					continue
 				results.append({"source": perm, "ability": ab})
 		for u in gs.board.get_all_units_on_board(ps.player_index):
 			if ctx.get("skip_played_card_source", false) and u == ctx.get("source"):
@@ -184,9 +192,22 @@ func _collect_sources(event: String, ctx: Dictionary, gs: GameState) -> Array:
 			for ab in u.definition.abilities:
 				if event == "on_play" and ctx.get("skip_played_card_source", false) and not _is_play_observer_ability(ab):
 					continue
+				if event == "on_conquer" and not _unit_conquers_here(u, ctx):
+					continue
 				results.append({"source": u, "ability": ab})
 
 	return results
+
+
+func _unit_conquers_here(unit: CardInstance, ctx: Dictionary) -> bool:
+	# "When I conquer" — only the conquering player's units at that battlefield.
+	var bf_idx = int(ctx.get("battlefield_index", -1))
+	var player_index = int(ctx.get("player_index", -1))
+	if unit.owner_index != player_index:
+		return false
+	if not unit.is_at_battlefield():
+		return false
+	return unit.battlefield_index == bf_idx
 
 
 func _is_play_observer_ability(ab: Dictionary) -> bool:
@@ -263,6 +284,12 @@ func _emit_played_card_abilities(ctx: Dictionary, gs: GameState, controller: Gam
 				continue
 			else:
 				CostCalculatorScript.pay_cost(owner_pi, computed, source, gs)
+		var params = ab.get("effect_params", {})
+		if params.get("targeting", "") == "choose_one" and controller != null:
+			var prompt_line = _prompt_mandatory_target(source, ab, ctx, gs, i + 1)
+			if not prompt_line.is_empty():
+				log_lines.append(prompt_line)
+				return log_lines
 		var target = _resolve_trigger_target(ab, source, ctx, gs)
 		var effect_ctx = ctx.duplicate()
 		effect_ctx["controller"] = controller
@@ -297,6 +324,44 @@ func _prompt_optional(source: Variant, ab: Dictionary, ctx: Dictionary, gs: Game
 		"valid_choices": ["yes", "no"],
 		"prompt": prompt_text,
 		"discard_resume": ctx.get("discard_resume", {}),
+	}
+	if on_play_resume_index >= 0:
+		gs.pending_prompt["resume_on_play"] = {
+			"ctx": ctx,
+			"next_index": on_play_resume_index,
+		}
+	return gs.pending_prompt["prompt"]
+
+
+func _prompt_mandatory_target(source: Variant, ab: Dictionary, ctx: Dictionary, gs: GameState, on_play_resume_index: int = -1) -> String:
+	var params: Dictionary = ab.get("effect_params", {})
+	var filter: String = params.get("target", "")
+	if filter.is_empty():
+		return ""
+	var tctx = ctx.duplicate()
+	if source is CardInstance:
+		tctx["player_index"] = source.owner_index
+	var targets = TargetResolverScript.filter_with_params(
+		filter, params, source if source is CardInstance else null, gs, tctx
+	)
+	targets = TargetResolverScript.restrict_to_hidden_battlefield(targets, int(ctx.get("hidden_bf_idx", -1)))
+	if targets.size() <= 1:
+		return ""
+	var ids: Array[String] = []
+	for t in targets:
+		if t is CardInstance:
+			ids.append(t.instance_id)
+	var pi = _owner_index(source, ctx)
+	gs.pending_prompt = {
+		"player_index": pi,
+		"type": "choose_target",
+		"valid_choices": targets,
+		"trigger_target_resume": {
+			"ability": ab,
+			"source": source,
+			"ctx": ctx,
+		},
+		"prompt": "[PROMPT] Choose a target — use: choose <%s>" % "|".join(ids),
 	}
 	if on_play_resume_index >= 0:
 		gs.pending_prompt["resume_on_play"] = {

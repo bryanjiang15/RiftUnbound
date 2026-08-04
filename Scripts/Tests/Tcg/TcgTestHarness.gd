@@ -87,6 +87,9 @@ func _drain_prompts(player_index: int) -> void:
 			choice = str(valid[0]) if not valid.is_empty() else "none"
 		elif controller.gs.pending_prompt.get("type", "") == "choose_optional":
 			choice = "yes"
+		elif controller.gs.pending_prompt.get("type", "") == "choose_mode":
+			var valid: Array = controller.gs.pending_prompt.get("valid_choices", [])
+			choice = str(valid[0]) if not valid.is_empty() else "draw"
 		elif controller.gs.pending_prompt.get("type", "") == "choose_battlefield":
 			var valid: Array = controller.gs.pending_prompt.get("valid_choices", [])
 			choice = str(valid[0]) if not valid.is_empty() else "none"

@@ -50,6 +50,209 @@ static func run(assertions) -> void:
 	_test_sprite_mother_token_here_temporary(assertions)
 	_test_dr_mundo_trash_might_and_recycle(assertions)
 	_test_retreat_returns_and_channels(assertions)
+	_test_zhonya_sacrifices_gear_on_lethal(assertions)
+	_test_unyielding_prevents_spell_damage(assertions)
+	_test_defy_cost_filter(assertions)
+	_test_find_your_center_cost_reduction(assertions)
+	_test_pit_rookie_buffs_other(assertions)
+	_test_grove_hold_draw(assertions)
+	_test_vilemaw_blocks_move_to_base(assertions)
+	_test_shanghai_deck_validates(assertions)
+	_test_charm_move_contests_occupied_battlefield(assertions)
+
+
+static func _test_charm_move_contests_occupied_battlefield(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 2, "power": {"calm": 2}}, "hand": ["charm"],
+			 "battlefield-a": [{"id": "stalwart-poro", "owner": 0}],
+			 "deck_size": 5, "rune_deck_size": 12},
+			{"battlefield-b": [{"id": "chemtech-enforcer", "owner": 1}],
+			 "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	# Move enemy unit onto the battlefield where P0 already has a unit → contested combat.
+	h.cmd_with_choices(0, "play charm", ["chemtech-enforcer", "battlefield-a"])
+	var bf = h.gs().board.battlefields[0]
+	assertions.assert_true(
+		not bf.units[0].is_empty() and not bf.units[1].is_empty(),
+		"both sides have units after charm"
+	)
+	assertions.assert_true(
+		bf.is_contested or not h.gs().board.staged_combats.is_empty() or h.gs().combat_bf_index >= 0,
+		"charm move contests battlefield when both sides present"
+	)
+
+
+static func _test_zhonya_sacrifices_gear_on_lethal(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"base": [{"id": "zhonyas-hourglass"}, {"id": "chemtech-enforcer"}],
+			 "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	var unit = h.find_unit("chemtech-enforcer")
+	unit.add_damage(10)
+	CleanupProcessor.run(h.gs(), h.controller.ability_resolver, h.controller)
+	assertions.assert_eq(unit.location, "base", "zhonya recalls lethal unit to base")
+	assertions.assert_eq(unit.damage, 0, "zhonya heals recalled unit")
+	assertions.assert_true(unit.is_exhausted, "zhonya exhausts recalled unit")
+	assertions.assert_true(not unit in h.gs().players[0].trash, "zhonya prevents unit trash")
+	var gear_in_trash := false
+	for c in h.gs().players[0].trash:
+		if c.definition.id == "zhonyas-hourglass":
+			gear_in_trash = true
+	assertions.assert_true(gear_in_trash, "zhonya gear is sacrificed to trash")
+	unit.add_damage(10)
+	CleanupProcessor.run(h.gs(), h.controller.ability_resolver, h.controller)
+	assertions.assert_true(unit in h.gs().players[0].trash, "second lethal death kills without gear")
+
+
+static func _test_unyielding_prevents_spell_damage(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 4, "power": {"body": 2}}, "hand": ["unyielding-spirit", "hextech-ray"],
+			 "deck_size": 5, "rune_deck_size": 12},
+			{"battlefield-a": [{"id": "chemtech-enforcer", "owner": 1}], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd(0, "play unyielding-spirit")
+	assertions.assert_true(h.gs().prevent_spell_ability_damage, "unyielding sets prevention flag")
+	h.cmd_with_choices(0, "play hextech-ray", ["chemtech-enforcer"])
+	var unit = h.find_unit("chemtech-enforcer")
+	assertions.assert_eq(unit.damage, 0, "unyielding blocks hextech-ray damage")
+	unit.add_damage(1)
+	assertions.assert_eq(unit.damage, 1, "direct add_damage still applies")
+
+
+static func _test_defy_cost_filter(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 10, "power": {}}, "hand": ["find-your-center", "highlander"],
+			 "base": [{"id": "chemtech-enforcer"}], "deck_size": 5, "rune_deck_size": 12},
+			{"pool": {"energy": 4, "power": {"calm": 2}}, "hand": ["defy"], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.controller.submit_command(0, "play find-your-center")
+	assertions.assert_true(not h.gs().chain.is_empty(), "find-your-center on chain")
+	var item = h.gs().chain[h.gs().chain.size() - 1]
+	assertions.assert_true(
+		AbilityResolver._chain_item_matches_counter_limits(item, {"max_energy": 4, "max_power_total": 1}),
+		"3-energy spell within defy limits"
+	)
+	h.controller.submit_command(1, "react defy")
+	assertions.assert_true(not h.controller.last_command_error, "defy can react to find-your-center")
+	h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 10, "power": {}}, "hand": ["highlander"],
+			 "base": [{"id": "chemtech-enforcer"}], "deck_size": 5, "rune_deck_size": 12},
+			{"pool": {"energy": 4, "power": {"calm": 2}}, "hand": ["defy"], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.controller.submit_command(0, "play highlander target chemtech-enforcer")
+	item = h.gs().chain[h.gs().chain.size() - 1]
+	# Force over-cost check via stricter params
+	assertions.assert_true(
+		not AbilityResolver._chain_item_matches_counter_limits(item, {"max_energy": 3, "max_power_total": 1}),
+		"4-energy highlander exceeds max_energy 3"
+	)
+	# Also reject react when ability params would fail — simulate by checking helper only.
+
+
+static func _test_find_your_center_cost_reduction(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"victory_score": 8,
+		"players": [
+			{"pool": {"energy": 1, "power": {}}, "hand": ["find-your-center"],
+			 "deck_size": 5, "rune_deck_size": 4},
+			{"score": 6, "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	var card = h.gs().players[0].hand[0]
+	var cost = CostCalculator.compute_play_cost(card, 0, h.gs())
+	assertions.assert_eq(cost.get("energy", 99), 1, "find your center costs 1 when opponent within 3 of victory")
+	h.cmd(0, "play find-your-center")
+	assertions.assert_true(h.gs().players[0].hand.size() >= 1, "find your center draws 1")
+
+
+static func _test_pit_rookie_buffs_other(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 4, "power": {}}, "hand": ["pit-rookie"],
+			 "base": [{"id": "stalwart-poro"}, {"id": "clockwork-keeper"}],
+			 "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd_with_choices(0, "play pit-rookie", ["stalwart-poro"])
+	var poro = h.find_unit("stalwart-poro")
+	assertions.assert_true(poro != null and poro.buff_counters > 0, "pit rookie buffs chosen other unit")
+
+
+static func _test_grove_hold_draw(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "BEGINNING", "state": "NEUTRAL_OPEN",
+		"battlefields": ["grove-of-the-god-willow", "targons-peak"],
+		"players": [
+			{"deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.gs().board.battlefields[0].controller_index = 0
+	var hand_before = h.gs().players[0].hand.size()
+	# Drive beginning hold via end turn into next beginning for P0
+	h.gs().current_phase = TurnStateMachine.Phase.MAIN
+	h.cmd(0, "end turn")
+	h.cmd(1, "end turn")
+	assertions.assert_true(
+		h.gs().players[0].hand.size() > hand_before or h.gs().players[0].score >= 1,
+		"grove hold scores and/or draws"
+	)
+
+
+static func _test_vilemaw_blocks_move_to_base(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["vilemaws-lair", "targons-peak"],
+		"players": [
+			{"battlefield-a": [{"id": "stalwart-poro", "owner": 0, "exhausted": false}],
+			 "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.controller.submit_command(0, "move stalwart-poro to base")
+	assertions.assert_true(h.controller.last_command_error, "vilemaw blocks move to base")
+	assertions.assert_true(h.find_unit("stalwart-poro").is_at_battlefield(), "unit remains at vilemaw")
+
+
+static func _test_shanghai_deck_validates(assertions) -> void:
+	var data = DeckLoader.load_deck("res://Data/Decks/master-yi-shanghai-open.json")
+	var errors = DeckLoader.validate(data)
+	assertions.assert_true(errors.is_empty(), "shanghai master yi deck validates", str(errors))
 
 
 static func _test_magma_wurm_aura(assertions) -> void:

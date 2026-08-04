@@ -473,7 +473,7 @@
         "id": "deathknell"
       }
     ],
-    "effect_text": "Deathknell — Discard 2, then draw 2. (When I die, get the effect.)",
+    "effect_text": "Deathknell \u2014 Discard 2, then draw 2. (When I die, get the effect.)",
     "abilities": [
       {
         "ability_id": "undercover-agent-deathknell",
@@ -753,7 +753,7 @@
     ],
     "effect_text": "Shield (+1 Might while I'm a defender.)",
     "abilities": [],
-    "flavor_text": "\"A true master is an eternal student.\" – Master Yi",
+    "flavor_text": "\"A true master is an eternal student.\" \u2013 Master Yi",
     "image": "CardArts/OGS-005.webp"
   },
   {
@@ -897,7 +897,7 @@
         "id": "legion"
       }
     ],
-    "effect_text": "Legion — I cost 2 less. (Get the effect if you've played another card this turn.)",
+    "effect_text": "Legion \u2014 I cost 2 less. (Get the effect if you've played another card this turn.)",
     "abilities": [
       {
         "ability_id": "noxus-hopeful-legion-cost",
@@ -951,7 +951,7 @@
     ],
     "effect_text": "Deflect (Opponents must pay a rainbow rune to choose me with a spell or ability.)",
     "abilities": [],
-    "flavor_text": "“Braum takes medicine too, see?” — Braum",
+    "flavor_text": "\u201cBraum takes medicine too, see?\u201d \u2014 Braum",
     "image": "CardArts/OGN-013.webp"
   },
   {
@@ -1016,7 +1016,7 @@
         "is_reaction": false
       }
     ],
-    "flavor_text": "“With overwhelming force.”",
+    "flavor_text": "\u201cWith overwhelming force.\u201d",
     "image": "CardArts/OGN-027.webp"
   },
   {
@@ -1042,7 +1042,7 @@
         "id": "deathknell"
       }
     ],
-    "effect_text": "Deathknell — Draw 1. (When I die, get the effect.)",
+    "effect_text": "Deathknell \u2014 Draw 1. (When I die, get the effect.)",
     "abilities": [
       {
         "ability_id": "watchful-sentry-deathknell",
@@ -1194,7 +1194,7 @@
         "is_reaction": false
       }
     ],
-    "flavor_text": "“Come, little ones.”",
+    "flavor_text": "\u201cCome, little ones.\u201d",
     "image": "CardArts/OGN-106.webp"
   },
   {
@@ -1317,7 +1317,355 @@
         "is_reaction": false
       }
     ],
-    "flavor_text": "“This not hurt a bit!”",
+    "flavor_text": "\u201cThis not hurt a bit!\u201d",
     "image": "CardArts/OGN-109.webp"
+  },
+  {
+    "id": "clockwork-keeper",
+    "name": "Clockwork Keeper",
+    "set": "OGN",
+    "card_number": "044",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Shurima"
+    ],
+    "domain": [
+      "calm"
+    ],
+    "rarity": "Common",
+    "energy_cost": 2,
+    "power_cost": [],
+    "might": 2,
+    "might_bonus": null,
+    "keywords": [],
+    "effect_text": "You may pay [1 Calm] as an additional cost to play me.\nWhen you play me, if you paid the additional cost, draw 1.",
+    "abilities": [
+      {
+        "ability_id": "clockwork-keeper-draw",
+        "ability_type": "triggered",
+        "timing": "on_play",
+        "condition": null,
+        "is_optional": true,
+        "cost": {
+          "power": [
+            {
+              "domain": "calm",
+              "amount": 1
+            }
+          ]
+        },
+        "effect_type": "draw",
+        "effect_params": {
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "",
+    "image": "CardArts/OGN-044.webp"
+  },
+  {
+    "id": "pit-rookie",
+    "name": "Pit Rookie",
+    "set": "OGN",
+    "card_number": "136",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Bilgewater"
+    ],
+    "domain": [
+      "body"
+    ],
+    "rarity": "Common",
+    "energy_cost": 2,
+    "power_cost": [],
+    "might": 2,
+    "might_bonus": null,
+    "keywords": [],
+    "effect_text": "When you play me, buff another friendly unit. (If it doesn't have a buff, it gets +1 Might buff.)",
+    "abilities": [
+      {
+        "ability_id": "pit-rookie-buff",
+        "ability_type": "triggered",
+        "timing": "on_play",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "buff_unit",
+        "effect_params": {
+          "target": "other_friendly_unit",
+          "targeting": "choose_one"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "",
+    "image": "CardArts/OGN-136.webp"
+  },
+  {
+    "id": "first-mate",
+    "name": "First Mate",
+    "set": "OGN",
+    "card_number": "132",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Bilgewater",
+      "Pirate"
+    ],
+    "domain": [
+      "body"
+    ],
+    "rarity": "Common",
+    "energy_cost": 3,
+    "power_cost": [],
+    "might": 3,
+    "might_bonus": null,
+    "keywords": [],
+    "effect_text": "When you play me, ready another unit.",
+    "abilities": [
+      {
+        "ability_id": "first-mate-ready",
+        "ability_type": "triggered",
+        "timing": "on_play",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "ready_permanent",
+        "effect_params": {
+          "target": "other_unit",
+          "targeting": "choose_one"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "",
+    "image": "CardArts/OGN-132.webp"
+  },
+  {
+    "id": "qiyana-victorious",
+    "name": "Qiyana - Victorious",
+    "set": "OGN",
+    "card_number": "155",
+    "card_type": "unit",
+    "supertypes": [
+      "champion"
+    ],
+    "tags": [
+      "Qiyana",
+      "Ixtal"
+    ],
+    "domain": [
+      "body"
+    ],
+    "rarity": "Rare",
+    "energy_cost": 4,
+    "power_cost": [
+      {
+        "domain": "body",
+        "amount": 1
+      }
+    ],
+    "might": 4,
+    "might_bonus": null,
+    "keywords": [
+      {
+        "id": "deflect",
+        "value": 1
+      }
+    ],
+    "effect_text": "Deflect (Opponents must pay [1] power to choose me with a spell or ability.)\nWhen I conquer, draw 1 or channel 1 rune exhausted.",
+    "abilities": [
+      {
+        "ability_id": "qiyana-victorious-conquer",
+        "ability_type": "triggered",
+        "timing": "on_conquer",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "choose_draw_or_channel",
+        "effect_params": {
+          "draw_amount": 1,
+          "channel_amount": 1,
+          "exhausted": true
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "",
+    "image": "CardArts/OGN-155.webp"
+  },
+  {
+    "id": "tasty-faefolk",
+    "name": "Tasty Faefolk",
+    "set": "OGN",
+    "card_number": "075",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Bandle City",
+      "Fae"
+    ],
+    "domain": [
+      "calm"
+    ],
+    "rarity": "Uncommon",
+    "energy_cost": 7,
+    "power_cost": [],
+    "might": 6,
+    "might_bonus": null,
+    "keywords": [
+      {
+        "id": "accelerate"
+      },
+      {
+        "id": "deathknell"
+      }
+    ],
+    "effect_text": "Accelerate (You may pay [1] [Calm] as an additional cost to have me enter ready.)\nDeathknell \u2013 Channel 2 runes exhausted and draw 1. (When I die, get the effect.)",
+    "abilities": [
+      {
+        "ability_id": "tasty-faefolk-accelerate",
+        "ability_type": "keyword_ability",
+        "timing": "on_play",
+        "condition": null,
+        "is_optional": true,
+        "cost": {
+          "energy": 1,
+          "power": [
+            {
+              "domain": "calm",
+              "amount": 1
+            }
+          ]
+        },
+        "effect_type": "enter_ready",
+        "effect_params": {},
+        "is_action": false,
+        "is_reaction": false
+      },
+      {
+        "ability_id": "tasty-faefolk-deathknell-channel",
+        "ability_type": "triggered",
+        "timing": "on_death",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "channel_rune",
+        "effect_params": {
+          "amount": 2,
+          "exhausted": true
+        },
+        "is_action": false,
+        "is_reaction": false
+      },
+      {
+        "ability_id": "tasty-faefolk-deathknell-draw",
+        "ability_type": "triggered",
+        "timing": "on_death",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "draw",
+        "effect_params": {
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "",
+    "image": "CardArts/OGN-075.webp"
+  },
+  {
+    "id": "whiteflame-protector",
+    "name": "Whiteflame Protector",
+    "set": "OGN",
+    "card_number": "082",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Mount Targon",
+      "Dragon"
+    ],
+    "domain": [
+      "calm"
+    ],
+    "rarity": "Rare",
+    "energy_cost": 8,
+    "power_cost": [
+      {
+        "domain": "calm",
+        "amount": 2
+      }
+    ],
+    "might": 8,
+    "might_bonus": null,
+    "keywords": [],
+    "effect_text": "When you play me, give a unit +8 Might this turn.",
+    "abilities": [
+      {
+        "ability_id": "whiteflame-protector-buff",
+        "ability_type": "triggered",
+        "timing": "on_play",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "give_might",
+        "effect_params": {
+          "amount": 8,
+          "duration": "turn",
+          "target": "any_unit",
+          "targeting": "choose_one"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "",
+    "image": "CardArts/OGN-082.webp"
+  },
+  {
+    "id": "deadbloom-predator",
+    "name": "Deadbloom Predator",
+    "set": "OGN",
+    "card_number": "161",
+    "card_type": "unit",
+    "supertypes": [],
+    "tags": [
+      "Shadow Isles"
+    ],
+    "domain": [
+      "body"
+    ],
+    "rarity": "Rare",
+    "energy_cost": 8,
+    "power_cost": [
+      {
+        "domain": "body",
+        "amount": 2
+      }
+    ],
+    "might": 8,
+    "might_bonus": null,
+    "keywords": [
+      {
+        "id": "deflect",
+        "value": 1
+      },
+      {
+        "id": "invade"
+      }
+    ],
+    "effect_text": "Deflect (Opponents must pay [1] power to choose me with a spell or ability.)\nYou may play me to an occupied enemy battlefield.",
+    "abilities": [],
+    "flavor_text": "",
+    "image": "CardArts/OGN-161.webp"
   }
 ]

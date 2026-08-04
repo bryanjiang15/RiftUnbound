@@ -137,5 +137,96 @@
       }
     ],
     "image": "CardArts/OGN-279.webp"
+  },
+  {
+    "id": "grove-of-the-god-willow",
+    "name": "Grove of the God-Willow",
+    "set": "OGN",
+    "card_number": "280",
+    "card_type": "battlefield",
+    "supertypes": [],
+    "tags": [],
+    "domain": [],
+    "rarity": "Uncommon",
+    "energy_cost": 0,
+    "power_cost": [],
+    "facedown_capacity": 1,
+    "keywords": [],
+    "effect_text": "When you hold here, draw 1.",
+    "abilities": [
+      {
+        "ability_id": "grove-of-the-god-willow-hold",
+        "ability_type": "triggered",
+        "timing": "hold",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "draw",
+        "effect_params": {
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "image": "CardArts/OGN-280.webp"
+  },
+  {
+    "id": "vilemaws-lair",
+    "name": "Vilemaw's Lair",
+    "set": "OGN",
+    "card_number": "295",
+    "card_type": "battlefield",
+    "supertypes": [],
+    "tags": [],
+    "domain": [],
+    "rarity": "Uncommon",
+    "energy_cost": 0,
+    "power_cost": [],
+    "facedown_capacity": 1,
+    "keywords": [
+      {
+        "id": "no_move_to_base"
+      }
+    ],
+    "effect_text": "Units can't move from here to base.",
+    "abilities": [],
+    "image": "CardArts/OGN-295.webp"
+  },
+  {
+    "id": "obelisk-of-power",
+    "name": "Obelisk of Power",
+    "set": "OGN",
+    "card_number": "284",
+    "card_type": "battlefield",
+    "supertypes": [],
+    "tags": [],
+    "domain": [],
+    "rarity": "Uncommon",
+    "energy_cost": 0,
+    "power_cost": [],
+    "facedown_capacity": 1,
+    "keywords": [],
+    "effect_text": "At the start of each Player's first Beginning Phase, that player channels 1 rune.",
+    "abilities": [
+      {
+        "ability_id": "obelisk-of-power-first-beginning",
+        "ability_type": "triggered",
+        "timing": "beginning_phase_start",
+        "condition": {
+          "type": "first_beginning_phase"
+        },
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "channel_rune",
+        "effect_params": {
+          "amount": 1,
+          "exhausted": false
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "image": "CardArts/OGN-284.webp"
   }
 ]

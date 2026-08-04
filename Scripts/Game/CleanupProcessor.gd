@@ -115,8 +115,12 @@ static func _process_deaths(gs: GameState, ability_resolver: AbilityResolver, co
 					units_to_kill.append(u)
 
 	var replaced_units: Array = []
+	var sacrificed_gear: Array = []
 	for u in units_to_kill:
 		if _consume_death_replacement(gs, u, log_lines):
+			replaced_units.append(u)
+			continue
+		if _try_sacrifice_gear_death_replacement(gs, u, sacrificed_gear, ability_resolver, controller, log_lines):
 			replaced_units.append(u)
 			continue
 		if ability_resolver != null:
@@ -150,6 +154,74 @@ static func _consume_death_replacement(gs: GameState, unit: CardInstance, log_li
 	if not gs.death_replacement_recalls.has(unit.instance_id):
 		return false
 	gs.death_replacement_recalls.erase(unit.instance_id)
+	_recall_instead_of_death(gs, unit, log_lines)
+	return true
+
+
+static func _try_sacrifice_gear_death_replacement(
+	gs: GameState,
+	unit: CardInstance,
+	sacrificed_gear: Array,
+	ability_resolver: AbilityResolver,
+	controller: GameController,
+	log_lines: Array
+) -> bool:
+	var gear := _find_sacrifice_gear(gs, unit.owner_index, sacrificed_gear)
+	if gear == null:
+		return false
+	sacrificed_gear.append(gear)
+	_kill_gear_for_replacement(gs, gear, ability_resolver, controller, log_lines)
+	_recall_instead_of_death(gs, unit, log_lines)
+	log_lines.append("> %s was sacrificed to save %s" % [gear.display_name(), unit.display_name()])
+	return true
+
+
+static func _find_sacrifice_gear(gs: GameState, owner: int, already_sacrificed: Array) -> CardInstance:
+	var ps: PlayerState = gs.players[owner]
+	var candidates: Array = []
+	candidates.append_array(ps.base_permanents)
+	candidates.append_array(gs.board.get_all_units_on_board(owner))
+	for c in candidates:
+		if not c is CardInstance:
+			continue
+		var gear: CardInstance = c
+		if gear in already_sacrificed:
+			continue
+		if gear.definition.card_type != "gear":
+			continue
+		for ab in gear.definition.abilities:
+			if ab.get("effect_type", "") == "death_replacement_sacrifice_gear":
+				return gear
+	return null
+
+
+static func _kill_gear_for_replacement(
+	gs: GameState,
+	gear: CardInstance,
+	ability_resolver: AbilityResolver,
+	controller: GameController,
+	log_lines: Array
+) -> void:
+	if ability_resolver != null:
+		for ab in gear.definition.abilities:
+			if ab.get("timing", "") == "on_death":
+				var ctx = {"player_index": gear.owner_index, "controller": controller}
+				var ab_lines = ability_resolver.resolve_ability(ab, gear, null, gs, ctx)
+				log_lines.append_array(ab_lines)
+				if controller != null:
+					for line in ab_lines:
+						controller.log_lines.append(line)
+	if gear.is_at_battlefield():
+		gs.board.remove_unit_from_battlefield(gear)
+	else:
+		gs.players[gear.owner_index].base_permanents.erase(gear)
+	gs.players[gear.owner_index].move_to_trash(gear)
+	log_lines.append("> %s (P%d) was killed" % [gear.display_name(), gear.owner_index + 1])
+	if controller != null:
+		controller._emit_card_event("died", gear)
+
+
+static func _recall_instead_of_death(gs: GameState, unit: CardInstance, log_lines: Array) -> void:
 	if unit.is_at_battlefield():
 		gs.board.remove_unit_from_battlefield(unit)
 	else:
@@ -163,7 +235,6 @@ static func _consume_death_replacement(gs: GameState, unit: CardInstance, log_li
 	if not unit in gs.players[unit.owner_index].base_permanents:
 		gs.players[unit.owner_index].base_permanents.append(unit)
 	log_lines.append("> %s would die, but is recalled to base instead" % unit.display_name())
-	return true
 
 
 static func _recall_unattached_gear(gs: GameState, log_lines: Array) -> void:
@@ -271,6 +342,7 @@ static func heal_all_units(gs: GameState) -> void:
 
 static func expire_turn_effects(gs: GameState) -> void:
 	gs.death_replacement_recalls.clear()
+	gs.prevent_spell_ability_damage = false
 	for ps in gs.players:
 		for perm in ps.base_permanents:
 			perm.expire_turn_effects()

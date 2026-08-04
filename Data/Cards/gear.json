@@ -62,5 +62,45 @@
     ],
     "flavor_text": "The parts that make it to the heap are the ones that DIDN'T blow up.",
     "image": "CardArts/OGN-182.webp"
+  },
+  {
+    "id": "zhonyas-hourglass",
+    "name": "Zhonya's Hourglass",
+    "set": "OGN",
+    "card_number": "077",
+    "card_type": "gear",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "calm"
+    ],
+    "rarity": "Rare",
+    "energy_cost": 2,
+    "power_cost": [],
+    "might_bonus": null,
+    "keywords": [
+      {
+        "id": "hidden"
+      }
+    ],
+    "effect_text": "Hidden (Hide now for [1] to react with later for [0].)\nIf a friendly unit would die, kill this instead. Heal that unit, exhaust it, and recall it. (Send it to base. This isn't a move.)",
+    "abilities": [
+      {
+        "ability_id": "zhonyas-hourglass-sacrifice",
+        "ability_type": "replacement",
+        "timing": null,
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "death_replacement_sacrifice_gear",
+        "effect_params": {
+          "target": "friendly_unit"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "",
+    "image": "CardArts/OGN-077.webp"
   }
 ]

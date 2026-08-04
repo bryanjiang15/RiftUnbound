@@ -37,6 +37,9 @@ var pending_prompt: Dictionary = {}
 # Turn-duration death replacement effects keyed by protected instance_id.
 var death_replacement_recalls: Dictionary = {}
 
+# Unyielding Spirit etc.: block damage from spells/abilities this turn (not combat).
+var prevent_spell_ability_damage: bool = false
+
 # Mulligan state
 var mulligan_phase: bool = false
 var mulligan_done: Array[bool] = [false, false]
@@ -277,6 +280,7 @@ func clone() -> GameState:
 	g.game_session_id = game_session_id
 	g.pending_prompt = _clone_variant(pending_prompt, map)
 	g.death_replacement_recalls = _clone_variant(death_replacement_recalls, map)
+	g.prevent_spell_ability_damage = prevent_spell_ability_damage
 	g.mulligan_phase = mulligan_phase
 	g.mulligan_done = mulligan_done.duplicate()
 	g.combat_assignment_active = combat_assignment_active

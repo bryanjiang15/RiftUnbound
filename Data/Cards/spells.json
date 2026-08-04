@@ -107,7 +107,7 @@
         "is_reaction": false
       }
     ],
-    "flavor_text": "\"It's a good day for a hunt.\" —Kai'Sa",
+    "flavor_text": "\"It's a good day for a hunt.\" \u2014Kai'Sa",
     "image": "CardArts/OGN-024.webp"
   },
   {
@@ -289,7 +289,7 @@
         "is_reaction": false
       }
     ],
-    "flavor_text": "\"Is this supposed to be a challenge?\" —Fiora",
+    "flavor_text": "\"Is this supposed to be a challenge?\" \u2014Fiora",
     "image": "CardArts/OGN-046.webp"
   },
   {
@@ -671,7 +671,7 @@
         "is_reaction": false
       }
     ],
-    "flavor_text": "“Destroy. Then improve.”",
+    "flavor_text": "\u201cDestroy. Then improve.\u201d",
     "image": "CardArts/OGN-009.webp"
   },
   {
@@ -786,7 +786,7 @@
         "is_reaction": false
       }
     ],
-    "flavor_text": "It’s easier to outsmart an opponent with a concussion.",
+    "flavor_text": "It\u2019s easier to outsmart an opponent with a concussion.",
     "image": "CardArts/OGN-095.webp"
   },
   {
@@ -831,7 +831,7 @@
         "is_reaction": false
       }
     ],
-    "flavor_text": "“Well, well, well. What have we here?”",
+    "flavor_text": "\u201cWell, well, well. What have we here?\u201d",
     "image": "CardArts/OGN-093.webp"
   },
   {
@@ -889,7 +889,328 @@
         "is_reaction": false
       }
     ],
-    "flavor_text": "There’s always tomorrow.",
+    "flavor_text": "There\u2019s always tomorrow.",
     "image": "CardArts/OGN-104.webp"
+  },
+  {
+    "id": "charm",
+    "name": "Charm",
+    "set": "OGN",
+    "card_number": "043",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "calm"
+    ],
+    "rarity": "Common",
+    "energy_cost": 1,
+    "power_cost": [
+      {
+        "domain": "calm",
+        "amount": 1
+      }
+    ],
+    "keywords": [],
+    "is_action": false,
+    "is_reaction": false,
+    "effect_text": "Move an enemy unit.",
+    "abilities": [
+      {
+        "ability_id": "charm-move",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "move_unit",
+        "effect_params": {
+          "target": "enemy_unit",
+          "targeting": "choose_one",
+          "destination": "choose"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "",
+    "image": "CardArts/OGN-043.webp"
+  },
+  {
+    "id": "defy",
+    "name": "Defy",
+    "set": "OGN",
+    "card_number": "045",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "calm"
+    ],
+    "rarity": "Common",
+    "energy_cost": 1,
+    "power_cost": [
+      {
+        "domain": "calm",
+        "amount": 1
+      }
+    ],
+    "keywords": [
+      {
+        "id": "reaction"
+      }
+    ],
+    "is_action": false,
+    "is_reaction": true,
+    "effect_text": "Reaction (Play any time, even before spells and abilities resolve.)\nCounter a spell that costs no more than [4] and no more than [1] power.",
+    "abilities": [
+      {
+        "ability_id": "defy-counter",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": {
+          "type": "chain_spell_cost_lte",
+          "energy": 4,
+          "power_total": 1
+        },
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "counter_spell",
+        "effect_params": {
+          "max_energy": 4,
+          "max_power_total": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "",
+    "image": "CardArts/OGN-045.webp"
+  },
+  {
+    "id": "discipline",
+    "name": "Discipline",
+    "set": "OGN",
+    "card_number": "058",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "calm"
+    ],
+    "rarity": "Common",
+    "energy_cost": 2,
+    "power_cost": [],
+    "keywords": [
+      {
+        "id": "reaction"
+      }
+    ],
+    "is_action": false,
+    "is_reaction": true,
+    "effect_text": "Reaction (Play any time, even before spells and abilities resolve.)\nGive a unit +2 Might this turn. Draw 1.",
+    "abilities": [
+      {
+        "ability_id": "discipline-buff",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "give_might",
+        "effect_params": {
+          "amount": 2,
+          "duration": "turn",
+          "target": "any_unit",
+          "targeting": "choose_one"
+        },
+        "is_action": false,
+        "is_reaction": false
+      },
+      {
+        "ability_id": "discipline-draw",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "draw",
+        "effect_params": {
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "",
+    "image": "CardArts/OGN-058.webp"
+  },
+  {
+    "id": "rune-prison",
+    "name": "Rune Prison",
+    "set": "OGN",
+    "card_number": "050",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "calm"
+    ],
+    "rarity": "Common",
+    "energy_cost": 2,
+    "power_cost": [
+      {
+        "domain": "calm",
+        "amount": 1
+      }
+    ],
+    "keywords": [
+      {
+        "id": "action"
+      }
+    ],
+    "is_action": true,
+    "is_reaction": false,
+    "effect_text": "Action (Play on your turn or in showdowns.)\nStun a unit. (It doesn't deal combat damage this turn.)",
+    "abilities": [
+      {
+        "ability_id": "rune-prison-stun",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "stun_unit",
+        "effect_params": {
+          "target": "any_unit",
+          "targeting": "choose_one"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "",
+    "image": "CardArts/OGN-050.webp"
+  },
+  {
+    "id": "find-your-center",
+    "name": "Find Your Center",
+    "set": "OGN",
+    "card_number": "047",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "calm"
+    ],
+    "rarity": "Common",
+    "energy_cost": 3,
+    "power_cost": [],
+    "keywords": [
+      {
+        "id": "action"
+      }
+    ],
+    "is_action": true,
+    "is_reaction": false,
+    "effect_text": "Action (Play on your turn or in showdowns.)\nIf an opponent's score is within 3 points of the Victory Score, this costs [2] less.\nDraw 1 and channel 1 rune exhausted.",
+    "abilities": [
+      {
+        "ability_id": "find-your-center-cost-reduction",
+        "ability_type": "passive",
+        "timing": null,
+        "condition": {
+          "type": "opponent_score_within_victory",
+          "within": 3
+        },
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "cost_reduction",
+        "effect_params": {
+          "amount": 2
+        },
+        "is_action": false,
+        "is_reaction": false
+      },
+      {
+        "ability_id": "find-your-center-draw",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "draw",
+        "effect_params": {
+          "amount": 1
+        },
+        "is_action": false,
+        "is_reaction": false
+      },
+      {
+        "ability_id": "find-your-center-channel",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "channel_rune",
+        "effect_params": {
+          "amount": 1,
+          "exhausted": true
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "",
+    "image": "CardArts/OGN-047.webp"
+  },
+  {
+    "id": "unyielding-spirit",
+    "name": "Unyielding Spirit",
+    "set": "OGN",
+    "card_number": "145",
+    "card_type": "spell",
+    "supertypes": [],
+    "tags": [],
+    "domain": [
+      "body"
+    ],
+    "rarity": "Rare",
+    "energy_cost": 1,
+    "power_cost": [
+      {
+        "domain": "body",
+        "amount": 1
+      }
+    ],
+    "keywords": [
+      {
+        "id": "reaction"
+      }
+    ],
+    "is_action": false,
+    "is_reaction": true,
+    "effect_text": "Reaction (Play any time, even before spells and abilities resolve.)\nPrevent all damage that would be dealt this turn by spells and abilities.",
+    "abilities": [
+      {
+        "ability_id": "unyielding-spirit-prevent",
+        "ability_type": "triggered",
+        "timing": "resolution",
+        "condition": null,
+        "is_optional": false,
+        "cost": {},
+        "effect_type": "prevent_damage",
+        "effect_params": {
+          "source": "spells_and_abilities",
+          "duration": "turn",
+          "scope": "all"
+        },
+        "is_action": false,
+        "is_reaction": false
+      }
+    ],
+    "flavor_text": "",
+    "image": "CardArts/OGN-145.webp"
   }
 ]

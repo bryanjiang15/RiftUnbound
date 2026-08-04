@@ -42,6 +42,16 @@ static func evaluate(condition: Variant, source: CardInstance, gs: GameState, ct
 		"while_defending_alone":
 			# Unit is a defender and the only friendly unit at its battlefield.
 			return source != null and source.is_defender and _is_combat_alone(source, gs)
+		"opponent_score_within_victory":
+			var pi = source.owner_index if source else ctx.get("player_index", 0)
+			var opp = gs.players[1 - pi]
+			var within = int(condition.get("within", 3))
+			return opp.score >= gs.victory_score - within
+		"first_beginning_phase":
+			var pi = source.owner_index if source else ctx.get("player_index", 0)
+			# first_channel_done is set during Channel after Beginning, so it is
+			# still false during that player's first Beginning Phase.
+			return not gs.first_channel_done[pi]
 		_:
 			return true
 

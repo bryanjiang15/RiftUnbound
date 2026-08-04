@@ -1,0 +1,95 @@
+{
+  "deck_id": "ogs-master-yi-shanghai-open",
+  "player_label": "Master Yi (Shanghai Open)",
+  "legend": "master-yi-wuju-bladesman",
+  "chosen_champion": "master-yi-honed",
+  "main_deck": [
+    {
+      "card_id": "master-yi-honed",
+      "count": 1
+    },
+    {
+      "card_id": "en-garde",
+      "count": 2
+    },
+    {
+      "card_id": "charm",
+      "count": 3
+    },
+    {
+      "card_id": "defy",
+      "count": 3
+    },
+    {
+      "card_id": "unyielding-spirit",
+      "count": 1
+    },
+    {
+      "card_id": "clockwork-keeper",
+      "count": 3
+    },
+    {
+      "card_id": "confront",
+      "count": 1
+    },
+    {
+      "card_id": "discipline",
+      "count": 3
+    },
+    {
+      "card_id": "pit-rookie",
+      "count": 3
+    },
+    {
+      "card_id": "stalwart-poro",
+      "count": 3
+    },
+    {
+      "card_id": "zhonyas-hourglass",
+      "count": 2
+    },
+    {
+      "card_id": "rune-prison",
+      "count": 1
+    },
+    {
+      "card_id": "find-your-center",
+      "count": 3
+    },
+    {
+      "card_id": "first-mate",
+      "count": 2
+    },
+    {
+      "card_id": "qiyana-victorious",
+      "count": 3
+    },
+    {
+      "card_id": "tasty-faefolk",
+      "count": 2
+    },
+    {
+      "card_id": "whiteflame-protector",
+      "count": 3
+    },
+    {
+      "card_id": "deadbloom-predator",
+      "count": 1
+    }
+  ],
+  "rune_deck": [
+    {
+      "card_id": "calm-rune",
+      "count": 6
+    },
+    {
+      "card_id": "body-rune",
+      "count": 6
+    }
+  ],
+  "battlefields": [
+    "grove-of-the-god-willow",
+    "vilemaws-lair",
+    "obelisk-of-power"
+  ]
+}

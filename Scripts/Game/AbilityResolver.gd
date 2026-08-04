@@ -32,7 +32,7 @@ func resolve_ability(ability: Dictionary, source: Variant, target: CardInstance,
 		"stun_unit":
 			log_lines.append_array(_stun_unit(target))
 		"move_unit":
-			log_lines.append_array(_move_unit(params, target, gs))
+			log_lines.append_array(_move_unit(params, target, gs, ctx))
 		"move_unit_to_base":
 			log_lines.append_array(_move_unit_to_base(target, gs))
 		"recycle":
@@ -54,7 +54,7 @@ func resolve_ability(ability: Dictionary, source: Variant, target: CardInstance,
 		"deal_damage_all_enemies_in_combat":
 			log_lines.append_array(_deal_damage_all_enemies_in_combat(params, card_source, gs))
 		"fight_chosen_units":
-			log_lines.append_array(_fight_chosen_units(card_source, target, ctx))
+			log_lines.append_array(_fight_chosen_units(card_source, target, ctx, gs))
 		"ready_permanent":
 			log_lines.append_array(_ready_permanent(target))
 		"ready_runes":
@@ -64,7 +64,7 @@ func resolve_ability(ability: Dictionary, source: Variant, target: CardInstance,
 		"gain_points":
 			log_lines.append_array(_gain_points(params, gs, owner_pi))
 		"counter_spell":
-			log_lines.append_array(_counter_spell(card_source, gs))
+			log_lines.append_array(_counter_spell(card_source, gs, params))
 		"predict":
 			log_lines.append_array(_predict(params, gs, owner_pi))
 		"return_to_hand":
@@ -88,6 +88,10 @@ func resolve_ability(ability: Dictionary, source: Variant, target: CardInstance,
 			log_lines.append_array(_attach(card_source, target))
 		"death_replacement_recall":
 			log_lines.append_array(_death_replacement_recall(target, gs))
+		"prevent_damage":
+			log_lines.append_array(_prevent_damage(params, gs))
+		"choose_draw_or_channel":
+			log_lines.append_array(_choose_draw_or_channel(params, card_source, gs, owner_pi, ctx))
 		_:
 			log_lines.append("> [INFO] Unhandled effect type: %s" % effect_type)
 
@@ -131,6 +135,8 @@ func _draw(params: Dictionary, source: CardInstance, gs: GameState, owner: int) 
 func _deal_damage(params: Dictionary, source: CardInstance, target: CardInstance, gs: GameState) -> Array:
 	if target == null:
 		return ["[INFO] deal_damage: no target provided"]
+	if gs.prevent_spell_ability_damage:
+		return ["> Damage from spells/abilities prevented"]
 	var amount: int = params.get("amount", 1)
 	target.add_damage(amount)
 	var src_name = source.display_name() if source else "Effect"
@@ -215,15 +221,69 @@ func _stun_unit(target: CardInstance) -> Array:
 	return ["> %s is Stunned" % target.display_name()]
 
 
-func _move_unit(params: Dictionary, target: CardInstance, gs: GameState) -> Array:
+func _move_unit(params: Dictionary, target: CardInstance, gs: GameState, ctx: Dictionary = {}) -> Array:
 	if target == null:
 		return []
-	return _move_unit_to_base(target, gs)
+	var destination: String = str(params.get("destination", "base"))
+	if destination == "choose":
+		var controller: GameController = ctx.get("controller")
+		if controller != null:
+			var choices: Array[String] = ["base"]
+			for bf in gs.board.battlefields:
+				if target.is_at_battlefield() and bf.battlefield_id == gs.board.battlefields[target.battlefield_index].battlefield_id:
+					continue
+				choices.append(bf.battlefield_id)
+			# Vilemaw: cannot choose base from a no_move_to_base battlefield.
+			if target.is_at_battlefield() and _battlefield_blocks_move_to_base(gs, target.battlefield_index):
+				choices.erase("base")
+			gs.pending_prompt = {
+				"player_index": int(ctx.get("player_index", target.owner_index)),
+				"type": "choose_battlefield",
+				"valid_choices": choices,
+				"move_destination_resume": {
+					"target": target,
+					"params": params,
+					"source": ctx.get("source", null),
+					"chain_source_card": ctx.get("chain_source_card", null),
+				},
+				"prompt": "[PROMPT] Choose destination for %s — use: choose <%s>" % [
+					target.display_name(), "|".join(choices)
+				],
+			}
+			return [gs.pending_prompt["prompt"]]
+		destination = "base"
+	if destination == "base" or destination.is_empty():
+		return _move_unit_to_base(target, gs)
+	var bf_idx = gs.board.get_battlefield_index(destination)
+	if bf_idx < 0:
+		return ["[INFO] move_unit: unknown destination %s" % destination]
+	if target.is_at_battlefield() and target.battlefield_index == bf_idx:
+		return ["> %s is already at %s" % [target.display_name(), destination]]
+	var owner = target.owner_index
+	var ps = gs.players[owner]
+	if target.is_at_battlefield():
+		gs.board.remove_unit_from_battlefield(target)
+	else:
+		ps.base_permanents.erase(target)
+	gs.board.add_unit_to_battlefield(target, bf_idx)
+	var log_lines: Array[String] = ["> %s moved to %s" % [target.display_name(), destination]]
+	# Same contested rules as a normal Move: the effect controller is the aggressor.
+	var mover_pi = int(ctx.get("player_index", owner))
+	var bf = gs.board.battlefields[bf_idx]
+	if bf.controller_index != mover_pi or not bf.units[1 - mover_pi].is_empty():
+		bf.is_contested = true
+		gs.attacker_player_index = mover_pi
+		log_lines.append("> %s is now Contested" % bf.display_name)
+	return log_lines
 
 
 func _move_unit_to_base(target: CardInstance, gs: GameState) -> Array:
 	if target == null:
 		return []
+	if target.is_at_battlefield() and _battlefield_blocks_move_to_base(gs, target.battlefield_index):
+		return ["> %s cannot move to base from %s" % [
+			target.display_name(), gs.board.battlefields[target.battlefield_index].display_name
+		]]
 	var owner = target.owner_index
 	var ps = gs.players[owner]
 	if target.is_at_battlefield():
@@ -234,6 +294,51 @@ func _move_unit_to_base(target: CardInstance, gs: GameState) -> Array:
 	target.is_exhausted = true
 	ps.base_permanents.append(target)
 	return ["> %s moved to base" % target.display_name()]
+
+
+static func _battlefield_blocks_move_to_base(gs: GameState, bf_idx: int) -> bool:
+	if bf_idx < 0 or bf_idx >= gs.board.battlefields.size():
+		return false
+	var bf = gs.board.battlefields[bf_idx]
+	if bf.card_def == null:
+		return false
+	for kw in bf.card_def.keywords:
+		if kw.get("id", "") == "no_move_to_base":
+			return true
+	return false
+
+
+func _prevent_damage(params: Dictionary, gs: GameState) -> Array:
+	var source_filter: String = str(params.get("source", "spells_and_abilities"))
+	if source_filter == "spells_and_abilities" or source_filter == "all":
+		gs.prevent_spell_ability_damage = true
+		return ["> Damage from spells and abilities is prevented this turn"]
+	return ["> [INFO] prevent_damage: unsupported source %s" % source_filter]
+
+
+func _choose_draw_or_channel(params: Dictionary, source: CardInstance, gs: GameState, owner: int, ctx: Dictionary) -> Array:
+	var controller: GameController = ctx.get("controller")
+	if controller == null:
+		# Simulation fallback: prefer channel if possible, else draw.
+		var ps: PlayerState = gs.players[owner]
+		if not ps.rune_deck.is_empty():
+			return _channel_rune({
+				"amount": int(params.get("channel_amount", 1)),
+				"exhausted": params.get("exhausted", true),
+			}, gs, owner)
+		return _draw({"amount": int(params.get("draw_amount", 1))}, source, gs, owner)
+	gs.pending_prompt = {
+		"player_index": owner,
+		"type": "choose_mode",
+		"valid_choices": ["draw", "channel"],
+		"mode_resume": {
+			"params": params,
+			"source": source,
+			"owner": owner,
+		},
+		"prompt": "[PROMPT] Choose draw or channel — use: choose draw or choose channel",
+	}
+	return [gs.pending_prompt["prompt"]]
 
 
 func _recycle(params: Dictionary, source: CardInstance, gs: GameState, owner: int) -> Array:
@@ -365,6 +470,8 @@ func _deal_damage_all_enemies_in_combat(params: Dictionary, source: CardInstance
 	var amount: int = params.get("amount", 1)
 	if gs.combat_bf_index < 0:
 		return ["[INFO] Cannon Barrage: no combat in progress — no targets"]
+	if gs.prevent_spell_ability_damage:
+		return ["> Damage from spells/abilities prevented"]
 	var caster_owner := source.owner_index if source else gs.focus_player_index
 	# Enemy = the side opposing the caster among the two combatants.
 	var enemy_pi := 1 - caster_owner
@@ -380,7 +487,7 @@ func _deal_damage_all_enemies_in_combat(params: Dictionary, source: CardInstance
 	return log_lines
 
 
-func _fight_chosen_units(_source: CardInstance, chosen_enemy: CardInstance, ctx: Dictionary) -> Array:
+func _fight_chosen_units(_source: CardInstance, chosen_enemy: CardInstance, ctx: Dictionary, gs: GameState = null) -> Array:
 	var chosen_targets: Array = ctx.get("chosen_targets", [])
 	var buffed_friendly: CardInstance = null
 	if not chosen_targets.is_empty() and chosen_targets[0] is CardInstance:
@@ -389,6 +496,8 @@ func _fight_chosen_units(_source: CardInstance, chosen_enemy: CardInstance, ctx:
 		return ["[INFO] fight_chosen_units: missing friendly target"]
 	if chosen_enemy == null:
 		return ["[INFO] fight_chosen_units: missing enemy target"]
+	if gs != null and gs.prevent_spell_ability_damage:
+		return ["> Damage from spells/abilities prevented"]
 	var friendly_might = buffed_friendly.get_current_might()
 	var enemy_might = chosen_enemy.get_current_might()
 	chosen_enemy.add_damage(friendly_might)
@@ -446,13 +555,35 @@ func _gain_points(params: Dictionary, gs: GameState, owner: int) -> Array:
 	]]
 
 
-func _counter_spell(source: CardInstance, gs: GameState) -> Array:
+func _counter_spell(source: CardInstance, gs: GameState, params: Dictionary = {}) -> Array:
 	if gs.chain.is_empty():
 		return ["> [ERROR] Nothing on the chain to counter"]
 	var item = gs.chain[gs.chain.size() - 1]
+	if not _chain_item_matches_counter_limits(item, params):
+		return ["> [ERROR] Top of chain costs too much to counter"]
 	gs.chain.erase(item)
 	var src_name = source.display_name() if source else "Effect"
 	return ["> %s countered %s" % [src_name, item.describe()]]
+
+
+static func _chain_item_matches_counter_limits(item: ChainItem, params: Dictionary) -> bool:
+	if params.is_empty():
+		return true
+	if item == null or item.source_card == null:
+		return false
+	if item.source_card.definition.card_type != "spell":
+		return false
+	var max_energy = int(params.get("max_energy", -1))
+	var max_power = int(params.get("max_power_total", -1))
+	var energy = item.source_card.definition.energy_cost
+	var power_total := 0
+	for p in item.source_card.definition.power_cost:
+		power_total += int(p.get("amount", 0))
+	if max_energy >= 0 and energy > max_energy:
+		return false
+	if max_power >= 0 and power_total > max_power:
+		return false
+	return true
 
 
 func _predict(params: Dictionary, gs: GameState, owner: int) -> Array:
@@ -558,6 +689,8 @@ func _deal_damage_discarded_cost(params: Dictionary, source: CardInstance, targe
 		return ["> P%d has no discarded card for damage" % (owner + 1)]
 	if target == null:
 		return log_lines
+	if gs.prevent_spell_ability_damage:
+		return ["> Damage from spells/abilities prevented"]
 	target.add_damage(energy)
 	log_lines.append("> Dealt %d damage to %s (discarded card cost)" % [energy, target.display_name()])
 	return log_lines

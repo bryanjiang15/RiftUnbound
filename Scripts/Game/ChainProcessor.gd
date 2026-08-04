@@ -148,6 +148,7 @@ static func _execute_chain_item(item: ChainItem, gs: GameState, ability_resolver
 					"controller": controller,
 					"player_index": owner_pi,
 					"chosen_targets": item.targets,
+					"chain_source_card": card,
 				}
 				var ab_lines = ability_resolver.resolve_ability(ab, card, target, gs, ctx)
 				log_lines.append_array(ab_lines)
