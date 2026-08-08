@@ -24,6 +24,10 @@ still assembled in code and are intentionally **not** stored here.
 | `strategist_output_discipline_think.md` | `strategist.py` | Think-phase output discipline |
 | `strategist_format_phase.md` | `strategist.py` | Format-phase GoalSet instruction |
 | `strategist_task.md` | `strategist.py` | Strategist user-prompt task line |
+| `reasoner_role_base.md` | `reasoner.py` | Phase-3 Reasoner role, scope, and safe-fallback stance |
+| `reasoner_output_discipline_think.md` | `reasoner.py` | Reasoner think-phase investigation discipline |
+| `reasoner_format_phase.md` | `reasoner.py` | Terminal `commit_line` / `emit_goals` output instruction |
+| `reasoner_task.md` | `reasoner.py` | Reasoner user-prompt task line |
 | `line_selector_retry.md` | `agent.py` | Retry nudge for the line selector |
 
 ## Usage
