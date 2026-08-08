@@ -1,0 +1,55 @@
+{
+  "case_id": "sealed-win-from-seven-holdout",
+  "title": "Sealed holdout: win from seven",
+  "summary": "Sealed copy of the lethal win position for release-candidate holdout scoring.",
+  "objective": "Same as win-from-seven but not used for prompt tuning.",
+  "desired_result": "Wins the game.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/search_winning_line.json",
+  "decision_type": "main_phase",
+  "tags": [
+    "terminal_tactics",
+    "sealed",
+    "agent_decision"
+  ],
+  "split": "sealed",
+  "difficulty": "easy",
+  "hard_invariants": [
+    {
+      "kind": "chosen_line_complete",
+      "params": {},
+      "description": "Complete line"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "wins_game",
+      "params": {},
+      "description": "Wins",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "RuleSearchTests._test_search_finds_winning_line",
+    "source_fixture": "search_winning_line.json",
+    "notes": "Sealed holdout twin"
+  },
+  "fixture_hash": "ff087a39b28029c1",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "origin": "tcg_fixture",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "search_budget": {
+    "node_budget": 80,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  },
+  "exclusions": "",
+  "setup_notes": "",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "eval_lane": "agent"
+}

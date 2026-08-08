@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0",
+  "case_id": "spend-develop-no-threat",
+  "title": "Develop instead of floating unused Gust",
+  "summary": "Empty board; opponent has two small base units but is not on a lethal clock. Play the 2-drop rather than passing to float Gust.",
+  "objective": "Develop Stalwart Poro. Holding energy for Gust is wrong when you have no board and no imminent lethal to answer.",
+  "desired_result": "Chosen line plays stalwart-poro.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_spend_develop_no_threat.json",
+  "fixture_hash": "dd2211fa58e03a2d",
+  "acting_seat": 0,
+  "decision_type": "main_phase",
+  "tags": [
+    "decision_v2",
+    "resources",
+    "reaction",
+    "trap",
+    "agent_decision"
+  ],
+  "split": "dev",
+  "eval_lane": "agent",
+  "origin": "hand_built",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "difficulty": "hard",
+  "metamorphic_family": "resource-react",
+  "hard_invariants": [
+    {
+      "kind": "chosen_line_complete",
+      "params": {},
+      "description": "Complete line"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "command_prefix",
+      "params": {
+        "prefix": "play stalwart-poro"
+      },
+      "description": "Develop board instead of floating",
+      "label_tier": "gold"
+    }
+  ],
+  "trap_outcomes": [
+    {
+      "kind": "command_equals",
+      "params": {
+        "command": "end turn"
+      },
+      "description": "Paranoid float when Gust has no lethal to stop and board is empty",
+      "label_tier": "gold"
+    }
+  ],
+  "exclusions": "Never end turn floating Gust when you have no units and opponent is not threatening an immediate win.",
+  "setup_notes": "P0: empty board; hand gust + stalwart-poro; energy 2. P1 score 0: chemtech-enforcer + stalwart-poro in base. Both BFs empty \u2014 develop presence.",
+  "provenance": {
+    "source_fixture": "eval_spend_develop_no_threat.json",
+    "notes": "Resource-react spend twin of float-gust-deny-lethal",
+    "created_by": "decision-v2"
+  },
+  "search_budget": {
+    "node_budget": 120,
+    "time_budget_ms": 1500,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  }
+}

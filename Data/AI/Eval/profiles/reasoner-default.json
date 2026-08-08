@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "reasoner-default",
+  "title": "Reasoner search-driving strategist",
+  "architecture": "reasoner",
+  "adapter": "reasoner",
+  "description": "Live Reasoner against pinned Godot EngineServer. Requires GODOT + OpenAI/Azure credentials.",
+  "env": {
+    "RIFTBOUND_SEARCH": "on",
+    "RIFTBOUND_SEARCH_ARGMAX": "off",
+    "RIFTBOUND_REASONER": "on",
+    "RIFTBOUND_GOALS": "off",
+    "RIFTBOUND_TRANSIENT_RETRIES": "6",
+    "RIFTBOUND_TRANSIENT_BACKOFF_S": "2.0",
+    "RIFTBOUND_TRANSIENT_BACKOFF_MAX_S": "60.0",
+    "RIFTBOUND_CLIENT_MAX_RETRIES": "4"
+  },
+  "models": {
+    "reasoner": "gpt-4o"
+  },
+  "budgets": {
+    "node_budget": 80,
+    "time_budget_ms": 8000,
+    "tool_rounds": 8
+  },
+  "components": [
+    "turn_search",
+    "scout",
+    "reasoner_loop",
+    "search_for",
+    "deepen",
+    "verified_line_registry"
+  ],
+  "ablations": [
+    {
+      "variant_id": "no-reasoner",
+      "description": "Fall back to goals/selector without Reasoner handshake.",
+      "env": {"RIFTBOUND_REASONER": "off", "RIFTBOUND_GOALS": "on"},
+      "disabled_components": ["reasoner_loop", "search_for", "deepen"]
+    },
+    {
+      "variant_id": "no-tools",
+      "description": "Reasoner without search_for/deepen tools.",
+      "env": {"RIFTBOUND_REASONER": "on"},
+      "disabled_components": ["search_for", "deepen"]
+    },
+    {
+      "variant_id": "shuffled-scout",
+      "description": "Shuffle scout ranking to test anchoring.",
+      "env": {"RIFTBOUND_REASONER": "on", "RIFTBOUND_EVAL_SHUFFLE_SCOUT": "on"},
+      "disabled_components": []
+    }
+  ],
+  "equal_compute": {
+    "max_model_calls": 12,
+    "max_engine_nodes": 200,
+    "max_latency_ms": 30000
+  }
+}

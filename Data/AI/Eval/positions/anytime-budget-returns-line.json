@@ -1,0 +1,55 @@
+{
+  "case_id": "anytime-budget-returns-line",
+  "title": "Anytime node budget still returns a line",
+  "summary": "Even with node_budget=1 search must return a candidate and report stop reason.",
+  "objective": "Graceful degradation under budget pressure.",
+  "desired_result": "Non-empty candidates; stopped_reason node_budget when forced.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/search_reorderable.json",
+  "decision_type": "main_phase",
+  "tags": [
+    "reliability",
+    "search",
+    "dev",
+    "engine_contract"
+  ],
+  "split": "dev",
+  "difficulty": "easy",
+  "search_budget": {
+    "node_budget": 1,
+    "time_budget_ms": 500,
+    "beam_width": 4,
+    "max_depth": 3,
+    "top_n": 5,
+    "mode": "main"
+  },
+  "hard_invariants": [
+    {
+      "kind": "has_candidates",
+      "params": {},
+      "description": "Returns candidates under budget"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "has_candidates",
+      "params": {},
+      "description": "Anytime returns a line",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "RuleSearchTests._test_anytime_budget_returns_lines",
+    "source_fixture": "search_reorderable.json"
+  },
+  "fixture_hash": "b1381b3fdc6eb9bf",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "origin": "tcg_fixture",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "exclusions": "",
+  "setup_notes": "",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "eval_lane": "engine"
+}

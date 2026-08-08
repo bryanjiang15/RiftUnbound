@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "baseline-argmax",
+  "title": "Baseline TurnSearch argmax",
+  "architecture": "search_argmax",
+  "adapter": "argmax",
+  "description": "Deterministic Godot TurnSearch argmax baseline. Requires GODOT; no LLM.",
+  "env": {
+    "RIFTBOUND_SEARCH": "on",
+    "RIFTBOUND_SEARCH_ARGMAX": "on",
+    "RIFTBOUND_REASONER": "off",
+    "RIFTBOUND_GOALS": "off"
+  },
+  "models": {},
+  "budgets": {
+    "node_budget": 80,
+    "time_budget_ms": 1000
+  },
+  "components": ["turn_search", "scoring_profile", "argmax_selector"],
+  "ablations": [
+    {
+      "variant_id": "no-search",
+      "description": "Disable engine search (heuristic-only).",
+      "env": {"RIFTBOUND_SEARCH": "off"},
+      "disabled_components": ["turn_search", "argmax_selector"]
+    }
+  ],
+  "equal_compute": {
+    "max_model_calls": 0,
+    "max_engine_nodes": 80
+  }
+}

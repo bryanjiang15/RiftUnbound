@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "run_id": "reasoner-live-smoke",
+  "description": "Live Reasoner decision-quality smoke (agent lane only). Requires Godot + LLM credentials.",
+  "case_globs": ["*.json"],
+  "splits": ["blocking", "dev"],
+  "eval_lanes": ["agent"],
+  "profiles": ["reasoner-default"],
+  "repeats": 1,
+  "layers": ["contract", "validity", "gold", "trajectory", "cost"],
+  "transforms": ["identity"],
+  "include_fidelity_limited": false,
+  "mode": "engine_backed",
+  "throttle_ms": 3000
+}

@@ -1,0 +1,82 @@
+{
+  "schema_version": "1.0",
+  "case_id": "hold-open-rune-discipline",
+  "title": "Hold: take empty B instead of contesting into Discipline",
+  "summary": "Opponent holds BF-A with a 2-might unit, 2 ready runes, and Discipline. Move to empty BF-B; do not contest A or pass idle.",
+  "objective": "Move Flame Chompers onto empty battlefield-b. Do not contest A (Discipline makes 4 > 3) and do not end turn doing nothing.",
+  "desired_result": "Chosen line takes battlefield-b.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_hold_open_rune_discipline.json",
+  "fixture_hash": "9f486e5a7b74ef22",
+  "acting_seat": 0,
+  "decision_type": "main_phase",
+  "tags": [
+    "decision_v2",
+    "open_rune",
+    "reaction",
+    "battlefield",
+    "trap",
+    "agent_decision"
+  ],
+  "split": "dev",
+  "eval_lane": "agent",
+  "origin": "hand_built",
+  "fidelity_status": "fidelity_limited",
+  "label_tier": "gold",
+  "difficulty": "hard",
+  "metamorphic_family": "open-rune-react",
+  "hard_invariants": [
+    {
+      "kind": "root_hash_matched",
+      "params": {},
+      "description": "Decision pinned to fixture root"
+    },
+    {
+      "kind": "has_candidates",
+      "params": {},
+      "description": "Search returned candidates"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "line_contains",
+      "params": {
+        "substring": "battlefield-b"
+      },
+      "description": "Take empty BF-B instead of contested A",
+      "label_tier": "gold"
+    }
+  ],
+  "trap_outcomes": [
+    {
+      "kind": "line_contains",
+      "params": {
+        "substring": "battlefield-a"
+      },
+      "description": "Contest A into Discipline buff (2+2 beats your 3)",
+      "label_tier": "gold"
+    },
+    {
+      "kind": "command_equals",
+      "params": {
+        "command": "end turn"
+      },
+      "description": "Idle pass when empty BF-B is free",
+      "label_tier": "gold"
+    }
+  ],
+  "exclusions": "Never move onto battlefield-a while opponent has Discipline and two ready runes. Never end turn when BF-B is free.",
+  "setup_notes": "P0: flame-chompers (3) ready in base. P1: stalwart-poro (2) on BF-A; hand discipline; two ready calm runes. BF-B empty. React Discipline \u2192 poro 4 > chompers 3.",
+  "provenance": {
+    "source_fixture": "eval_hold_open_rune_discipline.json",
+    "notes": "Open-rune hold twin: take empty B; respect ready runes + Discipline on A. Fidelity-limited: gold assumes opponent casts Discipline, but search/sim currently auto-passes opponent reactions so contesting A looks winning under the engine world model. Keep diagnostic until opponent reactions are simulated; take-closed twin remains authoritative.",
+    "created_by": "decision-v2"
+  },
+  "search_budget": {
+    "node_budget": 200,
+    "time_budget_ms": 2000,
+    "beam_width": 8,
+    "max_depth": 10,
+    "top_n": 8,
+    "mode": "main"
+  }
+}

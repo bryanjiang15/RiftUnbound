@@ -1,0 +1,64 @@
+{
+  "schema_version": "1.0",
+  "case_id": "close-from-six-double",
+  "title": "Close from six via double conquer",
+  "summary": "At score 6 with two ready units and empty battlefields, execute the lethal double-conquer.",
+  "objective": "Find a complete line that wins this turn from 6.",
+  "desired_result": "Chosen complete line sets wins_game.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_close_from_six_double.json",
+  "fixture_hash": "ef0f4477ede96de1",
+  "acting_seat": 0,
+  "decision_type": "main_phase",
+  "tags": [
+    "decision_v2",
+    "lethal",
+    "trap",
+    "agent_decision"
+  ],
+  "split": "dev",
+  "eval_lane": "agent",
+  "origin": "hand_built",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "difficulty": "medium",
+  "hard_invariants": [
+    {
+      "kind": "chosen_line_complete",
+      "params": {},
+      "description": "Complete line"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "wins_game",
+      "params": {},
+      "description": "Double conquer closes from 6",
+      "label_tier": "gold"
+    }
+  ],
+  "trap_outcomes": [
+    {
+      "kind": "command_equals",
+      "params": {
+        "command": "end turn"
+      },
+      "description": "Idle instead of closing",
+      "label_tier": "gold"
+    }
+  ],
+  "exclusions": "Never end turn or develop without taking the available close.",
+  "setup_notes": "P0 score 6; Vi + Chemtech Enforcer ready at base; both battlefields empty.",
+  "provenance": {
+    "source_fixture": "eval_close_from_six_double.json",
+    "notes": "Lethal-range recognition twin of win-from-seven at score 6",
+    "created_by": "decision-v2"
+  },
+  "search_budget": {
+    "node_budget": 120,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  }
+}

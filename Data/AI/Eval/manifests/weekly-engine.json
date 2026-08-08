@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "run_id": "weekly-engine",
+  "description": "Weekly engine-contract suite (Godot argmax, metamorphic transforms, no LLM).",
+  "case_globs": ["*.json"],
+  "splits": ["blocking", "dev"],
+  "eval_lanes": ["engine"],
+  "profiles": ["baseline-argmax"],
+  "repeats": 1,
+  "layers": ["contract", "validity", "gold", "silver", "trajectory", "cost"],
+  "transforms": ["identity", "reorder_hand", "reorder_base_units", "swap_battlefield_ids"],
+  "include_fidelity_limited": false,
+  "mode": "engine_backed"
+}

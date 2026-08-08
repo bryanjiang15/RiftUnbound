@@ -1,0 +1,55 @@
+{
+  "case_id": "reorderable-transposition",
+  "title": "Reorderable moves / transposition safety",
+  "summary": "Two ready units can move in either order; search should dedupe permutations.",
+  "objective": "Return complete legal candidates without mutating live state.",
+  "desired_result": "Search returns candidates; transposition hits > 0 for deeper budgets.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/search_reorderable.json",
+  "decision_type": "main_phase",
+  "tags": [
+    "search",
+    "mechanics",
+    "blocking",
+    "engine_contract"
+  ],
+  "split": "blocking",
+  "difficulty": "easy",
+  "hard_invariants": [
+    {
+      "kind": "live_state_unchanged",
+      "params": {},
+      "description": "Search must not mutate the fixture root"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "has_complete_candidates",
+      "params": {},
+      "description": "At least one complete candidate",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "RuleSearchTests._test_transposition_table_dedupes_reorderings",
+    "source_fixture": "search_reorderable.json"
+  },
+  "fixture_hash": "b1381b3fdc6eb9bf",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "origin": "tcg_fixture",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "search_budget": {
+    "node_budget": 80,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  },
+  "exclusions": "",
+  "setup_notes": "",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "eval_lane": "engine"
+}

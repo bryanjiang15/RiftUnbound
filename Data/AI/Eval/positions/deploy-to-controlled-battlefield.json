@@ -1,0 +1,59 @@
+{
+  "case_id": "deploy-to-controlled-battlefield",
+  "title": "Deploy unit to controlled battlefield",
+  "summary": "When controlling a battlefield, legal plays include deploying directly to that field.",
+  "objective": "Prefer or at least enumerate play-to-battlefield commands.",
+  "desired_result": "Legal moves include play chemtech-enforcer to battlefield-a.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_deploy_controlled_bf.json",
+  "decision_type": "main_phase",
+  "tags": [
+    "movement",
+    "legal_moves",
+    "dev",
+    "agent_decision"
+  ],
+  "split": "dev",
+  "difficulty": "easy",
+  "origin": "inline_test",
+  "hard_invariants": [
+    {
+      "kind": "legal_move_contains",
+      "params": {
+        "substring": "to battlefield"
+      },
+      "description": "Deploy-to-BF enumerated"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "command_contains",
+      "params": {
+        "substring": "to battlefield"
+      },
+      "description": "Play onto controlled BF",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "RuleMovementTests._test_play_unit_to_controlled_battlefield",
+    "source_fixture": "eval_deploy_controlled_bf.json"
+  },
+  "fixture_hash": "d10bc05019510ef0",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "search_budget": {
+    "node_budget": 80,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  },
+  "exclusions": "",
+  "setup_notes": "",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "eval_lane": "agent"
+}

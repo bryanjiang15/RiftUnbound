@@ -1,0 +1,63 @@
+{
+  "case_id": "gust-might-filter",
+  "title": "Gust respects might filter",
+  "summary": "Gust may only target units within its might constraint.",
+  "objective": "Do not target illegal high-might units.",
+  "desired_result": "Chosen gust target is within might filter at cast/resolution.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_gust_target.json",
+  "decision_type": "main_phase",
+  "tags": [
+    "targets",
+    "spells",
+    "dev",
+    "agent_decision"
+  ],
+  "split": "dev",
+  "difficulty": "medium",
+  "origin": "inline_test",
+  "hard_invariants": [
+    {
+      "kind": "target_legal",
+      "params": {},
+      "description": "Target in valid set"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "gust_valid_target",
+      "params": {
+        "card_id": "gust",
+        "allowed_targets": [
+          "stalwart-poro"
+        ],
+        "forbidden_targets": [
+          "magma-wurm"
+        ]
+      },
+      "description": "Valid might-filtered target",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "CardScenarioTests._test_gust_might_filter",
+    "source_fixture": "eval_gust_target.json"
+  },
+  "fixture_hash": "7ced4215f517318c",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "search_budget": {
+    "node_budget": 80,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  },
+  "exclusions": "",
+  "setup_notes": "",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "eval_lane": "agent"
+}

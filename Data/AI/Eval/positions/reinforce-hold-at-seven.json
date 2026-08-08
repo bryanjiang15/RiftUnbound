@@ -1,0 +1,73 @@
+{
+  "schema_version": "1.0",
+  "case_id": "reinforce-hold-at-seven",
+  "title": "Reinforce: hold A at score 7",
+  "summary": "Both players at 7; same 2-might on A vs 4-might in opp base, but you have two 3-drops and energy to play both. Hold A by reinforcing.",
+  "objective": "Keep and reinforce battlefield-a (play Flame Chompers onto A). Do not retreat to base.",
+  "desired_result": "Chosen line commits Flame Chompers to battlefield-a while keeping presence there.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_reinforce_hold_at_seven.json",
+  "fixture_hash": "e7dff78d04c17bed",
+  "acting_seat": 0,
+  "decision_type": "main_phase",
+  "tags": [
+    "decision_v2",
+    "retreat",
+    "battlefield",
+    "trap",
+    "agent_decision"
+  ],
+  "split": "dev",
+  "eval_lane": "agent",
+  "origin": "hand_built",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "difficulty": "hard",
+  "metamorphic_family": "retreat-reinforce",
+  "hard_invariants": [
+    {
+      "kind": "root_hash_matched",
+      "params": {},
+      "description": "Decision pinned to fixture root"
+    },
+    {
+      "kind": "has_candidates",
+      "params": {},
+      "description": "Search returned candidates"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "line_contains",
+      "params": {
+        "substring": "to battlefield-a"
+      },
+      "description": "Reinforce A to hold at score 7",
+      "label_tier": "gold"
+    }
+  ],
+  "trap_outcomes": [
+    {
+      "kind": "line_contains",
+      "params": {
+        "substring": "to base"
+      },
+      "description": "Retreat off A when holding/reinforcing is required at 7",
+      "label_tier": "gold"
+    }
+  ],
+  "exclusions": "Never recall Chemtech off A at score 7 when you can reinforce to beat the 4-might threat.",
+  "setup_notes": "P0 score 7: chemtech-enforcer (2) on BF-A; hand two flame-chompers (3); energy 6. P1 score 7: raging-soul (4) ready in base. BF-B empty. Reinforcing makes the pile beat 4.",
+  "provenance": {
+    "source_fixture": "eval_reinforce_hold_at_seven.json",
+    "notes": "Retreat-reinforce hold twin: at 7, reinforce A instead of leaving",
+    "created_by": "decision-v2"
+  },
+  "search_budget": {
+    "node_budget": 200,
+    "time_budget_ms": 2000,
+    "beam_width": 8,
+    "max_depth": 10,
+    "top_n": 8,
+    "mode": "main"
+  }
+}

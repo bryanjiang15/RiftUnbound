@@ -85,6 +85,9 @@ static func enumerate(gs: GameState, player_index: int) -> Array:
 	# Move ready units from base to battlefields
 	_add_unit_moves_from_base(gs, ps, player_index, moves)
 
+	# Move ready units from battlefields back to base (retreat)
+	_add_unit_moves_to_base(gs, player_index, moves)
+
 	# Move ready units between battlefields (Ganking keyword)
 	_add_ganking_moves(gs, player_index, moves)
 
@@ -111,8 +114,13 @@ static func _add_playable_cards(gs: GameState, ps: PlayerState, player_index: in
 	for card in ps.hand:
 		if card.definition.card_type == "rune":
 			continue
-		if card.definition.is_reaction:
-			continue  # reactions are played via react/chain, not play
+		# Reaction spells are playable via `play` in the turn player's own
+		# Neutral Open window; in every other window they go on the chain via
+		# `react` (see _add_reaction_plays).
+		if card.definition.is_reaction and not TurnStateMachine.can_play_card(
+			card, gs.current_state, player_index, gs
+		):
+			continue
 
 		var cost = CostCalculator.compute_play_cost(card, player_index, gs)
 		if not CostCalculator.can_afford_with_autopay(player_index, cost, gs, card):
@@ -167,6 +175,27 @@ static func _add_unit_moves_from_base(gs: GameState, ps: PlayerState, player_ind
 						ready_units[j].instance_id,
 						bf.battlefield_id
 					])
+
+
+static func _add_unit_moves_to_base(gs: GameState, player_index: int, moves: Array) -> void:
+	## Ready units may retreat from a battlefield to base (unless the BF blocks it).
+	for bf_idx in range(gs.board.battlefields.size()):
+		var bf = gs.board.battlefields[bf_idx]
+		if _battlefield_blocks_move_to_base(bf):
+			continue
+		for unit in bf.units[player_index]:
+			if unit.is_exhausted:
+				continue
+			moves.append("move %s to base" % unit.instance_id)
+
+
+static func _battlefield_blocks_move_to_base(bf) -> bool:
+	if bf.card_def == null:
+		return false
+	for kw in bf.card_def.keywords:
+		if kw.get("id", "") == "no_move_to_base":
+			return true
+	return false
 
 
 static func _add_ganking_moves(gs: GameState, player_index: int, moves: Array) -> void:

@@ -1,0 +1,56 @@
+{
+  "case_id": "stale-root-rejected",
+  "title": "Stale root hash rejected",
+  "summary": "Reasoner commits with mismatched root_state_hash must be rejected before step zero.",
+  "objective": "Reject stale commit without mutating the board.",
+  "desired_result": "Commit rejected; structural hash unchanged.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/search_reorderable.json",
+  "decision_type": "main_phase",
+  "tags": [
+    "reasoner",
+    "safety",
+    "blocking",
+    "engine_contract"
+  ],
+  "split": "blocking",
+  "difficulty": "trivial",
+  "hard_invariants": [
+    {
+      "kind": "stale_root_rejected",
+      "params": {},
+      "description": "Mismatched root rejected"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "reject_stale_root",
+      "params": {},
+      "description": "No mutation on reject",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "RuleReasonerTests._test_root_mismatch_rejected_before_step_zero",
+    "source_fixture": "search_reorderable.json"
+  },
+  "fixture_hash": "b1381b3fdc6eb9bf",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "origin": "tcg_fixture",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "search_budget": {
+    "node_budget": 80,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  },
+  "engine_mode": "reject_stale",
+  "exclusions": "",
+  "setup_notes": "",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "eval_lane": "engine"
+}

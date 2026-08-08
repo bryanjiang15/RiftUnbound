@@ -31,7 +31,9 @@ const EngineServerScript = preload("res://Scripts/AI/EngineServer.gd")
 const ENGINE_PORT_DEFAULT := 8766
 
 # Resolved in setup() so it can differ per OS (see _agent_base_url()).
+# Per-seat override via set_agent_base_url() enables dual-server paired eval.
 var AGENT_URL := ""
+var _agent_base_url_override: String = ""
 
 # Mulligan keep/set-aside priors, loaded from scoring_profile.json["mulligan"].
 # Handled locally by MulliganHeuristic instead of deferring to the agent server.
@@ -228,6 +230,8 @@ func _env_flag(name: String) -> bool:
 
 
 func _agent_base_url() -> String:
+	if _agent_base_url_override != "":
+		return _agent_base_url_override.rstrip("/")
 	# Windows resolves "localhost" to IPv6 (::1) first, but the agent binds to
 	# IPv4 only, so the connection stalls before falling back to 127.0.0.1.
 	# Use the explicit IPv4 loopback on Windows; "localhost" works elsewhere
@@ -238,6 +242,13 @@ func _agent_base_url() -> String:
 	if port_override != "" and int(port_override) > 0:
 		port = int(port_override)
 	return "http://%s:%d" % [host, port]
+
+
+func set_agent_base_url(base_url: String) -> void:
+	"""Per-seat agent server URL for paired infrastructure A/B (no shared env)."""
+	_agent_base_url_override = base_url.strip_edges()
+	if _agent_base_url_override != "":
+		AGENT_URL = _agent_base_url() + "/decision"
 
 
 func take_turn() -> void:

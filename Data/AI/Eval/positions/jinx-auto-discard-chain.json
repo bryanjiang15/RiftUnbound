@@ -1,0 +1,63 @@
+{
+  "case_id": "jinx-auto-discard-chain",
+  "title": "Jinx play auto-discard hash chain",
+  "summary": "Seeded play jinx-demolitionist must expand through intermediate choose steps with full hashes.",
+  "objective": "Produce a complete hashed line including both auto-discard choices.",
+  "desired_result": "Complete line: play jinx + 2 intermediate chooses; parallel arrays equal length.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_jinx_auto_discard.json",
+  "decision_type": "main_phase",
+  "tags": [
+    "jinx",
+    "pending_choice",
+    "reasoner",
+    "blocking",
+    "engine_contract"
+  ],
+  "split": "blocking",
+  "difficulty": "medium",
+  "origin": "inline_test",
+  "hard_invariants": [
+    {
+      "kind": "chosen_line_complete",
+      "params": {},
+      "description": "Complete hashed line"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "seeded_jinx_auto_choices",
+      "params": {
+        "intermediate_choices": 2
+      },
+      "description": "Two intermediate chooses",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "RuleSearchTests._test_jinx_seed_search_captures_auto_choices",
+    "source_fixture": "eval_jinx_auto_discard.json",
+    "notes": "T2 Jinx surrogate"
+  },
+  "setup_notes": "P0 has jinx + 2 fury runes + void-seeker; pool 10E + 1 fury.",
+  "fixture_hash": "cf01aeb46f01647b",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "search_budget": {
+    "node_budget": 80,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  },
+  "seed_moves": [
+    "play jinx-demolitionist"
+  ],
+  "engine_mode": "search",
+  "exclusions": "",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "eval_lane": "engine"
+}

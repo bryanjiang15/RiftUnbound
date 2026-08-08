@@ -1,0 +1,58 @@
+{
+  "case_id": "budget-cutoff-incomplete",
+  "title": "Budget cutoff marks incomplete lines",
+  "summary": "Zero expansion budget promotes an incomplete frontier candidate that must not look complete.",
+  "objective": "Never commit incomplete budget-cutoff lines as full turns.",
+  "desired_result": "Candidate legal but complete=false with terminal_reason node_budget.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/search_reorderable.json",
+  "decision_type": "main_phase",
+  "tags": [
+    "reasoner",
+    "safety",
+    "blocking",
+    "engine_contract"
+  ],
+  "split": "blocking",
+  "difficulty": "easy",
+  "search_budget": {
+    "node_budget": 0,
+    "time_budget_ms": 1000,
+    "beam_width": 4,
+    "max_depth": 3,
+    "top_n": 5,
+    "mode": "main"
+  },
+  "hard_invariants": [
+    {
+      "kind": "incomplete_not_committed",
+      "params": {},
+      "description": "Incomplete lines not committed"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "incomplete_budget_cutoff",
+      "params": {
+        "terminal_reason": "node_budget"
+      },
+      "description": "Explicit incomplete marker",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "RuleSearchTests._test_budget_cutoff_line_is_incomplete",
+    "source_fixture": "search_reorderable.json"
+  },
+  "fixture_hash": "b1381b3fdc6eb9bf",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "origin": "tcg_fixture",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "engine_mode": "search",
+  "exclusions": "",
+  "setup_notes": "",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "eval_lane": "engine"
+}

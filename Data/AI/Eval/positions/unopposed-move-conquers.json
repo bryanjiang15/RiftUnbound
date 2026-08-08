@@ -1,0 +1,56 @@
+{
+  "case_id": "unopposed-move-conquers",
+  "title": "Unopposed move conquers",
+  "summary": "Moving the only unit to an empty battlefield conquers if unanswered.",
+  "objective": "Select a move that conquers.",
+  "desired_result": "simulate/resolved_if_unanswered.conquer == true for the chosen move.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/movement_base_to_bf.json",
+  "decision_type": "main_phase",
+  "tags": [
+    "agent_smoke",
+    "battlefield",
+    "movement",
+    "dev",
+    "agent_decision"
+  ],
+  "split": "dev",
+  "difficulty": "easy",
+  "hard_invariants": [
+    {
+      "kind": "live_state_unchanged",
+      "params": {},
+      "description": "Simulation must not mutate live"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "conquers_if_unanswered",
+      "params": {},
+      "description": "Unanswered move conquers",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "RuleSimulationTests._test_simulate_unopposed_move_conquers",
+    "source_fixture": "movement_base_to_bf.json"
+  },
+  "fixture_hash": "0c092eb865d653a5",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "origin": "tcg_fixture",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "search_budget": {
+    "node_budget": 80,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  },
+  "exclusions": "Never idle/end turn when an unanswered move conquers.",
+  "setup_notes": "Single ready unit at base; empty battlefields \u2014 take the free conquer.",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "eval_lane": "agent"
+}
