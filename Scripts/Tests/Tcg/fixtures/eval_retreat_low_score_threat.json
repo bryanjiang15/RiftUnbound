@@ -1,0 +1,36 @@
+{
+  "first_player": 0,
+  "turn_number": 3,
+  "phase": "MAIN",
+  "state": "NEUTRAL_OPEN",
+  "battlefields": ["obelisk-of-power", "targons-peak"],
+  "battlefield_control": [0, -1],
+  "players": [
+    {
+      "score": 2,
+      "pool": {"energy": 3, "power": {}},
+      "hand": ["flame-chompers"],
+      "base": [],
+      "runes": [
+        {"id": "fury-rune", "exhausted": false},
+        {"id": "fury-rune", "exhausted": false},
+        {"id": "fury-rune", "exhausted": false}
+      ],
+      "battlefield-a": [
+        {"id": "chemtech-enforcer", "owner": 0, "exhausted": false}
+      ],
+      "deck_size": 10,
+      "rune_deck_size": 9
+    },
+    {
+      "score": 2,
+      "pool": {"energy": 0, "power": {}},
+      "hand": [],
+      "base": [
+        {"id": "raging-soul", "exhausted": false}
+      ],
+      "deck_size": 10,
+      "rune_deck_size": 12
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "first_player": 0,
+  "turn_number": 1,
+  "phase": "MAIN",
+  "state": "NEUTRAL_OPEN",
+  "battlefields": ["zaun-warrens", "targons-peak"],
+  "battlefield_control": [-1, -1],
+  "pending_prompt": {
+    "player_index": 0,
+    "type": "choose_discard",
+    "remaining": 1,
+    "valid_choices": ["gust", "fading-memories"],
+    "prompt": "[PROMPT] Choose a card to discard"
+  },
+  "players": [
+    {
+      "score": 0,
+      "pool": {"energy": 0, "power": {}},
+      "hand": ["gust", "fading-memories"],
+      "base": [],
+      "runes": [{"id": "fury-rune", "exhausted": false}],
+      "deck_size": 5,
+      "rune_deck_size": 12
+    },
+    {
+      "score": 0,
+      "pool": {"energy": 0, "power": {}},
+      "hand": [],
+      "base": [],
+      "deck_size": 5,
+      "rune_deck_size": 12
+    }
+  ]
+}

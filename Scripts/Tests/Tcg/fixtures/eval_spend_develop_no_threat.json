@@ -1,0 +1,33 @@
+{
+  "first_player": 0,
+  "turn_number": 3,
+  "phase": "MAIN",
+  "state": "NEUTRAL_OPEN",
+  "battlefields": ["obelisk-of-power", "targons-peak"],
+  "battlefield_control": [-1, -1],
+  "players": [
+    {
+      "score": 0,
+      "pool": {"energy": 2, "power": {}},
+      "hand": ["gust", "stalwart-poro"],
+      "base": [],
+      "runes": [
+        {"id": "calm-rune", "exhausted": false},
+        {"id": "calm-rune", "exhausted": false}
+      ],
+      "deck_size": 10,
+      "rune_deck_size": 10
+    },
+    {
+      "score": 0,
+      "pool": {"energy": 0, "power": {}},
+      "hand": [],
+      "base": [
+        {"id": "chemtech-enforcer", "exhausted": false},
+        {"id": "stalwart-poro", "exhausted": false}
+      ],
+      "deck_size": 10,
+      "rune_deck_size": 12
+    }
+  ]
+}

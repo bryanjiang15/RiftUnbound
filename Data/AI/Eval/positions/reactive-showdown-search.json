@@ -1,0 +1,55 @@
+{
+  "case_id": "reactive-showdown-search",
+  "title": "Reactive search in showdown window",
+  "summary": "Reactive mode must navigate a showdown focus window without emitting main-phase end turn.",
+  "objective": "First reactive move is pass/play/react, never end turn or move.",
+  "desired_result": "search_stats.mode == reactive; no end-turn opener.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_reactive_showdown.json",
+  "decision_type": "showdown_focus",
+  "tags": [
+    "priority",
+    "reactions",
+    "blocking",
+    "engine_contract"
+  ],
+  "split": "blocking",
+  "difficulty": "medium",
+  "origin": "inline_test",
+  "contested_window": true,
+  "fidelity_status": "fidelity_limited",
+  "search_budget": {
+    "node_budget": 80,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 4,
+    "top_n": 8,
+    "mode": "reactive"
+  },
+  "hard_invariants": [
+    {
+      "kind": "reactive_mode",
+      "params": {},
+      "description": "Search mode reactive"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "no_end_turn_opener",
+      "params": {},
+      "description": "Does not open with end turn",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "RuleSearchTests._test_reactive_search_in_showdown_window",
+    "source_fixture": "eval_reactive_showdown.json"
+  },
+  "exclusions": "Opponent responses auto-passed in simulation; diagnostic until contested modeling improves.",
+  "fixture_hash": "88fa2fa9c2acf1a0",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "label_tier": "gold",
+  "setup_notes": "",
+  "metamorphic_family": "",
+  "eval_lane": "engine"
+}

@@ -1,0 +1,59 @@
+{
+  "case_id": "jinx-base-cost-recycles",
+  "title": "Jinx base cost auto-recycles for power",
+  "summary": "Playing jinx with 0 pool power must auto-recycle a fury rune for domain power.",
+  "objective": "Do not assume all runes only tap for energy.",
+  "desired_result": "Play succeeds with auto-recycle; jinx enters exhausted without accelerate.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_jinx_cost_recycle.json",
+  "decision_type": "main_phase",
+  "tags": [
+    "resources",
+    "jinx",
+    "blocking",
+    "agent_decision"
+  ],
+  "split": "blocking",
+  "difficulty": "medium",
+  "origin": "inline_test",
+  "hard_invariants": [
+    {
+      "kind": "command_legal",
+      "params": {
+        "command_contains": "play jinx-demolitionist"
+      },
+      "description": "Base play is legal"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "command_prefix",
+      "params": {
+        "prefix": "play jinx-demolitionist"
+      },
+      "description": "Play jinx without accelerate",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "RuleResourcesTests._test_jinx_base_cost_recycles_for_power",
+    "source_fixture": "eval_jinx_cost_recycle.json"
+  },
+  "fixture_hash": "5fb0476b79ece0ee",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "search_budget": {
+    "node_budget": 80,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  },
+  "exclusions": "",
+  "setup_notes": "",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "eval_lane": "agent"
+}

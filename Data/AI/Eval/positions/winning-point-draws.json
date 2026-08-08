@@ -1,0 +1,59 @@
+{
+  "case_id": "winning-point-draws",
+  "title": "Winning point draws instead of scoring eight",
+  "summary": "At score 7, establishing control draws rather than scoring the eighth point.",
+  "objective": "Respect winning-point replacement effect.",
+  "desired_result": "Score stays 7; draw occurs.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/winning_point_conquer.json",
+  "decision_type": "main_phase",
+  "tags": [
+    "scoring",
+    "rules",
+    "dev",
+    "engine_contract"
+  ],
+  "split": "dev",
+  "difficulty": "medium",
+  "hard_invariants": [
+    {
+      "kind": "score_cap_behavior",
+      "params": {
+        "score": 7
+      },
+      "description": "Winning point replacement"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "score_remains",
+      "params": {
+        "score": 7
+      },
+      "description": "Does not reach 8 via hold",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "RuleScoringTests._test_winning_point_draws_instead",
+    "source_fixture": "winning_point_conquer.json"
+  },
+  "fixture_hash": "3ad9c2f5d36b057e",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "origin": "tcg_fixture",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "search_budget": {
+    "node_budget": 80,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  },
+  "exclusions": "",
+  "setup_notes": "",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "eval_lane": "engine"
+}

@@ -1,0 +1,73 @@
+{
+  "schema_version": "1.0",
+  "case_id": "retreat-low-score-threat",
+  "title": "Retreat: leave A and develop at base",
+  "summary": "Low scores; 2-might on A faces a 4-might in opponent base. Retreat and play Flame Chompers at base instead of reinforcing A.",
+  "objective": "Move Chemtech Enforcer to base and develop Flame Chompers at base. Do not pile onto A.",
+  "desired_result": "Chosen line recalls the unit to base (and preferably plays the 3-drop at base).",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_retreat_low_score_threat.json",
+  "fixture_hash": "c1090cfd7ddb5289",
+  "acting_seat": 0,
+  "decision_type": "main_phase",
+  "tags": [
+    "decision_v2",
+    "retreat",
+    "battlefield",
+    "trap",
+    "agent_decision"
+  ],
+  "split": "dev",
+  "eval_lane": "agent",
+  "origin": "hand_built",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "difficulty": "hard",
+  "metamorphic_family": "retreat-reinforce",
+  "hard_invariants": [
+    {
+      "kind": "root_hash_matched",
+      "params": {},
+      "description": "Decision pinned to fixture root"
+    },
+    {
+      "kind": "has_candidates",
+      "params": {},
+      "description": "Search returned candidates"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "line_contains",
+      "params": {
+        "substring": "to base"
+      },
+      "description": "Retreat the 2-might off A",
+      "label_tier": "gold"
+    }
+  ],
+  "trap_outcomes": [
+    {
+      "kind": "line_contains",
+      "params": {
+        "substring": "to battlefield-a"
+      },
+      "description": "Reinforce A into a likely losing pile vs the 4-might",
+      "label_tier": "gold"
+    }
+  ],
+  "exclusions": "Never reinforce battlefield-a with Flame Chompers while opponent has a ready 4-might and scores are low. Prefer recall + develop at base.",
+  "setup_notes": "P0 score 2: chemtech-enforcer (2) on BF-A; hand flame-chompers (3); energy 3. P1 score 2: raging-soul (4) ready in base. BF-B empty.",
+  "provenance": {
+    "source_fixture": "eval_retreat_low_score_threat.json",
+    "notes": "Retreat-reinforce retreat twin: low-score leave A rather than feed the 4-might",
+    "created_by": "decision-v2"
+  },
+  "search_budget": {
+    "node_budget": 200,
+    "time_budget_ms": 2000,
+    "beam_width": 8,
+    "max_depth": 10,
+    "top_n": 8,
+    "mode": "main"
+  }
+}

@@ -169,7 +169,8 @@ per-line deltas that changed selection.
   also bias search *generation* (today they bias selection only; generic goals
   already bias generation via the handshake).
 - `telemetry`: persist `goal_set` + per-goal `achieved`-at-leaf into
-  `search_decisions`.
+  `search_decisions` (prerequisite for post-game **goal error** triage —
+  `LLM_Data_Analysis_Loop.md` §0.2 / §4).
 - `sprt-gate`: strategist seat vs base seat in `SelfPlaySim.gd`; commit the
   mechanism only on a significant win-rate lift.
 

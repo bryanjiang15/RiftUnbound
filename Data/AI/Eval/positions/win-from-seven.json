@@ -1,0 +1,57 @@
+{
+  "case_id": "win-from-seven",
+  "title": "Forced win from seven points",
+  "summary": "Two ready units can move to empty battlefields and conquer for the winning point.",
+  "objective": "Find a line that wins the game this turn.",
+  "desired_result": "Chosen complete line sets wins_game / reaches victory score.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/search_winning_line.json",
+  "decision_type": "main_phase",
+  "tags": [
+    "agent_smoke",
+    "terminal_tactics",
+    "blocking",
+    "search",
+    "agent_decision"
+  ],
+  "split": "blocking",
+  "difficulty": "easy",
+  "hard_invariants": [
+    {
+      "kind": "chosen_line_complete",
+      "params": {},
+      "description": "Committed line must be complete"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "wins_game",
+      "params": {},
+      "description": "Line wins the game",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "RuleSearchTests._test_search_finds_winning_line",
+    "source_fixture": "search_winning_line.json",
+    "notes": "Primary lethal search regression"
+  },
+  "setup_notes": "P0 score 7 with Vi and Chemtech Enforcer ready at base; empty battlefields.",
+  "fixture_hash": "ff087a39b28029c1",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "origin": "tcg_fixture",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "search_budget": {
+    "node_budget": 80,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  },
+  "exclusions": "",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "eval_lane": "agent"
+}

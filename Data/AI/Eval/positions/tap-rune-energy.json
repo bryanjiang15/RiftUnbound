@@ -1,0 +1,62 @@
+{
+  "case_id": "tap-rune-energy",
+  "title": "Tap rune for energy",
+  "summary": "Basic resource action: tapping a ready rune adds one energy.",
+  "objective": "Enumerate and prefer tap when energy is needed.",
+  "desired_result": "After tap rune-0, energy increases by 1.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/resources_tap_rune.json",
+  "decision_type": "main_phase",
+  "tags": [
+    "resources",
+    "blocking",
+    "engine_contract"
+  ],
+  "split": "blocking",
+  "difficulty": "trivial",
+  "hard_invariants": [
+    {
+      "kind": "command_legal",
+      "params": {
+        "command": "tap rune-0"
+      },
+      "description": "tap rune-0 is legal"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "command_prefix",
+      "params": {
+        "prefix": "tap rune"
+      },
+      "description": "Tap a rune",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "RuleResourcesTests._test_tap_adds_energy",
+    "source_fixture": "resources_tap_rune.json"
+  },
+  "fixture_hash": "2562b66a9aa081fe",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "origin": "tcg_fixture",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "search_budget": {
+    "node_budget": 40,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  },
+  "seed_moves": [
+    "tap rune-0"
+  ],
+  "engine_mode": "search",
+  "exclusions": "",
+  "setup_notes": "",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "eval_lane": "engine"
+}

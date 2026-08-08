@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "run_id": "arena-pilot",
+  "candidate_profile": "res://Data/AI/scoring_profile.json",
+  "candidate_deck": "res://Data/Decks/starter-deck-p2.json",
+  "opponents": [
+    {
+      "opponent_id": "baseline_mirror",
+      "profile_path": "res://Data/AI/scoring_profile.json",
+      "deck_path": "res://Data/Decks/starter-deck-p2.json",
+      "description": "Same deck/profile mirror baseline"
+    },
+    {
+      "opponent_id": "shanghai_open",
+      "profile_path": "res://Data/AI/scoring_profile.json",
+      "deck_path": "res://Data/Decks/master-yi-shanghai-open.json",
+      "description": "Different deck archetype"
+    }
+  ],
+  "seed_base": 1000,
+  "num_pairs": 2,
+  "turn_cap": 200,
+  "mode": "offline_argmax"
+}

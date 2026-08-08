@@ -1,0 +1,66 @@
+{
+  "case_id": "seeded-end-turn-complete",
+  "title": "Seeded end-turn completeness contract",
+  "summary": "A forced end-turn seed must produce a complete hashed line.",
+  "objective": "Preserve root hash, parallel move/context/hash arrays, and complete=true.",
+  "desired_result": "Exactly one complete end_turn line with matching root hash.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/search_reorderable.json",
+  "decision_type": "main_phase",
+  "tags": [
+    "reasoner",
+    "contract",
+    "blocking",
+    "engine_contract"
+  ],
+  "split": "blocking",
+  "difficulty": "trivial",
+  "hard_invariants": [
+    {
+      "kind": "chosen_line_complete",
+      "params": {},
+      "description": "Line complete"
+    },
+    {
+      "kind": "root_hash_matched",
+      "params": {},
+      "description": "Root hash retained"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "terminal_reason",
+      "params": {
+        "terminal_reason": "end_turn"
+      },
+      "description": "Ends turn",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "RuleSearchTests._test_seeded_end_turn_line_is_complete",
+    "source_fixture": "search_reorderable.json"
+  },
+  "fixture_hash": "b1381b3fdc6eb9bf",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "origin": "tcg_fixture",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "search_budget": {
+    "node_budget": 10,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  },
+  "seed_moves": [
+    "end turn"
+  ],
+  "engine_mode": "search",
+  "exclusions": "",
+  "setup_notes": "",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "eval_lane": "engine"
+}

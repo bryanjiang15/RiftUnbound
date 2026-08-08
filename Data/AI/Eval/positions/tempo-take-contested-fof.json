@@ -1,0 +1,82 @@
+{
+  "schema_version": "1.0",
+  "case_id": "tempo-take-contested-fof",
+  "title": "Take: contest A when FoF protects next turn",
+  "summary": "Same contested A + watcher wipe setup, but Fight or Flight in hand with an open rune makes committing to A correct.",
+  "objective": "Contest battlefield-a (buff / move / reinforce). Keep Fight or Flight in hand and leave at least one rune open so you can bounce or recall if the watcher contests next turn.",
+  "desired_result": "Chosen line commits to battlefield-a; FoF remains unspent this turn.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_tempo_take_contested_fof.json",
+  "fixture_hash": "44b4927d4ef9ff81",
+  "acting_seat": 0,
+  "decision_type": "main_phase",
+  "tags": [
+    "decision_v2",
+    "tempo_axis",
+    "battlefield",
+    "overcommit",
+    "trap",
+    "agent_decision"
+  ],
+  "split": "dev",
+  "eval_lane": "agent",
+  "origin": "hand_built",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "difficulty": "hard",
+  "metamorphic_family": "tempo-contest",
+  "hard_invariants": [
+    {
+      "kind": "root_hash_matched",
+      "params": {},
+      "description": "Decision pinned to fixture root"
+    },
+    {
+      "kind": "has_candidates",
+      "params": {},
+      "description": "Search returned candidates"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "line_contains",
+      "params": {
+        "substring": "battlefield-a"
+      },
+      "description": "Contest A while FoF answers the next-turn wipe",
+      "label_tier": "gold"
+    }
+  ],
+  "trap_outcomes": [
+    {
+      "kind": "command_equals",
+      "params": {
+        "command": "end turn"
+      },
+      "description": "Pass when FoF makes the contested contest safe",
+      "label_tier": "gold"
+    },
+    {
+      "kind": "line_contains",
+      "params": {
+        "substring": "fight-or-flight"
+      },
+      "description": "Spend FoF this turn instead of holding it for next-turn protection",
+      "label_tier": "gold"
+    }
+  ],
+  "exclusions": "Never decline battlefield-a when Fight or Flight plus an open rune answers the watcher's next-turn contest. Keep FoF in hand this turn.",
+  "setup_notes": "Same board as tempo-hold-contested-wipe, plus fight-or-flight in hand and an extra ready chaos rune. P0: chemtech ready; hand discipline + raging-soul + fight-or-flight; energy 6. P1: flame-chompers on A, thousand-tailed-watcher ready in base. BF-B empty.",
+  "provenance": {
+    "source_fixture": "eval_tempo_take_contested_fof.json",
+    "notes": "Tempo-contest take twin: FoF + open rune flips contested A from trap to gold",
+    "created_by": "decision-v2"
+  },
+  "search_budget": {
+    "node_budget": 200,
+    "time_budget_ms": 2000,
+    "beam_width": 8,
+    "max_depth": 10,
+    "top_n": 8,
+    "mode": "main"
+  }
+}

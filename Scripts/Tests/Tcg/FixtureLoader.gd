@@ -68,6 +68,9 @@ static func load_from_dict(controller: GameController, data: Dictionary) -> void
 		else:
 			gs.board.battlefields[i].controller_index = int(ctrl)
 
+	if data.has("pending_prompt") and data["pending_prompt"] is Dictionary:
+		gs.pending_prompt = (data["pending_prompt"] as Dictionary).duplicate(true)
+
 
 static func _read_json(path: String) -> Dictionary:
 	var file = FileAccess.open(path, FileAccess.READ)

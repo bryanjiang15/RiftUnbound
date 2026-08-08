@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "case_id": "react-dont-end-turn",
+  "title": "Reactive window does not end turn",
+  "summary": "In showdown focus, open with pass/play/react \u2014 never main-phase end turn.",
+  "objective": "First reactive move is pass/play/react, never end turn or move.",
+  "desired_result": "No end-turn or move opener in the reactive window.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_reactive_showdown.json",
+  "fixture_hash": "88fa2fa9c2acf1a0",
+  "acting_seat": 0,
+  "decision_type": "showdown_focus",
+  "tags": [
+    "agent_smoke",
+    "priority",
+    "reactions",
+    "blocking",
+    "agent_decision"
+  ],
+  "split": "blocking",
+  "eval_lane": "agent",
+  "origin": "inline_test",
+  "fidelity_status": "fidelity_limited",
+  "label_tier": "gold",
+  "difficulty": "medium",
+  "contested_window": true,
+  "search_budget": {
+    "node_budget": 80,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 4,
+    "top_n": 8,
+    "mode": "reactive"
+  },
+  "hard_invariants": [
+    {
+      "kind": "reactive_mode",
+      "params": {},
+      "description": "Decision is in a reactive / showdown window"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "no_end_turn_opener",
+      "params": {},
+      "description": "Does not open with end turn or move",
+      "label_tier": "gold"
+    }
+  ],
+  "exclusions": "Opponent responses auto-passed in simulation; diagnostic until contested modeling improves. Never open with end turn.",
+  "setup_notes": "Showdown open on battlefield-a; P0 has void-seeker in hand and energy to react.",
+  "metamorphic_family": "",
+  "provenance": {
+    "source_test": "RuleSearchTests._test_reactive_search_in_showdown_window",
+    "source_fixture": "eval_reactive_showdown.json",
+    "notes": "Agent-lane twin of reactive-showdown-search for decision catalog v1",
+    "created_by": "decision_catalog_v1"
+  }
+}

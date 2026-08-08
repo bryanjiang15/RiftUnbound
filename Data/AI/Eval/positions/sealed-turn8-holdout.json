@@ -1,0 +1,57 @@
+{
+  "case_id": "sealed-turn8-holdout",
+  "title": "Sealed holdout: Turn 8 two-point continuation",
+  "summary": "Sealed twin of the Turn 8 continuation for release scoring.",
+  "objective": "Reach score >= 4.",
+  "desired_result": "Two-point continuation found.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/reasoner_turn8_two_point.json",
+  "decision_type": "main_phase",
+  "tags": [
+    "ordering",
+    "sealed",
+    "agent_decision"
+  ],
+  "split": "sealed",
+  "difficulty": "hard",
+  "search_budget": {
+    "node_budget": 300,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 12,
+    "top_n": 8,
+    "mode": "main"
+  },
+  "hard_invariants": [
+    {
+      "kind": "root_hash_matched",
+      "params": {},
+      "description": "Pinned root"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "score_after_at_least",
+      "params": {
+        "my_score_after": 4
+      },
+      "description": "Score >= 4",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "RuleReasonerTests._test_turn8_two_point_continuation_discoverable",
+    "source_fixture": "reasoner_turn8_two_point.json",
+    "notes": "Sealed holdout twin"
+  },
+  "fixture_hash": "c6bad80f2bfca311",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "origin": "tcg_fixture",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "exclusions": "",
+  "setup_notes": "",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "eval_lane": "agent"
+}

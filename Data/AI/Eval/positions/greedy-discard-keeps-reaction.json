@@ -1,0 +1,58 @@
+{
+  "case_id": "greedy-discard-keeps-reaction",
+  "title": "Greedy discard keeps reaction",
+  "summary": "Forced discard should keep gust and discard fading-memories.",
+  "objective": "Preserve playable reaction under discard pressure.",
+  "desired_result": "choose fading-memories; gust remains in hand.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_greedy_discard.json",
+  "decision_type": "pending_choice",
+  "tags": [
+    "targets",
+    "resources",
+    "blocking",
+    "engine_contract"
+  ],
+  "split": "blocking",
+  "difficulty": "easy",
+  "origin": "inline_test",
+  "hard_invariants": [
+    {
+      "kind": "legal_choice",
+      "params": {},
+      "description": "Choice must be legal"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "discard_card",
+      "params": {
+        "card_id": "fading-memories"
+      },
+      "description": "Discard do-nothing card",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "RuleSearchTests._test_discard_picks_best_card",
+    "source_fixture": "eval_greedy_discard.json"
+  },
+  "setup_notes": "Pending choose_discard with gust and fading-memories; one ready fury rune.",
+  "engine_mode": "resolve_discard",
+  "fixture_hash": "7730f5ae28182b69",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "search_budget": {
+    "node_budget": 80,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  },
+  "exclusions": "",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "eval_lane": "engine"
+}

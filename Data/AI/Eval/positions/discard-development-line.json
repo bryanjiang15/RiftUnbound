@@ -1,0 +1,56 @@
+{
+  "case_id": "discard-development-line",
+  "title": "Flame Chompers / Scrapheap discard development",
+  "summary": "Hand supports discard-triggered development with Flame Chompers and Scrapheap.",
+  "objective": "Use discard synergies rather than a do-nothing discard.",
+  "desired_result": "A line that develops via discard triggers / play-self is preferred over idle.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_discard_development.json",
+  "decision_type": "main_phase",
+  "tags": [
+    "agent_smoke",
+    "cards",
+    "tempo",
+    "dev",
+    "agent_decision"
+  ],
+  "split": "dev",
+  "difficulty": "hard",
+  "origin": "inline_test",
+  "label_tier": "silver",
+  "hard_invariants": [
+    {
+      "kind": "chosen_line_legal",
+      "params": {},
+      "description": "Legal complete line"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "develops_via_discard",
+      "params": {},
+      "description": "Uses discard development",
+      "label_tier": "silver"
+    }
+  ],
+  "provenance": {
+    "source_test": "CardScenarioTests flame-chompers/scrapheap",
+    "source_fixture": "eval_discard_development.json"
+  },
+  "setup_notes": "Hand: flame-chompers, scrapheap, fading-memories with fury runes.",
+  "fixture_hash": "17e2486d84135bc2",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "fidelity_status": "authoritative",
+  "search_budget": {
+    "node_budget": 80,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  },
+  "exclusions": "",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "eval_lane": "agent"
+}

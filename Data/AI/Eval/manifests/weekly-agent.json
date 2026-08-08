@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "run_id": "weekly-agent",
+  "description": "Weekly agent decision-quality suite (Godot argmax baseline; swap profile to reasoner-default for live LLM).",
+  "case_globs": ["*.json"],
+  "splits": ["blocking", "dev"],
+  "eval_lanes": ["agent"],
+  "profiles": ["baseline-argmax"],
+  "repeats": 1,
+  "layers": ["contract", "validity", "gold", "silver", "trajectory", "cost"],
+  "transforms": ["identity", "reorder_hand", "reorder_base_units", "swap_battlefield_ids"],
+  "include_fidelity_limited": false,
+  "mode": "engine_backed"
+}
