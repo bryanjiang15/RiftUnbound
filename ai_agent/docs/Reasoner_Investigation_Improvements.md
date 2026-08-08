@@ -1,12 +1,17 @@
 # Reasoner Investigation and Commitment Improvements (FINISHED)
 
 Status: **Phases A0–C implemented for deterministic coverage (2026-07-25);
-live behavioral acceptance pending.** Companion to
+investigation redesign Phases 1–4 landed (telemetry, prompts, prefix_steps,
+novelty gate); §5.3 live behavioral sample and SPRT still operator-run.** Companion to
 `Deliberative_Reasoning_Toolkit.md` (§5–§7 Phase 3), which remains the
 architectural source of truth for the live-tool Reasoner. The implementation
 now has native terminals, strict goals, request-scoped registries, complete
-hashed line commitment, root identity, and an enforced investigation gate.
-The §5.3 sample of 20 eligible turns across three games has not yet been run.
+hashed line commitment, root identity, a novelty-aware investigation gate,
+typed search `result_status`, and eval investigation metrics. See
+`Reasoner_Investigation_Acceptance.md` for the Phase 1–6 command surface.
+A synthetic §5.3-shaped baseline can be archived via
+`python -m ai_agent.eval investigate-baseline`; replace it with a live
+multi-game sample when Godot + LLM credentials are available.
 
 Implemented verification baseline:
 

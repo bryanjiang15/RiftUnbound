@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "run_id": "reasoner-investigate-accept",
+  "description": "A/B acceptance: redesigned Reasoner investigation profile on agent-lane gold/trap positions. Requires Godot + LLM credentials.",
+  "case_globs": ["*.json"],
+  "splits": ["blocking", "dev"],
+  "eval_lanes": ["agent"],
+  "profiles": ["reasoner-default", "reasoner-investigate-v2"],
+  "repeats": 1,
+  "layers": ["contract", "validity", "gold", "trajectory", "cost"],
+  "transforms": ["identity"],
+  "include_fidelity_limited": false,
+  "mode": "engine_backed",
+  "throttle_ms": 3000
+}

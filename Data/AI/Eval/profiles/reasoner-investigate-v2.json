@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "reasoner-investigate-v2",
+  "title": "Reasoner investigation redesign v2",
+  "architecture": "reasoner",
+  "adapter": "reasoner",
+  "description": "Reasoner with local-fork-first prompts, prefix_steps deepen, novelty gate, and typed search feedback. Requires GODOT + OpenAI/Azure credentials.",
+  "env": {
+    "RIFTBOUND_SEARCH": "on",
+    "RIFTBOUND_SEARCH_ARGMAX": "off",
+    "RIFTBOUND_REASONER": "on",
+    "RIFTBOUND_GOALS": "off",
+    "RIFTBOUND_TRANSIENT_RETRIES": "6",
+    "RIFTBOUND_TRANSIENT_BACKOFF_S": "2.0",
+    "RIFTBOUND_TRANSIENT_BACKOFF_MAX_S": "60.0",
+    "RIFTBOUND_CLIENT_MAX_RETRIES": "4",
+    "RIFTBOUND_SCORE_TIE_BAND": "0.15",
+    "RIFTBOUND_REASONER_HIDE_RAW_SCORE": "1"
+  },
+  "models": {
+    "reasoner": "gpt-4o"
+  },
+  "budgets": {
+    "node_budget": 80,
+    "time_budget_ms": 8000,
+    "tool_rounds": 8
+  },
+  "components": [
+    "turn_search",
+    "scout",
+    "reasoner_loop",
+    "search_for",
+    "deepen",
+    "prefix_steps",
+    "novelty_gate",
+    "verified_line_registry"
+  ],
+  "ablations": [
+    {
+      "variant_id": "no-reasoner",
+      "description": "Fall back to goals/selector without Reasoner handshake.",
+      "env": {"RIFTBOUND_REASONER": "off", "RIFTBOUND_GOALS": "on"},
+      "disabled_components": ["reasoner_loop", "search_for", "deepen", "prefix_steps", "novelty_gate"]
+    },
+    {
+      "variant_id": "show-raw-scores",
+      "description": "Show raw scout scores (disable soft score bands).",
+      "env": {"RIFTBOUND_REASONER_HIDE_RAW_SCORE": "0"},
+      "disabled_components": []
+    }
+  ],
+  "equal_compute": {
+    "max_model_calls": 12,
+    "max_engine_nodes": 200,
+    "max_latency_ms": 30000
+  }
+}

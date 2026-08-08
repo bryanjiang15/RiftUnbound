@@ -474,10 +474,17 @@ def search_for(
         result["matches"] = enriched
     result["source"] = source
     from .tool_budget import current_budget
+    from .investigation_metrics import classify_search_result
 
     budget = current_budget()
     if budget is not None:
         result.update(budget.status())
+    scout_leader: tuple[str, ...] = ()
+    if context is not None and context.scout_lines:
+        scout_leader = tuple(
+            str(m) for m in (context.scout_lines[0].get("moves", []) or [])
+        )
+    result["result_status"] = classify_search_result("search_for", result, scout_leader)
     return result
 
 
@@ -563,14 +570,21 @@ def deepen(
     line_id: str | None = None,
     extra_depth: int = 4,
     moves: list | None = None,
+    prefix_steps: int | None = None,
 ) -> dict[str, Any]:
     """Re-search from an existing candidate line with more depth/budget.
 
     Pass ``line_id`` (resolved against the current search corpus) or an explicit
-    ``moves`` prefix. Trailing ``end turn`` is stripped so the engine continues
-    from the last actionable position along the line.
+    ``moves`` prefix. Optional ``prefix_steps`` replays only the first *k*
+    commands of ``line_id`` so TurnSearch can fork mid-line. Trailing
+    ``end turn`` is stripped so the engine continues from the tip.
     """
-    seed = _resolve_deepen_seed(line_id, moves)
+    from .investigation_metrics import (
+        classify_search_result,
+        suggest_last_valid_prefix,
+    )
+
+    seed = _resolve_deepen_seed(line_id, moves, prefix_steps=prefix_steps)
     if seed is None:
         return {
             "legal": False,
@@ -580,6 +594,7 @@ def deepen(
                 "or an explicit moves prefix."
             ),
             "source": "unavailable",
+            "result_status": "unavailable",
         }
     extra = max(1, int(extra_depth or 4))
     payload = {
@@ -600,9 +615,16 @@ def deepen(
             "seed_moves": seed,
             "error": "Live engine unavailable; deepen requires /engine/search.",
             "source": "unavailable",
+            "result_status": "unavailable",
+            "prefix_steps": prefix_steps,
+            "suggested_prefix": suggest_last_valid_prefix(seed),
         }
     if live.get("error") == "budget_exhausted":
-        return dict(live)
+        out_budget = dict(live)
+        out_budget["seed_moves"] = seed
+        out_budget["result_status"] = "unavailable"
+        out_budget["prefix_steps"] = prefix_steps
+        return out_budget
     out = dict(live)
     context = _reasoner_context()
     if context is not None:
@@ -615,12 +637,32 @@ def deepen(
         out["candidate_lines"] = registered
         context.search_corpus = list(registered)
     out["seed_moves"] = seed
-    out["source"] = "live_engine"
+    out["source"] = out.get("source") or "live_engine"
     out["extra_depth"] = extra
+    out["prefix_steps"] = prefix_steps
+    stopped = str(out.get("stopped_reason", "") or "")
+    error = str(out.get("error", "") or "")
+    if stopped == "seed_failed" or "seed" in error.lower():
+        out["legal"] = False
+        out["result_status"] = "illegal_seed"
+        out["suggested_prefix"] = suggest_last_valid_prefix(seed, error)
+        return out
+
+    scout_leader: tuple[str, ...] = ()
+    if context is not None and context.scout_lines:
+        scout_leader = tuple(
+            str(m) for m in (context.scout_lines[0].get("moves", []) or [])
+        )
+    out["result_status"] = classify_search_result("deepen", out, scout_leader)
     return out
 
 
-def _resolve_deepen_seed(line_id: str | None, moves: list | None) -> list[str] | None:
+def _resolve_deepen_seed(
+    line_id: str | None,
+    moves: list | None,
+    *,
+    prefix_steps: int | None = None,
+) -> list[str] | None:
     cmds: list[str] = []
     if moves:
         cmds = [_move_to_command(m) for m in moves]
@@ -640,6 +682,11 @@ def _resolve_deepen_seed(line_id: str | None, moves: list | None) -> list[str] |
                 if str(entry.get("line_id", "")) == target:
                     cmds = [str(m) for m in (entry.get("moves", []) or [])]
                     break
+        if cmds and prefix_steps is not None:
+            steps = max(0, int(prefix_steps))
+            if steps <= 0:
+                return None
+            cmds = cmds[:steps]
     if not cmds:
         return None
     # Drop trailing end-turn so search can still expand from the tip.

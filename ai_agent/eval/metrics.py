@@ -56,6 +56,7 @@ def compute_profile_metrics(
     latencies: list[float] = []
     model_calls: list[float] = []
     prompt_tokens: list[float] = []
+    investigation_metrics: list[dict[str, Any]] = []
 
     for trial in trials:
         case = cases_by_id.get(trial.case_id)
@@ -73,6 +74,7 @@ def compute_profile_metrics(
             trajectory_warn += 1
 
         metrics = trial.metrics or {}
+        investigation_metrics.append(metrics)
         if metrics.get("latency_ms") is not None:
             latencies.append(float(metrics["latency_ms"]))
         if metrics.get("model_calls") is not None:
@@ -104,6 +106,10 @@ def compute_profile_metrics(
             if gold_passed:
                 easy_gold_pass += 1
 
+    from ai_agent.investigation_metrics import summarize_investigation_trials
+
+    investigation = summarize_investigation_trials(investigation_metrics)
+
     return {
         "trials": n,
         "hard_gold_pass_rate": _rate(hard_gold_pass, hard_gold_n),
@@ -122,6 +128,14 @@ def compute_profile_metrics(
         "p95_latency_ms": _percentile(latencies, 95.0),
         "mean_model_calls": _mean(model_calls),
         "mean_prompt_tokens": _mean(prompt_tokens),
+        "investigation": investigation,
+        "novel_investigation_rate": investigation.get("novel_investigation_rate"),
+        "local_fork_rate": investigation.get("local_fork_rate"),
+        "novel_suffix_rate": investigation.get("novel_suffix_rate"),
+        "failed_query_recovery_rate": investigation.get("failed_query_recovery_rate"),
+        "score_primary_rationale_rate": investigation.get("score_primary_rationale_rate"),
+        "scout_agreement_rate": investigation.get("scout_agreement_rate"),
+        "investigation_satisfied_rate": investigation.get("investigation_satisfied_rate"),
     }
 
 
