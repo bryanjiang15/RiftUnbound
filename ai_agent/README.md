@@ -1,8 +1,9 @@
 # Riftbound AI Agent Service
 
-A Python-based OpenAI reasoning agent that plays Riftbound against a human.
-Godot sends compact game state JSON; the agent reasons using GPT-4o with
-tool-calling skills, then returns a structured decision that Godot validates.
+A Python-based OpenAI-compatible reasoning agent that plays Riftbound against a
+human. Godot sends compact game state JSON; the agent reasons with configured
+LLM models and tool-calling skills, then returns structured decisions or
+engine-verified line commitments that Godot validates.
 
 ## Quick Start
 
@@ -39,6 +40,12 @@ uvicorn ai_agent.main:app --port 8765 --reload
 | `RIFTBOUND_SEARCH` | `off` | No | Enables engine search mode. When on, Godot runs `TurnSearch` and posts candidate lines; the server selects a line (via `choose_line`) and captures the tuning dataset (`search_decisions` / `candidate_lines` / `decision_snapshots`). |
 | `RIFTBOUND_SEARCH_ARGMAX` | `off` | No | When on (with search enabled), skips the LLM line-selector round-trip and returns the top-scored line directly. Decisions are tagged `selector_source='argmax'`. Use for bulk data generation / weight tuning. |
 | `RIFTBOUND_GOALS` | `off` | No | Enables the goal-oriented strategist: once per turn an LLM emits a structured GoalSet that is compiled into a transient scoring-profile overlay biasing line selection (`ai_agent/docs/Goal_Oriented_Strategist.md`). Requires `RIFTBOUND_SEARCH=on`; ignored under `RIFTBOUND_SEARCH_ARGMAX`. Off keeps the proven base-profile search as the floor. |
+| `RIFTBOUND_REASONER` | `off` | No | Enables the Phase-3 Reasoner pre-search handshake (`POST /reason`). Requires `RIFTBOUND_SEARCH=on` and `RIFTBOUND_SEARCH_ARGMAX=off`. The Reasoner can either commit a complete engine-registered line directly or emit a non-empty GoalSet overlay for the final search. |
+| `RIFTBOUND_REASONER_MODEL` | (falls back to `RIFTBOUND_STRATEGIST_MODEL`, then `RIFTBOUND_AI_MODEL`) | No | Model used by the Reasoner think/terminal loop. Use this to try a stronger model for live investigation without changing the Actor/Planner defaults. |
+| `RIFTBOUND_REASONER_NODE_BUDGET` | `1500` | No | Per-turn live-tool node budget shared by `search_for` and `deepen`. Exhaustion forces the Reasoner to terminate or fall back to base search. |
+| `RIFTBOUND_REASONER_TIME_BUDGET_MS` | `3000` | No | Per-turn live-tool engine-time budget in milliseconds. Combined with the node budget; whichever reaches zero first exhausts the tool budget. |
+| `RIFTBOUND_ENGINE_PORT` | `8766` | No | Port Python live tools use for Godot's local `EngineServer` (`127.0.0.1:<port>`). Must match the engine-side value when changed. |
+| `RIFTBOUND_ENGINE_TIMEOUT_S` | `8.0` | No | Python HTTP timeout for each live engine tool call. Transport errors fall back to the Phase-1 pre-computed corpus where possible. |
 | `RIFTBOUND_DATA_ORIGIN` | `vs_human` | No | Provenance tag stamped on captured `search_decisions` rows: `vs_human`, `self_play`, or `vs_heuristic`. Keeps state distributions separable so they are never silently mixed in tuning. |
 | `RIFTBOUND_CAPTURE_SEAT` | (unset) | No | When `0` or `1`, persist the tuning dataset (`search_decisions` / `candidate_lines` / `decision_snapshots`) for **only that seat's** decisions. Use in two-profile self-play to store data from just the profile under test (put it on this seat). Unset/invalid = capture both seats. |
 | `RIFTBOUND_DB_PATH` | (default `ai_agent/agent_memory.db`) | No | Override the SQLite database path. Useful to write self-play data to a dedicated file (e.g. `ai_agent/selfplay.db`) instead of the live-play DB. |
@@ -58,12 +65,14 @@ Notes:
   retries, etc.). Use it to tell rate-limit fallbacks apart from validator
   rejections.
 - `agent_search.log` records searched candidate lines, search stats, and goal
-  overlay deltas. It is written only when `RIFTBOUND_LOG_INPUTS=1` and
-  `RIFTBOUND_SEARCH=on`; enable both when debugging search selection or
-  `RIFTBOUND_GOALS`.
-- The HTTP port is **not** an environment variable. The service is started with
-  `uvicorn ... --port 8765`, and the Godot client hardcodes `AGENT_PORT := 8765`
-  (`Scripts/AI/AIPlayer.gd`). Change both together if you need a different port.
+  overlay deltas. Reasoner runs also write tool traces, terminal outcomes,
+  budget status, and fallback reasons here. It is written only when
+  `RIFTBOUND_LOG_INPUTS=1` and `RIFTBOUND_SEARCH=on`; enable both when debugging
+  search selection, `RIFTBOUND_GOALS`, or `RIFTBOUND_REASONER`.
+- The Python service HTTP port is set by the `uvicorn ... --port` argument, not
+  by an agent-side environment variable. The Godot client defaults to
+  `AGENT_PORT := 8765` (`Scripts/AI/AIPlayer.gd`); change the uvicorn port and
+  Godot's `RIFTBOUND_AGENT_PORT` together if you need a different service port.
 
 ### Example
 
@@ -95,6 +104,7 @@ uvicorn ai_agent.main:app --port 8765 --reload
 |---|---|---|
 | `/decision` | POST | Main entry — receives BriefState, returns Decision |
 | `/goals` | POST | Pre-search handshake — receives BriefState, returns this turn's compiled goal overlay (empty unless `RIFTBOUND_GOALS=on`) |
+| `/reason` | POST | Phase-3 pre-search handshake — receives BriefState, scout lines, and `root_state_hash`; returns `base_search_fallback`, a compiled overlay, or a committed verified line |
 | `/health` | GET | Liveness check |
 | `/legal_moves` | GET | Current enumerated legal moves (debug) |
 | `/state` | GET | Full board state text (debug) |
@@ -108,16 +118,85 @@ uvicorn ai_agent.main:app --port 8765 --reload
 Godot (GameController)
   └─ AIPlayer.gd
        ├─ GET /health at setup: adopt server search/goals flags
-       ├─ optional TurnSearch scout + POST /goals before main search
+       ├─ optional TurnSearch scout + POST /goals or /reason before main search
+       ├─ EngineServer.gd: local /engine/simulate + /engine/search for live tools
        └─ POST /decision with BriefState and candidate lines
              │
              ▼
         FastAPI (main.py)
-             ├─ agent.py: legacy loop, line selector, goal overlay build
+             ├─ agent.py: legacy loop, line selector, goal overlay, Reasoner runner
+             ├─ reasoner.py / reasoner_context.py: ReAct loop + verified registry
+             ├─ engine_client.py / tool_budget.py: live engine calls + caps
              ├─ planner.py / strategist.py: cached per-turn LLM stages
              ├─ skills.py: read tools, simulations, scout search context
              └─ memory.py / capture.py: SQLite decision and tuning data
 ```
+
+## Search, goals, and Reasoner modes
+
+Search mode has three increasingly capable paths:
+
+1. **Base search** (`RIFTBOUND_SEARCH=on`) — Godot runs `TurnSearch`, posts the
+   candidate lines to `/decision`, and Python chooses one line or falls back to a
+   validated move. This is the reliability floor.
+2. **Goal strategist** (`RIFTBOUND_GOALS=on`) — before the main search, Godot can
+   run a cheap base-profile scout and `POST /goals`. The returned overlay biases
+   the final `TurnSearch`; `/decision` reuses the same GoalSet for server-side
+   re-ranking. This requires search mode and is disabled by argmax mode.
+3. **Phase-3 Reasoner** (`RIFTBOUND_REASONER=on`) — Godot runs the scout and
+   `POST /reason` with the current `root_state_hash`. The Reasoner uses
+   request-scoped live tools (`search_for`, `deepen`, `simulate_*`) against
+   Godot's pinned `EngineServer` state. It terminates as one of:
+   - `line`: commit a complete, engine-registered canonical line by `line_id`.
+   - `goals`: return a strict 1-4 goal overlay for the final search.
+   - `base_search_fallback`: run the normal base-profile search.
+
+Committed Reasoner lines are never raw model-authored scripts. `TurnSearch` and
+the registry provide canonical moves, `move_contexts`, `expected_pre_hashes`,
+`root_state_hash`, `complete`, and `terminal_reason`. `AIPlayer.gd` checks the
+root hash before step 0 and each step's pre-hash during replay; if the opponent
+interacts or the state diverges, the line is dropped and the agent replans from
+the live state. Budget-cutoff or incomplete lines can be investigated but are not
+committable.
+
+### Live engine tool runbook
+
+```bash
+# Terminal 1: start the Python service with search + Reasoner enabled.
+export OPENAI_API_KEY=sk-...
+export RIFTBOUND_SEARCH=on
+export RIFTBOUND_REASONER=on
+export RIFTBOUND_LOG_INPUTS=1
+uvicorn ai_agent.main:app --port 8765 --reload
+
+# Terminal 2: launch Godot normally.
+# AIPlayer starts EngineServer on 127.0.0.1:8766 by default.
+```
+
+Operational constraints:
+
+- `RIFTBOUND_REASONER` is ignored unless `RIFTBOUND_SEARCH=on` and
+  `RIFTBOUND_SEARCH_ARGMAX=off`; `/health` exposes `reasoner_enabled` so Godot
+  can mirror the server's actual mode.
+- `RIFTBOUND_ENGINE_PORT` is shared by Python (`engine_client.py`) and Godot
+  (`AIPlayer.gd` / `EngineServer.gd`). Change both environments together.
+- Set engine-side `RIFTBOUND_ENGINE_SERVER=0` only when intentionally testing the
+  Phase-1 fallback path. Live `search_for` / `deepen` calls need the server.
+- `EngineServer` operates only on a cloned, pinned decision state and runs heavy
+  `MoveSimulator` / `TurnSearch` work on a worker thread; the main loop only
+  pumps HTTP.
+- The engine pin is decision-scoped and cleared when a line commits, falls back,
+  or the `/decision` request finishes. A `/reason` call without a
+  `root_state_hash` deliberately returns `base_search_fallback`.
+
+Troubleshooting quick checks:
+
+| Symptom | Check |
+|---|---|
+| `/health` says `reasoner_enabled=false` | Confirm `RIFTBOUND_SEARCH=on`, `RIFTBOUND_REASONER=on`, and `RIFTBOUND_SEARCH_ARGMAX` is off in the Python service environment. |
+| Reasoner tool calls report engine unreachable | Confirm Godot is running, `RIFTBOUND_ENGINE_SERVER` is not falsey, and Python/Godot agree on `RIFTBOUND_ENGINE_PORT` (default `8766`). |
+| Reasoner returns `base_search_fallback` | Inspect `agent_search.log` for `fallback_reason`, budget exhaustion, terminal validation errors, or missing/changed `root_state_hash`. |
+| A committed line stops mid-turn | This is expected when pre-hashes diverge after opponent interaction; `AIPlayer.gd` drops the line and replans or reactive-searches from the live window. |
 
 ## File Structure
 
@@ -129,6 +208,10 @@ ai_agent/
   system_prompt.py     Prompt module assembly + keyword / goal vocabulary blocks
   planner.py           Cached per-turn plan producer for staged mode
   strategist.py        Cached per-turn GoalSet producer for search goals
+  reasoner.py          Phase-3 search-driving ReAct loop and terminal tools
+  reasoner_context.py  Request-local verified-line registry and telemetry state
+  tool_budget.py       Per-turn node/time budgets for live Reasoner tools
+  engine_client.py     Python HTTP client for Godot EngineServer live tools
   goal_compiler.py     GoalSet -> transient scoring-profile overlay
   skills.py            Read + helper skill implementations
   agent.py             Legacy reasoning loop, search line selector, fallbacks
@@ -211,7 +294,9 @@ Rows recorded before this feature show zero tokens.
 ## Tuning dataset (search mode)
 
 When `RIFTBOUND_SEARCH` is on, every engine-searched decision is captured for
-later score tuning (see `docs/Statistical_Analysis_Storage.md`):
+later score tuning (see `docs/Statistical_Analysis_Storage.md`). Post-game
+analyst design (counterfactual missed wins / later goals, hypothesis loop):
+`docs/LLM_Data_Analysis_Loop.md`.
 
 - `weight_versions` — the active `Data/AI/scoring_profile.json`, hashed + tagged
   with the current git SHA, recorded on server start.
@@ -342,6 +427,9 @@ Engine-side env vars consumed by `Scripts/AI/AIPlayer.gd`:
 | `RIFTBOUND_AI_THINK_DELAY` | `0.5` | Per-decision delay (seconds); set `0` for bulk runs. |
 | `RIFTBOUND_SEARCH` | `off` | Pre-handshake search default (the server's `/health` is authoritative). |
 | `RIFTBOUND_GOALS_SCOUT` | `on` | When goals are enabled, run a cheap base-profile scout search before `POST /goals` and send the top lines so the Strategist grounds goals in real candidate lines. Set to `0`, `false`, `no`, or `off` to disable the scout and use a snapshot-only strategist. |
+| `RIFTBOUND_SELFPLAY_CAPTURE` | (unset) | When set (a log path, or `1`/`on` for the default `res://out/selfplay_capture.jsonl`), run fully offline: compute argmax locally, skip the server, and append every server-bound payload to the JSONL log for `import_selfplay_logs.py`. Forces search mode on. |
+| `RIFTBOUND_ENGINE_SERVER` | `on` | Starts the local Godot `EngineServer` for Python live tools unless set to `0`, `false`, `no`, or `off`. Offline capture mode never starts it. |
+| `RIFTBOUND_ENGINE_PORT` | `8766` | Port used by Godot's `EngineServer`; must match Python's `RIFTBOUND_ENGINE_PORT`. |
 | `RIFTBOUND_SELFPLAY_CAPTURE` | (unset) | When set (a log path, or `1`/`on` for the default `res://out/selfplay_capture.jsonl`), run fully offline: compute argmax locally, skip the server, and append every server-bound payload to the JSONL log for `import_selfplay_logs.py`. Forces search mode on. |
 
 ## AI Evaluation
