@@ -29,13 +29,9 @@ static func compute_play_cost(
 			else:
 				energy = maxi(0, energy - int(ep.get("amount", 0)))
 
-	# Legion via ability condition
-	for ab in card.definition.abilities:
-		var cond = ab.get("condition", {})
-		if cond is Dictionary and cond.get("type", "") == "legion":
-			if ps.cards_played_this_turn > 0:
-				var ep = ab.get("effect_params", {})
-				energy = maxi(0, energy - int(ep.get("amount", 2)))
+	# Legion cost reductions are applied above via ability condition + cost_reduction.
+	# Do not apply a second hard-coded Legion pass (that double-discounted cards like
+	# Noxus Hopeful: 4 → 0 instead of 4 → 2).
 
 	if use_accelerate and card.has_keyword("accelerate"):
 		energy += 1
