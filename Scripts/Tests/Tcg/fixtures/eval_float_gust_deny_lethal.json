@@ -1,0 +1,36 @@
+{
+  "first_player": 0,
+  "turn_number": 6,
+  "phase": "MAIN",
+  "state": "NEUTRAL_OPEN",
+  "battlefields": ["obelisk-of-power", "targons-peak"],
+  "battlefield_control": [0, -1],
+  "players": [
+    {
+      "score": 4,
+      "pool": {"energy": 2, "power": {}},
+      "hand": ["gust", "chemtech-enforcer"],
+      "base": [],
+      "runes": [
+        {"id": "chaos-rune", "exhausted": false},
+        {"id": "chaos-rune", "exhausted": false}
+      ],
+      "battlefield-a": [
+        {"id": "blazing-scorcher", "owner": 0, "exhausted": false}
+      ],
+      "deck_size": 10,
+      "rune_deck_size": 10
+    },
+    {
+      "score": 6,
+      "pool": {"energy": 0, "power": {}},
+      "hand": [],
+      "base": [
+        {"id": "thousand-tailed-watcher", "exhausted": false},
+        {"id": "stalwart-poro", "exhausted": false}
+      ],
+      "deck_size": 10,
+      "rune_deck_size": 12
+    }
+  ]
+}

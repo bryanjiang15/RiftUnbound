@@ -16,6 +16,7 @@ const MasterYiDeckTests = preload("res://Scripts/Tests/Tcg/suites/MasterYiDeckTe
 const RuleSimulationTests = preload("res://Scripts/Tests/Tcg/suites/RuleSimulationTests.gd")
 const RuleSearchTests = preload("res://Scripts/Tests/Tcg/suites/RuleSearchTests.gd")
 const RuleReasonerTests = preload("res://Scripts/Tests/Tcg/suites/RuleReasonerTests.gd")
+const RuleEvaluationTests = preload("res://Scripts/Tests/Tcg/suites/RuleEvaluationTests.gd")
 
 const SUITE_ORDER: Array[String] = [
 	"RuleSetup",
@@ -33,6 +34,7 @@ const SUITE_ORDER: Array[String] = [
 	"RuleSimulation",
 	"RuleSearch",
 	"RuleReasoner",
+	"RuleEvaluation",
 ]
 
 const SUITES := {
@@ -51,6 +53,7 @@ const SUITES := {
 	"RuleSimulation": RuleSimulationTests,
 	"RuleSearch": RuleSearchTests,
 	"RuleReasoner": RuleReasonerTests,
+	"RuleEvaluation": RuleEvaluationTests,
 }
 
 

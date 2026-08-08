@@ -1,0 +1,68 @@
+{
+  "schema_version": "1.0",
+  "case_id": "float-gust-deny-lethal",
+  "title": "Float Gust energy to stop opponent lethal",
+  "summary": "You hold a big unit on BF-A; opponent at 6 has watcher + poro in base and can contest-kill then double-conquer for the win. Keep 1 energy for Gust.",
+  "objective": "End turn floating energy so Gust can bounce the small unit when they try to take the second battlefield. Do not tap out on Chemtech Enforcer.",
+  "desired_result": "Chosen opener is end turn with Gust still in hand and energy available.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_float_gust_deny_lethal.json",
+  "fixture_hash": "379bd09cab8a7cb4",
+  "acting_seat": 0,
+  "decision_type": "main_phase",
+  "tags": [
+    "decision_v2",
+    "resources",
+    "reaction",
+    "trap",
+    "agent_decision"
+  ],
+  "split": "dev",
+  "eval_lane": "agent",
+  "origin": "hand_built",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "difficulty": "hard",
+  "metamorphic_family": "resource-react",
+  "hard_invariants": [
+    {
+      "kind": "chosen_line_complete",
+      "params": {},
+      "description": "Complete line"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "command_equals",
+      "params": {
+        "command": "end turn"
+      },
+      "description": "Float energy for Gust against next-turn lethal",
+      "label_tier": "gold"
+    }
+  ],
+  "trap_outcomes": [
+    {
+      "kind": "command_prefix",
+      "params": {
+        "prefix": "play chemtech-enforcer"
+      },
+      "description": "Tap out on a develop and risk discarding Gust while opponent is lethal",
+      "label_tier": "gold"
+    }
+  ],
+  "exclusions": "Never empty the pool on Chemtech while Gust is the only answer to opponent's 6-score double-conquer lethal.",
+  "setup_notes": "P0: blazing-scorcher (5) on BF-A; hand gust + chemtech; energy 2. P1 score 6: thousand-tailed-watcher (7) + stalwart-poro (2) ready in base. BF-B empty. Next turn P1 can kill scorcher with watcher then conquer B with poro for 8 unless Gust bounces the poro.",
+  "provenance": {
+    "source_fixture": "eval_float_gust_deny_lethal.json",
+    "notes": "Resource-react hold twin: float Gust vs lethal double-conquer",
+    "created_by": "decision-v2"
+  },
+  "search_budget": {
+    "node_budget": 120,
+    "time_budget_ms": 1500,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  }
+}

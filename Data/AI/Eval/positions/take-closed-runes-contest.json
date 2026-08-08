@@ -1,0 +1,82 @@
+{
+  "schema_version": "1.0",
+  "case_id": "take-closed-runes-contest",
+  "title": "Take: contest A when opponent runes are down",
+  "summary": "Same board as the open-rune hold twin, but opponent runes are exhausted. Contest A (3 > 2) instead of only taking empty B or passing.",
+  "objective": "Move Flame Chompers onto battlefield-a. Empty B is available but the favorable contest on A is the correct line.",
+  "desired_result": "Chosen line contests battlefield-a.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_take_closed_runes_contest.json",
+  "fixture_hash": "09e7a8930bfe11d4",
+  "acting_seat": 0,
+  "decision_type": "main_phase",
+  "tags": [
+    "decision_v2",
+    "open_rune",
+    "reaction",
+    "battlefield",
+    "trap",
+    "agent_decision"
+  ],
+  "split": "dev",
+  "eval_lane": "agent",
+  "origin": "hand_built",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "difficulty": "hard",
+  "metamorphic_family": "open-rune-react",
+  "hard_invariants": [
+    {
+      "kind": "root_hash_matched",
+      "params": {},
+      "description": "Decision pinned to fixture root"
+    },
+    {
+      "kind": "has_candidates",
+      "params": {},
+      "description": "Search returned candidates"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "line_contains",
+      "params": {
+        "substring": "battlefield-a"
+      },
+      "description": "Contest A while Discipline cannot be paid",
+      "label_tier": "gold"
+    }
+  ],
+  "trap_outcomes": [
+    {
+      "kind": "command_equals",
+      "params": {
+        "command": "end turn"
+      },
+      "description": "Idle pass when a favorable contest exists",
+      "label_tier": "gold"
+    },
+    {
+      "kind": "line_contains",
+      "params": {
+        "substring": "battlefield-b"
+      },
+      "description": "Take empty B instead of the safe contest on A",
+      "label_tier": "gold"
+    }
+  ],
+  "exclusions": "Never decline battlefield-a when opponent runes are exhausted. Prefer the favorable contest over only taking empty B or passing.",
+  "setup_notes": "Same board as hold-open-rune-discipline (poro on A, BF-B empty), but P1 calm runes are exhausted (pool 0). Discipline is in hand but unpayable. 3 > 2 wins combat on A.",
+  "provenance": {
+    "source_fixture": "eval_take_closed_runes_contest.json",
+    "notes": "Open-rune take twin: closed runes flip contest A from trap to gold",
+    "created_by": "decision-v2"
+  },
+  "search_budget": {
+    "node_budget": 200,
+    "time_budget_ms": 2000,
+    "beam_width": 8,
+    "max_depth": 10,
+    "top_n": 8,
+    "mode": "main"
+  }
+}

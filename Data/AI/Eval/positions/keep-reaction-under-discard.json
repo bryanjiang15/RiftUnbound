@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.0",
+  "case_id": "keep-reaction-under-discard",
+  "title": "Keep reaction under forced discard",
+  "summary": "Forced discard should keep gust and discard fading-memories.",
+  "objective": "Preserve playable reaction under discard pressure.",
+  "desired_result": "choose fading-memories; gust remains in hand.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_greedy_discard.json",
+  "fixture_hash": "7730f5ae28182b69",
+  "acting_seat": 0,
+  "decision_type": "pending_choice",
+  "tags": [
+    "agent_smoke",
+    "preference",
+    "targets",
+    "resources",
+    "blocking",
+    "agent_decision"
+  ],
+  "split": "blocking",
+  "eval_lane": "agent",
+  "origin": "inline_test",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "difficulty": "easy",
+  "hard_invariants": [
+    {
+      "kind": "legal_choice",
+      "params": {},
+      "description": "Choice must be legal"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "discard_card",
+      "params": {
+        "card_id": "fading-memories"
+      },
+      "description": "Discard do-nothing card; keep gust",
+      "label_tier": "gold"
+    }
+  ],
+  "search_budget": {
+    "node_budget": 80,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  },
+  "engine_mode": "resolve_discard",
+  "exclusions": "Never discard gust when fading-memories is a legal choice.",
+  "setup_notes": "Pending choose_discard with gust and fading-memories; one ready fury rune.",
+  "metamorphic_family": "",
+  "contested_window": false,
+  "provenance": {
+    "source_test": "RuleSearchTests._test_discard_picks_best_card",
+    "source_fixture": "eval_greedy_discard.json",
+    "notes": "Agent-lane twin of greedy-discard-keeps-reaction for decision catalog v1",
+    "created_by": "decision_catalog_v1"
+  }
+}

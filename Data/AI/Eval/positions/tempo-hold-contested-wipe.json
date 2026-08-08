@@ -1,0 +1,82 @@
+{
+  "schema_version": "1.0",
+  "case_id": "tempo-hold-contested-wipe",
+  "title": "Hold: refuse overcommit into wipe range",
+  "summary": "Opponent holds BF-A with 3 might and a 7-might unit in base; do not dump buff + reinforce into A.",
+  "objective": "Avoid spending resources to contest battlefield-a when opponent can wipe the pile next turn. Develop at base or take empty battlefield-b while keeping base presence.",
+  "desired_result": "Chosen line develops raging-soul at base and/or contests battlefield-b; never commits to battlefield-a.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_tempo_hold_contested_wipe.json",
+  "fixture_hash": "64b6ca018a4281b9",
+  "acting_seat": 0,
+  "decision_type": "main_phase",
+  "tags": [
+    "decision_v2",
+    "tempo_axis",
+    "battlefield",
+    "overcommit",
+    "trap",
+    "agent_decision"
+  ],
+  "split": "dev",
+  "eval_lane": "agent",
+  "origin": "hand_built",
+  "fidelity_status": "authoritative",
+  "label_tier": "gold",
+  "difficulty": "hard",
+  "metamorphic_family": "tempo-contest",
+  "hard_invariants": [
+    {
+      "kind": "root_hash_matched",
+      "params": {},
+      "description": "Decision pinned to fixture root"
+    },
+    {
+      "kind": "has_candidates",
+      "params": {},
+      "description": "Search returned candidates"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "line_contains",
+      "params": {
+        "substring": "play raging-soul"
+      },
+      "description": "Develop the 4-might unit (base play omits destination)",
+      "label_tier": "gold"
+    },
+    {
+      "kind": "line_contains",
+      "params": {
+        "substring": "battlefield-b"
+      },
+      "description": "Contest empty battlefield-b instead of A",
+      "label_tier": "gold"
+    }
+  ],
+  "trap_outcomes": [
+    {
+      "kind": "line_contains",
+      "params": {
+        "substring": "battlefield-a"
+      },
+      "description": "Overcommit into contested A (buff/move/reinforce) into opponent wipe range",
+      "label_tier": "gold"
+    }
+  ],
+  "exclusions": "Never move/play/buff into battlefield-a when opponent can answer with thousand-tailed-watcher from base.",
+  "setup_notes": "P0: chemtech-enforcer (2) ready at base; hand discipline (+2) + raging-soul (4); energy 6. P1: flame-chompers (3) on BF-A, thousand-tailed-watcher (7) ready at base. BF-B empty.",
+  "provenance": {
+    "source_fixture": "eval_tempo_hold_contested_wipe.json",
+    "notes": "Tempo-contest hold twin: 2+buff+4 into A loses to 7-might wipe next turn",
+    "created_by": "decision-v2"
+  },
+  "search_budget": {
+    "node_budget": 200,
+    "time_budget_ms": 2000,
+    "beam_width": 8,
+    "max_depth": 10,
+    "top_n": 8,
+    "mode": "main"
+  }
+}

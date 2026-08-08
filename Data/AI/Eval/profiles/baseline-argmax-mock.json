@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "profile_id": "baseline-argmax-mock",
+  "title": "Mock argmax (offline CI)",
+  "architecture": "search_argmax",
+  "adapter": "mock",
+  "description": "Deterministic offline stand-in for infrastructure tests. Does not invoke Godot or an LLM.",
+  "env": {
+    "RIFTBOUND_SEARCH": "on",
+    "RIFTBOUND_SEARCH_ARGMAX": "on",
+    "RIFTBOUND_REASONER": "off",
+    "RIFTBOUND_GOALS": "off"
+  },
+  "models": {},
+  "budgets": {
+    "node_budget": 80,
+    "time_budget_ms": 250
+  },
+  "components": ["turn_search", "scoring_profile", "argmax_selector"],
+  "ablations": [],
+  "equal_compute": {
+    "max_model_calls": 0,
+    "max_engine_nodes": 80
+  }
+}

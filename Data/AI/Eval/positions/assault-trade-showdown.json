@@ -1,0 +1,55 @@
+{
+  "case_id": "assault-trade-showdown",
+  "title": "Assault attacker wins equal trade",
+  "summary": "Equal might with assault: attacker should survive the trade and conquer.",
+  "objective": "Assign combat correctly under assault.",
+  "desired_result": "Attacker remains; defender dies; battlefield controlled by attacker.",
+  "fixture_path": "res://Scripts/Tests/Tcg/fixtures/eval_assault_trade.json",
+  "decision_type": "showdown_focus",
+  "tags": [
+    "combat",
+    "assault",
+    "dev",
+    "agent_decision"
+  ],
+  "split": "dev",
+  "difficulty": "medium",
+  "origin": "inline_test",
+  "contested_window": true,
+  "fidelity_status": "fidelity_limited",
+  "hard_invariants": [
+    {
+      "kind": "combat_window",
+      "params": {},
+      "description": "Showdown open"
+    }
+  ],
+  "acceptable_outcomes": [
+    {
+      "kind": "attacker_survives_trade",
+      "params": {},
+      "description": "Assault attacker wins trade",
+      "label_tier": "gold"
+    }
+  ],
+  "provenance": {
+    "source_test": "RuleCombatTests._test_assault_attacker_survives_defender_dies",
+    "source_fixture": "eval_assault_trade.json"
+  },
+  "exclusions": "Manual combat assignment simplified in some simulation paths.",
+  "fixture_hash": "c151ccb63c7465c9",
+  "schema_version": "1.0",
+  "acting_seat": 0,
+  "label_tier": "gold",
+  "search_budget": {
+    "node_budget": 80,
+    "time_budget_ms": 1000,
+    "beam_width": 8,
+    "max_depth": 8,
+    "top_n": 8,
+    "mode": "main"
+  },
+  "setup_notes": "",
+  "metamorphic_family": "",
+  "eval_lane": "agent"
+}

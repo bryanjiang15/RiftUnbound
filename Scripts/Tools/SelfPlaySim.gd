@@ -40,6 +40,15 @@ var _turn_cap: int = 200
 # so win-rate gates a tuning proposal.
 var _p1_profile: String = "res://Data/AI/scoring_profile.json"
 var _p2_profile: String = "res://Data/AI/scoring_profile.json"
+# Evaluation / paired-arena extensions. When --pair-mode is set, SelfPlaySim runs
+# exactly one game with explicit seat assignment and first-player override.
+var _pair_mode: bool = false
+var _first_player_override: int = -1
+var _json_results_path: String = ""
+var _game_session_id_override: String = ""
+var _candidate_seat: int = 0
+var _p1_agent_url: String = ""
+var _p2_agent_url: String = ""
 
 # Per-game node state (members so the deferred driver can reach them safely
 # without capturing them in a signal-emitted lambda).
@@ -96,6 +105,33 @@ func _parse_args(args: PackedStringArray) -> void:
 				i += 1
 				if i < args.size():
 					_p2_profile = args[i]
+			"--pair-mode":
+				_pair_mode = true
+				_games = 1
+			"--first-player":
+				i += 1
+				if i < args.size():
+					_first_player_override = int(args[i])
+			"--json-results":
+				i += 1
+				if i < args.size():
+					_json_results_path = args[i]
+			"--game-session-id":
+				i += 1
+				if i < args.size():
+					_game_session_id_override = args[i]
+			"--candidate-seat":
+				i += 1
+				if i < args.size():
+					_candidate_seat = int(args[i])
+			"--p1-agent-url":
+				i += 1
+				if i < args.size():
+					_p1_agent_url = args[i]
+			"--p2-agent-url":
+				i += 1
+				if i < args.size():
+					_p2_agent_url = args[i]
 		i += 1
 
 
@@ -151,6 +187,7 @@ func _run() -> void:
 		else:
 			unfinished += 1
 		_print_progress(g + 1, wins, unfinished, s, finished, winner, int(result["turns"]))
+		_append_json_result(s, result)
 	print("")  # end the in-place progress line
 	_print_summary(wins, unfinished)
 	_print_problem_summary()
@@ -285,16 +322,26 @@ func _run_one_game(s: int) -> Dictionary:
 	await process_frame
 	_ai0.setup(_controller, 0, _p1_profile)
 	_ai1.setup(_controller, 1, _p2_profile)
+	if _p1_agent_url != "":
+		_ai0.set_agent_base_url(_p1_agent_url)
+	if _p2_agent_url != "":
+		_ai1.set_agent_base_url(_p2_agent_url)
 	await process_frame  # let setup's HTTPRequest children + health probe settle
 
 	_driving = false
 	_controller.board_updated.connect(_on_board_updated_drive)
 	_controller.game_log_message.connect(_on_game_log_for_problems)
 
+	var first_player := s % 2
+	if _first_player_override >= 0:
+		first_player = _first_player_override
+	var session_id := "selfplay-%d-%d" % [_seed_base, s]
+	if _game_session_id_override != "":
+		session_id = _game_session_id_override
 	var cfg := {
 		"seed": s,
-		"first_player": s % 2,
-		"game_session_id": "selfplay-%d-%d" % [_seed_base, s],
+		"first_player": first_player,
+		"game_session_id": session_id,
 	}
 	if _p1_deck != "":
 		cfg["p1_deck"] = _p1_deck
@@ -318,6 +365,12 @@ func _run_one_game(s: int) -> Dictionary:
 	var finished := _controller.gs.game_over
 	var winner := _controller.gs.winner_index if finished else -1
 	var turns := _controller.gs.turn_number
+	var scores := [0, 0]
+	if _controller.gs.players.size() >= 2:
+		scores = [_controller.gs.players[0].score, _controller.gs.players[1].score]
+	var first_player := s % 2
+	if _first_player_override >= 0:
+		first_player = _first_player_override
 	# Let the fire-and-forget /game_over POST flush before tearing down.
 	await create_timer(1.5).timeout
 
@@ -329,7 +382,23 @@ func _run_one_game(s: int) -> Dictionary:
 	_ai0 = null
 	_ai1 = null
 	_driving = false
-	return {"finished": finished, "winner": winner, "turns": turns}
+	var candidate_won := false
+	if finished and winner >= 0:
+		candidate_won = winner == _candidate_seat
+	return {
+		"finished": finished,
+		"winner": winner,
+		"turns": turns,
+		"scores": scores,
+		"first_player_index": first_player,
+		"candidate_seat": _candidate_seat,
+		"candidate_won": candidate_won,
+		"game_session_id": _game_session_id_override if _game_session_id_override != "" else ("selfplay-%d-%d" % [_seed_base, s]),
+		"p1_profile": _p1_profile,
+		"p2_profile": _p2_profile,
+		"p1_deck": _p1_deck,
+		"p2_deck": _p2_deck,
+	}
 
 
 func _on_board_updated_drive() -> void:
@@ -372,3 +441,33 @@ func _pick_actor(gs):
 
 func _any_inflight() -> bool:
 	return (_ai0 != null and _ai0._waiting_for_http) or (_ai1 != null and _ai1._waiting_for_http)
+
+
+func _append_json_result(seed_used: int, result: Dictionary) -> void:
+	if _json_results_path == "":
+		return
+	var payload := {
+		"seed": seed_used,
+		"finished": bool(result.get("finished", false)),
+		"winner_index": int(result.get("winner", -1)),
+		"turns": int(result.get("turns", 0)),
+		"scores": result.get("scores", [0, 0]),
+		"first_player_index": int(result.get("first_player_index", seed_used % 2)),
+		"candidate_seat": int(result.get("candidate_seat", _candidate_seat)),
+		"candidate_won": bool(result.get("candidate_won", false)),
+		"game_session_id": str(result.get("game_session_id", "")),
+		"p1_profile": str(result.get("p1_profile", _p1_profile)),
+		"p2_profile": str(result.get("p2_profile", _p2_profile)),
+		"p1_deck": str(result.get("p1_deck", _p1_deck)),
+		"p2_deck": str(result.get("p2_deck", _p2_deck)),
+		"pair_mode": _pair_mode,
+	}
+	var file := FileAccess.open(_json_results_path, FileAccess.READ_WRITE)
+	if file == null:
+		file = FileAccess.open(_json_results_path, FileAccess.WRITE)
+	if file == null:
+		printerr("[SELFPLAY] failed to open json results path: %s" % _json_results_path)
+		return
+	file.seek_end()
+	file.store_line(JSON.stringify(payload))
+	file.close()

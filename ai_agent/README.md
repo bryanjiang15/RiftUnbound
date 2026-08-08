@@ -427,6 +427,33 @@ Engine-side env vars consumed by `Scripts/AI/AIPlayer.gd`:
 | `RIFTBOUND_AI_THINK_DELAY` | `0.5` | Per-decision delay (seconds); set `0` for bulk runs. |
 | `RIFTBOUND_SEARCH` | `off` | Pre-handshake search default (the server's `/health` is authoritative). |
 | `RIFTBOUND_GOALS_SCOUT` | `on` | When goals are enabled, run a cheap base-profile scout search before `POST /goals` and send the top lines so the Strategist grounds goals in real candidate lines. Set to `0`, `false`, `no`, or `off` to disable the scout and use a snapshot-only strategist. |
+| `RIFTBOUND_SELFPLAY_CAPTURE` | (unset) | When set (a log path, or `1`/`on` for the default `res://out/selfplay_capture.jsonl`), run fully offline: compute argmax locally, skip the server, and append every server-bound payload to the JSONL log for `import_selfplay_logs.py`. Forces search mode on. |
 | `RIFTBOUND_ENGINE_SERVER` | `on` | Starts the local Godot `EngineServer` for Python live tools unless set to `0`, `false`, `no`, or `off`. Offline capture mode never starts it. |
 | `RIFTBOUND_ENGINE_PORT` | `8766` | Port used by Godot's `EngineServer`; must match Python's `RIFTBOUND_ENGINE_PORT`. |
 | `RIFTBOUND_SELFPLAY_CAPTURE` | (unset) | When set (a log path, or `1`/`on` for the default `res://out/selfplay_capture.jsonl`), run fully offline: compute argmax locally, skip the server, and append every server-bound payload to the JSONL log for `import_selfplay_logs.py`. Forces search mode on. |
+
+## AI Evaluation
+
+Frozen-position evaluation lives under `Data/AI/Eval/` and `ai_agent/eval/`.
+
+```bash
+# Validate the 22 bootstrap positions and regenerate the catalog
+python -m ai_agent.eval validate-corpus
+python -m ai_agent.eval render-catalog
+
+# Deterministic blocking suite (no API key)
+python -m ai_agent.eval run --manifest Data/AI/Eval/manifests/blocking.json
+
+# Weekly positions + robustness transforms
+python -m ai_agent.eval run --manifest Data/AI/Eval/manifests/weekly.json
+
+# Godot fixture host / RuleEvaluation suite
+./Scripts/run_tcg_tests.sh RuleEvaluation
+./Scripts/run_eval_position.sh --fixture res://Scripts/Tests/Tcg/fixtures/search_winning_line.json --mode search
+```
+
+Human-readable docs:
+- `ai_agent/docs/AI_Evaluation_Position_Catalog.md` — every position, objective, desired result
+- `ai_agent/docs/AI_Evaluation_Operations.md` — authoring, profiles, weekly/release ops
+
+Default eval adapters are mocked for CI. Live LLM and full paired arena pilots are opt-in.

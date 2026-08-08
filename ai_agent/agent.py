@@ -79,6 +79,10 @@ TRANSIENT_API_ERRORS = (
 MAX_TRANSIENT_RETRIES = int(os.environ.get("RIFTBOUND_TRANSIENT_RETRIES", "3"))
 # Base seconds for exponential backoff between transient retries.
 TRANSIENT_BACKOFF_BASE_S = float(os.environ.get("RIFTBOUND_TRANSIENT_BACKOFF_S", "1.0"))
+# Ceiling on a single backoff wait. Live play keeps this short so a retry never
+# outlives Godot's client-side decision timeout; batch eval runs raise it so a
+# provider's own Retry-After can be honored instead of truncated.
+TRANSIENT_BACKOFF_MAX_S = float(os.environ.get("RIFTBOUND_TRANSIENT_BACKOFF_MAX_S", "10.0"))
 
 _INPUT_LOG_PATH = Path(__file__).resolve().parent / "agent_inputs.log"
 _PLAN_LOG_PATH = Path(__file__).resolve().parent / "agent_plans.log"
@@ -266,10 +270,10 @@ def _transient_retry_delay(exc: Exception, attempt: int) -> float:
         value = retry_after.get("retry-after")
         if value:
             try:
-                return min(float(value), 10.0)
+                return min(float(value), TRANSIENT_BACKOFF_MAX_S)
             except (TypeError, ValueError):
                 pass
-    return TRANSIENT_BACKOFF_BASE_S * (2 ** attempt)
+    return min(TRANSIENT_BACKOFF_BASE_S * (2 ** attempt), TRANSIENT_BACKOFF_MAX_S)
 
 
 # ── Tool definitions (OpenAI tool-call format) ────────────────────────────────
