@@ -1,0 +1,65 @@
+{
+  "manifest": {
+    "schema_version": "1.0",
+    "run_id": "engine-contract-smoke",
+    "description": "Godot engine accuracy/contracts only (TurnSearch, commits, rejects, seeds). No LLM.",
+    "case_globs": [
+      "*.json"
+    ],
+    "splits": [
+      "blocking",
+      "dev"
+    ],
+    "profiles": [
+      "baseline-argmax"
+    ],
+    "repeats": 1,
+    "layers": [
+      "contract",
+      "validity",
+      "gold",
+      "trajectory",
+      "cost"
+    ],
+    "transforms": [
+      "identity"
+    ],
+    "include_fidelity_limited": true,
+    "eval_lanes": [
+      "engine"
+    ],
+    "mode": "engine_backed",
+    "throttle_ms": 0
+  },
+  "git_sha": "962e811",
+  "case_count": 12,
+  "profile_ids": [
+    "baseline-argmax"
+  ],
+  "finished_at": "2026-08-05T18:24:44.845837+00:00",
+  "summary": {
+    "run_id": "engine-contract-smoke",
+    "trials": 12,
+    "by_profile": {
+      "baseline-argmax": {
+        "n": 12,
+        "passed": 12,
+        "errors": 0,
+        "scores": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    }
+  }
+}

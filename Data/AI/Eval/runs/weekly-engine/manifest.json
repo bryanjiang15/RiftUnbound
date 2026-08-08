@@ -1,0 +1,101 @@
+{
+  "manifest": {
+    "schema_version": "1.0",
+    "run_id": "weekly-engine",
+    "description": "Weekly engine-contract suite (Godot argmax, metamorphic transforms, no LLM).",
+    "case_globs": [
+      "*.json"
+    ],
+    "splits": [
+      "blocking",
+      "dev"
+    ],
+    "profiles": [
+      "baseline-argmax"
+    ],
+    "repeats": 1,
+    "layers": [
+      "contract",
+      "validity",
+      "gold",
+      "silver",
+      "trajectory",
+      "cost"
+    ],
+    "transforms": [
+      "identity",
+      "reorder_hand",
+      "reorder_base_units",
+      "swap_battlefield_ids"
+    ],
+    "include_fidelity_limited": false,
+    "eval_lanes": [
+      "engine"
+    ],
+    "mode": "engine_backed",
+    "throttle_ms": 0
+  },
+  "git_sha": "962e811",
+  "case_count": 11,
+  "profile_ids": [
+    "baseline-argmax"
+  ],
+  "finished_at": "2026-08-05T18:25:29.290205+00:00",
+  "summary": {
+    "run_id": "weekly-engine",
+    "trials": 44,
+    "by_profile": {
+      "baseline-argmax": {
+        "n": 44,
+        "passed": 44,
+        "errors": 0,
+        "scores": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    }
+  }
+}

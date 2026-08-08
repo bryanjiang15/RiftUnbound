@@ -1,0 +1,62 @@
+{
+  "manifest": {
+    "schema_version": "1.0",
+    "run_id": "blocking-smoke",
+    "description": "Offline plumbing smoke across all blocking cases (mock adapter). Not a quality gate.",
+    "case_globs": [
+      "*.json"
+    ],
+    "splits": [
+      "blocking"
+    ],
+    "profiles": [
+      "baseline-argmax-mock"
+    ],
+    "repeats": 1,
+    "layers": [
+      "contract",
+      "validity",
+      "gold",
+      "trajectory",
+      "cost"
+    ],
+    "transforms": [
+      "identity"
+    ],
+    "include_fidelity_limited": false,
+    "eval_lanes": [],
+    "mode": "agent_only",
+    "throttle_ms": 0
+  },
+  "git_sha": "962e811",
+  "case_count": 12,
+  "profile_ids": [
+    "baseline-argmax-mock"
+  ],
+  "finished_at": "2026-08-05T18:25:39.335374+00:00",
+  "summary": {
+    "run_id": "blocking-smoke",
+    "trials": 12,
+    "by_profile": {
+      "baseline-argmax-mock": {
+        "n": 12,
+        "passed": 12,
+        "errors": 0,
+        "scores": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    }
+  }
+}

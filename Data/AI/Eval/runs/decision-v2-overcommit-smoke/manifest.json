@@ -1,0 +1,95 @@
+{
+  "manifest": {
+    "schema_version": "1.0",
+    "run_id": "decision-v2-overcommit-smoke",
+    "description": "Single-case argmax smoke for refuse-overcommit-contested-bf",
+    "case_globs": [
+      "refuse-overcommit-contested-bf.json"
+    ],
+    "splits": [
+      "dev"
+    ],
+    "profiles": [
+      "baseline-argmax"
+    ],
+    "repeats": 1,
+    "layers": [
+      "contract",
+      "validity",
+      "gold",
+      "trajectory",
+      "cost"
+    ],
+    "transforms": [
+      "identity"
+    ],
+    "include_fidelity_limited": false,
+    "eval_lanes": [
+      "agent"
+    ],
+    "mode": "engine_backed",
+    "throttle_ms": 0
+  },
+  "git_sha": "962e811",
+  "case_count": 1,
+  "profile_ids": [
+    "baseline-argmax"
+  ],
+  "finished_at": "2026-08-06T19:59:41.318874+00:00",
+  "summary": {
+    "run_id": "decision-v2-overcommit-smoke",
+    "trials": 1,
+    "by_profile": {
+      "baseline-argmax": {
+        "n": 1,
+        "passed": 0,
+        "errors": 0,
+        "scores": [
+          0.75
+        ]
+      }
+    },
+    "metrics": {
+      "overall": {
+        "trials": 1,
+        "hard_gold_pass_rate": 0.0,
+        "hard_gold_n": 1,
+        "hard_gold_pass": 0,
+        "easy_gold_pass_rate": null,
+        "easy_gold_n": 0,
+        "easy_gold_pass": 0,
+        "trap_rate": 1.0,
+        "trap_n": 1,
+        "trap_hits": 1,
+        "validity_fail_rate": 0.0,
+        "timeout_rate": 0.0,
+        "trajectory_warn_rate": 0.0,
+        "mean_latency_ms": 1595.0,
+        "p95_latency_ms": 1595.0,
+        "mean_model_calls": 0.0,
+        "mean_prompt_tokens": 0.0
+      },
+      "by_profile": {
+        "baseline-argmax": {
+          "trials": 1,
+          "hard_gold_pass_rate": 0.0,
+          "hard_gold_n": 1,
+          "hard_gold_pass": 0,
+          "easy_gold_pass_rate": null,
+          "easy_gold_n": 0,
+          "easy_gold_pass": 0,
+          "trap_rate": 1.0,
+          "trap_n": 1,
+          "trap_hits": 1,
+          "validity_fail_rate": 0.0,
+          "timeout_rate": 0.0,
+          "trajectory_warn_rate": 0.0,
+          "mean_latency_ms": 1595.0,
+          "p95_latency_ms": 1595.0,
+          "mean_model_calls": 0.0,
+          "mean_prompt_tokens": 0.0
+        }
+      }
+    }
+  }
+}

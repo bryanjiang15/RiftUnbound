@@ -1,0 +1,142 @@
+{
+  "manifest": {
+    "schema_version": "1.0",
+    "run_id": "decision-v2",
+    "description": "Contested decision-v2 agent catalog (traps + hard gold). Default baseline-argmax; swap profiles to reasoner-default for live LLM.",
+    "case_globs": [
+      "refuse-vanity-midpoint.json",
+      "close-from-six-double.json",
+      "float-react-energy.json",
+      "continue-two-point-or-bust.json",
+      "tempo-*.json"
+    ],
+    "splits": [
+      "blocking",
+      "dev"
+    ],
+    "profiles": [
+      "baseline-argmax",
+      "reasoner-default"
+    ],
+    "repeats": 1,
+    "layers": [
+      "contract",
+      "validity",
+      "gold",
+      "silver",
+      "trajectory",
+      "cost"
+    ],
+    "transforms": [
+      "identity"
+    ],
+    "include_fidelity_limited": false,
+    "eval_lanes": [
+      "agent"
+    ],
+    "mode": "engine_backed",
+    "throttle_ms": 0
+  },
+  "git_sha": "962e811",
+  "case_count": 7,
+  "profile_ids": [
+    "baseline-argmax",
+    "reasoner-default"
+  ],
+  "finished_at": "2026-08-07T13:31:52.391396+00:00",
+  "summary": {
+    "run_id": "decision-v2",
+    "trials": 14,
+    "by_profile": {
+      "baseline-argmax": {
+        "n": 7,
+        "passed": 4,
+        "errors": 0,
+        "scores": [
+          1.0,
+          1.0,
+          0.75,
+          1.0,
+          0.75,
+          0.75,
+          1.0
+        ]
+      },
+      "reasoner-default": {
+        "n": 7,
+        "passed": 4,
+        "errors": 0,
+        "scores": [
+          1.0,
+          1.0,
+          0.75,
+          1.0,
+          0.75,
+          0.75,
+          1.0
+        ]
+      }
+    },
+    "metrics": {
+      "overall": {
+        "trials": 14,
+        "hard_gold_pass_rate": 0.5714285714285714,
+        "hard_gold_n": 14,
+        "hard_gold_pass": 8,
+        "easy_gold_pass_rate": null,
+        "easy_gold_n": 0,
+        "easy_gold_pass": 0,
+        "trap_rate": 0.42857142857142855,
+        "trap_n": 14,
+        "trap_hits": 6,
+        "validity_fail_rate": 0.0,
+        "timeout_rate": 0.0,
+        "trajectory_warn_rate": 0.0,
+        "mean_latency_ms": 40122.57142857143,
+        "p95_latency_ms": 169491.3,
+        "mean_model_calls": 1.5714285714285714,
+        "mean_prompt_tokens": 21259.285714285714
+      },
+      "by_profile": {
+        "baseline-argmax": {
+          "trials": 7,
+          "hard_gold_pass_rate": 0.5714285714285714,
+          "hard_gold_n": 7,
+          "hard_gold_pass": 4,
+          "easy_gold_pass_rate": null,
+          "easy_gold_n": 0,
+          "easy_gold_pass": 0,
+          "trap_rate": 0.42857142857142855,
+          "trap_n": 7,
+          "trap_hits": 3,
+          "validity_fail_rate": 0.0,
+          "timeout_rate": 0.0,
+          "trajectory_warn_rate": 0.0,
+          "mean_latency_ms": 1537.7142857142858,
+          "p95_latency_ms": 1972.6999999999998,
+          "mean_model_calls": 0.0,
+          "mean_prompt_tokens": 0.0
+        },
+        "reasoner-default": {
+          "trials": 7,
+          "hard_gold_pass_rate": 0.5714285714285714,
+          "hard_gold_n": 7,
+          "hard_gold_pass": 4,
+          "easy_gold_pass_rate": null,
+          "easy_gold_n": 0,
+          "easy_gold_pass": 0,
+          "trap_rate": 0.42857142857142855,
+          "trap_n": 7,
+          "trap_hits": 3,
+          "validity_fail_rate": 0.0,
+          "timeout_rate": 0.0,
+          "trajectory_warn_rate": 0.0,
+          "mean_latency_ms": 78707.42857142857,
+          "p95_latency_ms": 182881.59999999998,
+          "mean_model_calls": 3.142857142857143,
+          "mean_prompt_tokens": 42518.57142857143
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "run_id": "decision-v2",
+  "description": "Contested decision-v2 agent catalog (traps + hard gold). Default baseline-argmax; swap profiles to reasoner-default for live LLM.",
+  "case_globs": [
+    "close-from-six-double.json",
+    "float-gust-deny-lethal.json",
+    "spend-develop-no-threat.json",
+    "tempo-*.json",
+    "hold-open-rune-discipline.json",
+    "take-closed-runes-contest.json",
+    "retreat-low-score-threat.json",
+    "reinforce-hold-at-seven.json"
+  ],
+  "splits": ["blocking", "dev"],
+  "eval_lanes": ["agent"],
+  "profiles": ["reasoner-default"],
+  "repeats": 1,
+  "layers": ["contract", "validity", "gold", "silver", "trajectory", "cost"],
+  "transforms": ["identity"],
+  "include_fidelity_limited": false,
+  "mode": "engine_backed"
+}

@@ -1,0 +1,42 @@
+{
+  "overall": {
+    "trials": 1,
+    "hard_gold_pass_rate": 0.0,
+    "hard_gold_n": 1,
+    "hard_gold_pass": 0,
+    "easy_gold_pass_rate": null,
+    "easy_gold_n": 0,
+    "easy_gold_pass": 0,
+    "trap_rate": 1.0,
+    "trap_n": 1,
+    "trap_hits": 1,
+    "validity_fail_rate": 0.0,
+    "timeout_rate": 0.0,
+    "trajectory_warn_rate": 0.0,
+    "mean_latency_ms": 1595.0,
+    "p95_latency_ms": 1595.0,
+    "mean_model_calls": 0.0,
+    "mean_prompt_tokens": 0.0
+  },
+  "by_profile": {
+    "baseline-argmax": {
+      "trials": 1,
+      "hard_gold_pass_rate": 0.0,
+      "hard_gold_n": 1,
+      "hard_gold_pass": 0,
+      "easy_gold_pass_rate": null,
+      "easy_gold_n": 0,
+      "easy_gold_pass": 0,
+      "trap_rate": 1.0,
+      "trap_n": 1,
+      "trap_hits": 1,
+      "validity_fail_rate": 0.0,
+      "timeout_rate": 0.0,
+      "trajectory_warn_rate": 0.0,
+      "mean_latency_ms": 1595.0,
+      "p95_latency_ms": 1595.0,
+      "mean_model_calls": 0.0,
+      "mean_prompt_tokens": 0.0
+    }
+  }
+}
