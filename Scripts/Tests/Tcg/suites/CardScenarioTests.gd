@@ -47,6 +47,8 @@ static func run(assertions) -> void:
 	_test_darius_second_card_trigger(assertions)
 	_test_kaisa_debuff_minimum(assertions)
 	_test_falling_star_can_repeat_target(assertions)
+	_test_falling_star_requires_fury_power(assertions)
+	_test_noxus_hopeful_legion_cost(assertions)
 	_test_sprite_mother_token_here_temporary(assertions)
 	_test_dr_mundo_trash_might_and_recycle(assertions)
 	_test_retreat_returns_and_channels(assertions)
@@ -339,12 +341,67 @@ static func _test_falling_star_can_repeat_target(assertions) -> void:
 		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
 		"battlefields": ["zaun-warrens", "targons-peak"],
 		"players": [
-			{"pool": {"energy": 2, "power": {}}, "hand": ["falling-star"], "deck_size": 5, "rune_deck_size": 12},
+			{"pool": {"energy": 2, "power": {"fury": 2}}, "hand": ["falling-star"], "deck_size": 5, "rune_deck_size": 12},
 			{"base": [{"id": "magma-wurm"}], "deck_size": 5, "rune_deck_size": 12}
 		]
 	})
 	h.cmd_with_choices(0, "play falling-star target magma-wurm", ["magma-wurm"])
 	assertions.assert_eq(h.find_unit("magma-wurm").damage, 6, "falling star can choose same unit twice")
+	assertions.assert_eq(h.gs().players[0].rune_pool.power.get("fury", 0), 0,
+		"falling star spends 2 fury power")
+
+
+static func _test_falling_star_requires_fury_power(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 2, "power": {}}, "hand": ["falling-star"], "deck_size": 5, "rune_deck_size": 12},
+			{"base": [{"id": "magma-wurm"}], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	var card = h.gs().players[0].hand[0]
+	var cost = CostCalculator.compute_play_cost(card, 0, h.gs())
+	assertions.assert_eq(cost.get("energy", -1), 2, "falling star energy cost is 2")
+	assertions.assert_eq(cost.get("power", []).size(), 1, "falling star has one power requirement")
+	assertions.assert_eq(str(cost["power"][0].get("domain", "")), "fury", "falling star power is fury")
+	assertions.assert_eq(int(cost["power"][0].get("amount", 0)), 2, "falling star costs 2 fury power")
+	h.cmd(0, "play falling-star target magma-wurm")
+	assertions.assert_eq(h.gs().players[0].hand.size(), 1, "falling star stays in hand without power")
+	assertions.assert_eq(h.find_unit("magma-wurm").damage, 0, "falling star does not resolve unpaid")
+
+
+static func _test_noxus_hopeful_legion_cost(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 4, "power": {}}, "hand": ["noxus-hopeful", "lecturing-yordle"],
+			 "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	var hopeful = h.gs().players[0].hand[0]
+	var base_cost = CostCalculator.compute_play_cost(hopeful, 0, h.gs())
+	assertions.assert_eq(base_cost.get("energy", -1), 4, "noxus hopeful base energy is 4")
+
+	# First play establishes Legion for the next card.
+	h.cmd(0, "play lecturing-yordle")
+	hopeful = null
+	for c in h.gs().players[0].hand:
+		if c.definition.id == "noxus-hopeful":
+			hopeful = c
+			break
+	assertions.assert_true(hopeful != null, "noxus hopeful still in hand")
+	var legion_cost = CostCalculator.compute_play_cost(hopeful, 0, h.gs())
+	assertions.assert_eq(legion_cost.get("energy", -1), 2,
+		"noxus hopeful costs 2 energy with Legion (not double-reduced to 0)")
+	h.cmd(0, "play noxus-hopeful")
+	assertions.assert_eq(h.gs().players[0].rune_pool.energy, 2,
+		"playing noxus hopeful with Legion spends 2 energy")
+	assertions.assert_true(h.find_unit("noxus-hopeful") != null, "noxus hopeful enters play")
 
 
 static func _test_sprite_mother_token_here_temporary(assertions) -> void:
