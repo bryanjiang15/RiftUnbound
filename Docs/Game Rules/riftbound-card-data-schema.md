@@ -147,7 +147,7 @@ Each `effect_type` string maps to a handler in `AbilityResolver.gd` unless the n
 | `"give_might"` | Add temporary Might for a duration currently modeled as this turn. Negative values may include `minimum_might` to clamp current Might. | `{ "amount": 3, "duration": "turn", "target": "friendly_unit" }` |
 | `"give_keyword"` | Grant a temporary keyword. `duration` may be `"turn"`, `"combat"`, or omitted; `temporary` defaults to Beginning Phase cleanup | `{ "keyword": { "id": "shield", "value": 2 }, "duration": "combat" }` |
 | `"buff_unit"` | Place one Buff counter on the target unit | `{ "target": "friendly_unit" }` |
-| `"move_unit"` | Move target unit to its base; currently delegates to `move_unit_to_base` | `{ "target": "friendly_unit" }` |
+| `"move_unit"` | Move target unit to base or to a chosen battlefield. `destination: "choose"` prompts with `choose_battlefield`; the `no_move_to_base` battlefield keyword removes `base` as a valid choice. Moving to an enemy-controlled or occupied battlefield contests it. | `{ "target": "enemy_unit", "targeting": "choose_one", "destination": "choose" }` |
 | `"move_unit_to_base"` | Move a battlefield unit to its owner's base exhausted | `{ "target": "unit_at_battlefield", "targeting": "choose_one" }` |
 | `"stun_unit"` | Mark a target unit Stunned | `{ "target": "enemy_unit" }` |
 | `"recycle"` | Return cards from trash to hand in current implementation | `{ "from": "trash", "amount": 1 }` |
@@ -162,7 +162,7 @@ Each `effect_type` string maps to a handler in `AbilityResolver.gd` unless the n
 | `"fight_chosen_units"` | Use the spell's first chosen target as the buffed friendly unit and this ability's target as the enemy; both deal current Might to each other | `{ "target": "enemy_unit", "targeting": "choose_one" }` |
 | `"ready_permanent"` | Ready a target permanent | `{ "target": "friendly_unit" }` |
 | `"ready_runes"` | Ready up to N channeled runes; `TriggerDispatcher` can queue this for end of turn | `{ "amount": 2, "timing": "end_of_turn" }` |
-| `"play_token"` | Create and play a token definition, if present in `tokens.json`; `location: "here"` follows the source's battlefield when possible | `{ "token_type": "sprite_3m", "location": "here", "ready": true }` |
+| `"play_token"` | Create and play a token definition, if present in `tokens.json`; `location: "here"` follows the source's battlefield when possible | `{ "token_type": "sprite-3m", "location": "here", "ready": true }` |
 | `"gain_points"` | Gain Victory Points | `{ "amount": 1 }` |
 | `"counter_spell"` | Remove the top spell/ability from the chain | `{ "target": "spell_on_chain" }` |
 | `"predict"` | Reveal top cards in logs; recycle choice is not modeled | `{ "amount": 2 }` |
@@ -176,6 +176,9 @@ Each `effect_type` string maps to a handler in `AbilityResolver.gd` unless the n
 | `"cost_reduction"` | Read by `CostCalculator`; resolver intentionally does nothing | `{ "amount": 2, "scope": "self", "duration": "play" }` |
 | `"attach"` | Attach this Gear to a target unit | `{ "target": "friendly_unit" }` |
 | `"death_replacement_recall"` | Protect a chosen friendly unit from its next death this turn; cleanup heals, exhausts, and recalls it instead | `{ "target": "friendly_unit", "targeting": "choose_one", "duration": "turn" }` |
+| `"death_replacement_sacrifice_gear"` | Read by `CleanupProcessor`, not `AbilityResolver`: sacrifice the Gear, heal/exhaust/recall the dying friendly unit, and move the Gear to trash. | `{ "target": "friendly_unit" }` |
+| `"prevent_damage"` | Prevent spell/ability damage for the rest of the turn. Current resolver support is limited to `source: "spells_and_abilities"` or `"all"`; turn cleanup clears the flag. | `{ "source": "spells_and_abilities", "duration": "turn", "scope": "all" }` |
+| `"choose_draw_or_channel"` | Prompt the controller to `choose draw` or `choose channel`; direct resolver simulations without a controller channel first if possible, otherwise draw. | `{ "draw_amount": 1, "channel_amount": 1, "exhausted": true }` |
 
 Passive aura effects are refreshed by `TriggerDispatcher.emit_passive_auras()` rather than normal chain resolution:
 
@@ -185,7 +188,7 @@ Passive aura effects are refreshed by `TriggerDispatcher.emit_passive_auras()` r
 | `"aura_might"` | Legend aura that adds Might to each friendly unit whose condition evaluates true | `{ "target": "friendly_unit", "amount": 2 }` |
 | `"gain_keywords"` | Add passive keywords while the source's condition evaluates true | `{ "keywords": [{ "id": "ganking" }] }` |
 
-Declared but unsupported effect names should be treated as gaps until a handler and tests are added: `"spend_buff"`, `"banish"`, `"gain_xp"`, `"prevent_damage"`, and `"custom"` (general bespoke behavior; known custom cost strings such as `"may_exhaust_friendly_unit"` are handled explicitly by the chain/controller path).
+Declared but unsupported effect names should be treated as gaps until a handler and tests are added: `"spend_buff"`, `"banish"`, `"gain_xp"`, and `"custom"` (general bespoke behavior; known custom cost strings such as `"may_exhaust_friendly_unit"` are handled explicitly by the chain/controller path).
 
 ### Multi-Target Spell Resolution
 
@@ -256,11 +259,12 @@ Keywords with values are stored on the card directly. The engine reads them at t
 | `"ganking"` | No | Unit may Standard Move from Battlefield to Battlefield |
 | `"hidden"` | No | Can be placed face-down at controlled Battlefield for `[A]`; playable for free next turn with Reaction timing |
 | `"legion"` | No | Linked ability is active only if controller played another card this turn |
+| `"no_move_to_base"` | No | Battlefield keyword: units at this battlefield cannot move to base through standard movement or `move_unit` / `move_unit_to_base` effects |
 | `"reaction"` | No | Can be played during Closed States on any player's turn |
 | `"shield"` | Yes | +`value` Might while unit has Defender designation |
 | `"tank"` | No | Must be assigned lethal damage before non-Tank friendly units in combat |
 | `"temporary"` | No | Killed at the start of controller's next Beginning Phase (before scoring) |
-| `"vision"` | No | When played: look at top card of Main Deck; may Recycle it |
+| `"vision"` | No | Declared keyword only; no current engine implementation or card data uses it |
 
 ---
 
