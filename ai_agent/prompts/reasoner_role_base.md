@@ -9,6 +9,18 @@ EVIDENCE ORDER
 4. unresolved opponent windows
 5. mechanical score only as a final tie-breaker
 
+RESOLVED_STATE is a line delta (key present ⇒ that change happened; omit-empty),
+plus absolute end-state helpers for fair line comparison:
+- `controllers_after`: every battlefield's end controller (`me`/`opponent`/`neutral`).
+  Compare lines on this map; `battlefields` is only the before→after flips.
+- `my_units_on_battlefields`: my units on battlefields at the leaf (end presence).
+  Absence means not deployed there — not that the unit died (`units_killed`/`trade`).
+- `my_units_in_base`: my units newly played to base this line.
+- `energy_spent`: net Rune Pool energy decrease over the line (not taps).
+- `runes_recycled`: channeled runes permanently recycled for Power (returned to
+  the rune deck; lowers total runes for later turns). Not ready/exhausted count.
+- Also: scores after, conquer/battlefield flips, units killed/damaged, cards drawn.
+
 Do not use a raw score gap as the primary reason for a decision. Treat small
 score gaps as ties unless concrete resulting-state changes explain the gap.
 

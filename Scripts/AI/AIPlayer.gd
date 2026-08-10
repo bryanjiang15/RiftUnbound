@@ -20,7 +20,7 @@ var _think_delay: float = THINK_DELAY
 const AGENT_PORT := 8765
 const THINK_DELAY := 0.5       # seconds before each decision (default; override
 							   # per-instance via RIFTBOUND_AI_THINK_DELAY env)
-const HTTP_TIMEOUT := 30.0     # seconds before falling back to heuristic
+const HTTP_TIMEOUT := 60.0     # seconds before falling back to heuristic
 							   # (the agent may make several sequential LLM
 							   # calls per decision; 8s was far too short)
 const MAX_RETRIES := 3         # max rejection retry attempts

@@ -171,13 +171,14 @@ a genuine completeness proof rather than a guess.
 | `PlayerState.score` (both) | `my_score_after`, `opp_score_after` | **Always** — it *is* the win condition |
 | `GameState.game_over` / `winner_index` | `wins_game` | **Always** — terminal, highest signal |
 | `BoardState` battlefield controller | `battlefields[id].controller_before/after` + `conquer` | **Always** — primary score engine |
-| `CardInstance.location` / `battlefield_index` (zone moves, death→trash) | `units_killed`, `units_moved`, `my_units_surviving` | **Always** — board presence |
+| `CardInstance.location` / `battlefield_index` (zone moves, death→trash) | `units_killed`, `units_moved`, `my_units_on_battlefields`, `my_units_in_base` | **Always** — board presence |
 | `CardInstance.damage` / lethal check | `units_damaged` (+ folds into `units_killed`); `trade` verdict | **Always** for combat lines |
 | `CardInstance.temp_might_bonus` / `buff_counters` / `temp_keywords` | `units_buffed` | **Conditional** — only if combat/score-relevant |
 | `CardInstance.is_exhausted` | `exhausted` | **Conditional** — only when it gates a follow-up move |
 | `CardInstance.is_stunned` | `units_stunned` | **Conditional** — only if it changes a trade/attack |
 | `PlayerState.hand` / `deck` (draw, discard, mill) | `cards_drawn` (id if own deck/known, else count), `cards_discarded` | **Always** — tempo/resource |
-| `rune_pool` / energy / `channeled_runes.is_exhausted` | `energy_spent` (aggregate) | **Aggregate** — cost paid, never per-rune |
+| `rune_pool` / energy / `channeled_runes.is_exhausted` | `energy_spent` (aggregate) | **Aggregate** — pool energy decrease, never per-rune |
+| `channeled_runes` size (recycle → rune deck) | `runes_recycled` (aggregate) | **Aggregate** — net channeled loss for Power; omit if 0 |
 | `chain` contents after the move | (not a resolved fact) → `response_window` | **Flag**, not state (class C) |
 | `priority` / `focus` / `turn_player` next | `next_decision` | **Always** — "do I act again?" / tempo |
 | `played_this_turn`, `cards_played_this_turn`, `battlefields_scored_this_turn`, `id_registry`, `_id_counters`, `player_name`, `hidden_turn_number` | — | **Excluded** — provably not decision-relevant to a move's impact |
@@ -246,9 +247,13 @@ engine-computed exchange the agent must otherwise (mis)derive.
     "battlefields": {
       "battlefield-a": { "controller_before": "neutral", "controller_after": "me" }
     },
+    "controllers_after": {
+      "battlefield-a": "me",
+      "battlefield-b": "neutral"
+    },
     "trade": "I keep vi-destructive (3 might); they lose stalwart-poro-2 (2 might)",
     "units_killed": ["enemy-stalwart-poro-2"],
-    "my_units_surviving": ["vi-destructive"],
+    "my_units_on_battlefields": ["vi-destructive"],
     "next_decision": "your main phase"
   },
   "opponent_windows": [
@@ -485,17 +490,20 @@ ResolvedState   {
   opp_score_after: int,
   # ── board deltas (omit-empty) ──
   battlefields: { id: { controller_before: str, controller_after: str } },
+  controllers_after: { id: "me"|"opponent"|"neutral" },  # absolute end control (always)
   trade: str | null,              # engine-computed combat verdict, when a trade occurred
   units_killed: [str],            # omit if empty
   units_damaged: [ { id: str, damage: int } ],   # omit if empty
-  my_units_surviving: [str],      # included only for combat lines
+  my_units_on_battlefields: [str], # my units on BFs at leaf (end presence); omit if empty
+  my_units_in_base: [str],        # my units newly played to base this line; omit if empty
   units_moved: [ { id: str, to: str } ],         # omit if empty
   units_buffed: [ { id: str, might_after: int } ],  # omit if empty
   units_stunned: [str],           # omit if empty
   # ── resources / tempo ──
   cards_drawn: [str] | int,       # card ids if own/known deck, else count; omit if 0
   cards_discarded: [str],         # omit if empty
-  energy_spent: int,              # aggregate cost paid; omit if 0
+  energy_spent: int,              # aggregate pool energy decrease; omit if 0
+  runes_recycled: int,            # net channeled runes recycled for Power; omit if 0
   exhausted: [str],               # only units whose exhaust gates a follow-up; omit-empty
   next_decision: str              # who acts next / phase — tempo
 }
@@ -573,7 +581,7 @@ while it stabilizes.
 - **No real mutation:** structural hash of live `gs` is identical before/after
   any sim (asserted in the clone-fidelity test and in an integration test).
 - **Combat correctness:** a combat-trigger line returns a deterministic trade
-  (`units_killed` / `my_units_surviving`) plus an opponent Action-window flag;
+  (`units_killed` / `my_units_on_battlefields`) plus an opponent Action-window flag;
   cross-check against an equivalent `RuleCombatTests` fixture.
 - **Line legality:** an illegal multi-step line (e.g. spell played after the
   showdown closed) returns `first_illegal_move` set, not a fantasy resolution.

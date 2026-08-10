@@ -15,6 +15,8 @@ static func run(assertions) -> void:
 	_test_simulate_unopposed_move_conquers(assertions)
 	_test_simulate_illegal_move_is_flagged(assertions)
 	_test_presim_inlined_into_brief_state(assertions)
+	_test_resolved_state_controllers_after_and_unit_presence(assertions)
+	_test_resolved_state_play_to_base_lists_unit_in_base(assertions)
 
 
 # A structural signature of the decision-relevant state. Two states with the same
@@ -131,4 +133,55 @@ static func _test_presim_inlined_into_brief_state(assertions) -> void:
 		.get("resolved_if_unanswered", {}).get("conquer", false)
 	assertions.assert_true(conquered, "inlined sim reports the conquer fact")
 	assertions.assert_eq(_signature(live), sig_before, "serialize+presim leaves live state unchanged")
+
+
+static func _test_resolved_state_controllers_after_and_unit_presence(assertions) -> void:
+	var h = TcgTestHarness.new()
+	_load(h)
+	var sim = MoveSimulatorScript.new()
+	var result: Dictionary = sim.simulate_move(h.gs(), 0, "move vi-destructive to battlefield-a")
+	var resolved: Dictionary = result.get("resolved_if_unanswered", {})
+	var controllers: Dictionary = resolved.get("controllers_after", {})
+	assertions.assert_true(controllers.has("battlefield-a"), "controllers_after lists battlefield-a")
+	assertions.assert_true(controllers.has("battlefield-b"), "controllers_after lists every battlefield")
+	assertions.assert_eq(str(controllers.get("battlefield-a", "")), "me",
+		"controllers_after shows me controlling the conquered field")
+	assertions.assert_eq(str(controllers.get("battlefield-b", "")), "neutral",
+		"unchanged battlefield still appears in controllers_after")
+	assertions.assert_false(resolved.has("my_units_surviving"),
+		"legacy my_units_surviving key is not emitted")
+	var on_bf: Array = resolved.get("my_units_on_battlefields", [])
+	assertions.assert_true(on_bf.has("vi-destructive"),
+		"deployed unit is listed under my_units_on_battlefields")
+
+
+static func _test_resolved_state_play_to_base_lists_unit_in_base(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{
+				"pool": {"energy": 5, "power": {}},
+				"hand": ["watchful-sentry"],
+				"base": [],
+				"deck_size": 10, "rune_deck_size": 12,
+			},
+			{"deck_size": 10, "rune_deck_size": 12},
+		],
+	})
+	var sim = MoveSimulatorScript.new()
+	var result: Dictionary = sim.simulate_move(h.gs(), 0, "play watchful-sentry")
+	assertions.assert_true(result.get("legal", false), "play unit to base is legal")
+	var resolved: Dictionary = result.get("resolved_if_unanswered", {})
+	var in_base: Array = resolved.get("my_units_in_base", [])
+	assertions.assert_true(not in_base.is_empty(), "play-to-base emits my_units_in_base")
+	var found := false
+	for uid in in_base:
+		if str(uid).begins_with("watchful-sentry"):
+			found = true
+			break
+	assertions.assert_true(found, "played unit instance appears in my_units_in_base")
+	assertions.assert_false(resolved.has("my_units_on_battlefields"),
+		"unit played to base is not listed on battlefields")
 

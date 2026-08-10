@@ -142,10 +142,15 @@ class ResolvedState(BaseModel):
 
     # ── board deltas (omit-empty on the wire) ──
     battlefields: dict[str, ControllerChange] = Field(default_factory=dict)
+    # Absolute end-state controller per battlefield ("me" | "opponent" | "neutral").
+    controllers_after: dict[str, str] = Field(default_factory=dict)
     trade: Optional[str] = None
     units_killed: list[str] = Field(default_factory=list)
     units_damaged: list[UnitDamage] = Field(default_factory=list)
-    my_units_surviving: list[str] = Field(default_factory=list)
+    # My units on battlefields at the leaf (end presence — not "survived combat").
+    my_units_on_battlefields: list[str] = Field(default_factory=list)
+    # My units newly present at base this line (played to base).
+    my_units_in_base: list[str] = Field(default_factory=list)
     units_moved: list[UnitMove] = Field(default_factory=list)
     units_buffed: list[UnitBuff] = Field(default_factory=list)
     units_stunned: list[str] = Field(default_factory=list)
@@ -154,6 +159,9 @@ class ResolvedState(BaseModel):
     cards_drawn: Union[list[str], int] = 0
     cards_discarded: list[str] = Field(default_factory=list)
     energy_spent: int = 0
+    # Net channeled runes removed over the line (Power payment → rune deck).
+    # Omit when 0. Not taps / ready-count / leftover energy.
+    runes_recycled: int = 0
     exhausted: list[str] = Field(default_factory=list)
     next_decision: str = ""
 

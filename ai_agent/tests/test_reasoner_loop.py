@@ -43,7 +43,11 @@ class _Completions:
         self.calls = []
 
     async def create(self, **kwargs):
-        self.calls.append(kwargs)
+        # Snapshot messages: the reasoner mutates the same list across rounds.
+        recorded = dict(kwargs)
+        if "messages" in recorded:
+            recorded["messages"] = list(recorded["messages"])
+        self.calls.append(recorded)
         return _Response(self.messages.pop(0))
 
 
@@ -187,3 +191,111 @@ def test_budget_exhaustion_is_explicit_gate_exemption_for_nonempty_goals():
     assert emit.goal_set is not None
     assert emit.goal_set.turn == 3
     assert len(emit.goal_set.goals) == 1
+
+
+def _assert_tool_replies_contiguous(messages: list[dict]) -> None:
+    """OpenAI requires all tool replies immediately after an assistant tool_calls msg."""
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        tool_calls = getattr(msg, "tool_calls", None)
+        if isinstance(msg, dict):
+            tool_calls = msg.get("tool_calls")
+        if not tool_calls:
+            i += 1
+            continue
+        expected_ids = [tc.id for tc in tool_calls]
+        i += 1
+        for tool_call_id in expected_ids:
+            assert i < len(messages), f"missing tool reply for {tool_call_id}"
+            reply = messages[i]
+            assert isinstance(reply, dict)
+            assert reply.get("role") == "tool", (
+                f"expected contiguous tool reply for {tool_call_id}, "
+                f"got role={reply.get('role')!r}"
+            )
+            assert reply.get("tool_call_id") == tool_call_id
+            i += 1
+
+
+def test_parallel_deepen_defers_feedback_envelopes_until_all_tool_replies():
+    """Regression: user envelopes must not interrupt parallel tool_call replies."""
+    state = {"turn_number": 2, "legal_moves": ["pass", "end turn"]}
+    context = ReasonerTurnContext("g-parallel", state, "root")
+    scout = _complete_line(context)
+    alt = context.registry.register({
+        "line_id": "line-2",
+        "moves": ["end turn"],
+        "move_contexts": [{"kind": "scripted"}],
+        "expected_pre_hashes": ["root"],
+        "root_state_hash": "root",
+        "legal": True,
+        "complete": True,
+        "terminal_reason": "end_turn",
+    }, source="scout")
+    assert alt is not None
+    context.scout_lines = [scout, alt]
+    deepen_a = _ToolCall(
+        "deepen",
+        {"line_id": scout["line_id"], "prefix_steps": 1, "extra_depth": 3},
+    )
+    deepen_b = _ToolCall(
+        "deepen",
+        {"line_id": alt["line_id"], "prefix_steps": 1, "extra_depth": 3},
+    )
+    client = _Client([
+        _Message(tool_calls=[deepen_a, deepen_b]),
+        _Message(tool_calls=[_ToolCall("commit_line", {
+            "line_id": scout["line_id"],
+            "rationale": (
+                "Compared with scout; deepened both frontiers and kept the safer line."
+            ),
+        })]),
+    ])
+
+    def fake_tool(trace, *, round_num, name, args):
+        trace.append({"round": round_num, "name": name, "args": args, "summary": name})
+        line_id = args.get("line_id")
+        moves = (
+            list(scout["moves"]) if line_id == scout["line_id"] else list(alt["moves"])
+        )
+        return json.dumps({
+            "source": "live_engine",
+            "candidate_lines": [{
+                "line_id": line_id,
+                "moves": moves,
+                "complete": True,
+                "resolved_state": {"points_scored": 0, "hand_size": 4},
+            }],
+        })
+
+    token = install_context(context)
+    try:
+        with patch("ai_agent.agent._invoke_traced_tool", side_effect=fake_tool):
+            emit = asyncio.run(reasoner._request_reasoning(
+                client=client,
+                model="gpt-4o",
+                game_id="g-parallel",
+                brief_state=state,
+                memory_summary="",
+                known_lines=context.scout_lines,
+                root_state_hash="root",
+            ))
+    finally:
+        reset_context(token)
+
+    assert emit.kind == "line"
+    assert len(client.chat.completions.calls) >= 2
+    followup_messages = client.chat.completions.calls[1]["messages"]
+    _assert_tool_replies_contiguous(followup_messages)
+
+    # Locate the parallel deepen turn: both tool replies, then both envelopes.
+    deepen_idx = next(
+        i
+        for i, msg in enumerate(followup_messages)
+        if getattr(msg, "tool_calls", None)
+        and {tc.id for tc in msg.tool_calls} == {deepen_a.id, deepen_b.id}
+    )
+    after = followup_messages[deepen_idx + 1 : deepen_idx + 5]
+    assert [m.get("role") for m in after] == ["tool", "tool", "user", "user"]
+    assert {m.get("tool_call_id") for m in after[:2]} == {deepen_a.id, deepen_b.id}

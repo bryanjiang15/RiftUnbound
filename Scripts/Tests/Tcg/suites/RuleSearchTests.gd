@@ -23,6 +23,8 @@ static func run(assertions) -> void:
 	_test_seeded_end_turn_line_is_complete(assertions)
 	_test_budget_cutoff_line_is_incomplete(assertions)
 	_test_jinx_seed_search_captures_auto_choices(assertions)
+	_test_seed_with_intermediate_pass_replays_without_double_quiescence(assertions)
+	_test_jinx_seed_replays_explicit_intermediate_chooses(assertions)
 
 
 # A forced discard during search must be resolved greedily — keeping the card
@@ -218,6 +220,116 @@ static func _test_jinx_seed_search_captures_auto_choices(assertions) -> void:
 			break
 	assertions.assert_true(found_complete_auto_choice_line,
 		"Jinx seed search returns a complete hashed line with both auto-discard choices")
+
+
+# Regression: scout lines store AI intermediate `pass` after a move into an empty
+# battlefield. Seeding that full prefix must apply the pass as the AI's next act
+# (opp-only settle between commands), not double-apply it via full quiescence
+# after the move — which previously made the following seed command illegal.
+static func _test_seed_with_intermediate_pass_replays_without_double_quiescence(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture("res://Scripts/Tests/Tcg/fixtures/movement_base_to_bf.json")
+	var root_hash := _hash(h.gs(), 0)
+	var searcher = TurnSearchScript.new()
+	var result: Dictionary = searcher.search(h.gs(), 0, {
+		"seed_moves": [
+			"move vi-destructive to battlefield-a",
+			"pass",
+			"end turn",
+		],
+		"node_budget": 10,
+		"time_budget_ms": 1000,
+	})
+	assertions.assert_eq(str(result.get("error", "")), "",
+		"seed with intermediate pass does not fail: %s" % str(result.get("error", "")))
+	assertions.assert_true(bool(result.get("legal", false)),
+		"seed with intermediate pass is legal")
+	assertions.assert_true(
+		str(result.get("search_stats", {}).get("stopped_reason", "")) != "seed_failed",
+		"seed with intermediate pass is not seed_failed")
+	var lines: Array = result.get("candidate_lines", [])
+	assertions.assert_eq(lines.size(), 1, "terminal seed with pass returns one line")
+	if lines.is_empty():
+		return
+	var line: Dictionary = lines[0]
+	assertions.assert_true(bool(line.get("complete", false)), "seeded move+pass+end turn is complete")
+	assertions.assert_eq(str(line.get("root_state_hash", "")), root_hash,
+		"seeded pass line retains pre-seed root hash")
+	var moves: Array = line.get("moves", [])
+	assertions.assert_true(moves.size() >= 3, "seeded line keeps move, pass, end turn")
+	assertions.assert_eq(str(moves[0]), "move vi-destructive to battlefield-a",
+		"first seed command preserved")
+	assertions.assert_eq(str(moves[1]), "pass", "intermediate pass preserved in line")
+	assertions.assert_eq(str(moves[moves.size() - 1]), "end turn", "end turn preserved")
+	var contexts: Array = line.get("move_contexts", [])
+	if contexts.size() > 1:
+		assertions.assert_eq(str(contexts[1].get("kind", "")), "intermediate",
+			"seeded pass is labeled intermediate")
+
+
+# Explicit intermediate chooses in a seed must replay as AI acts between
+# opponent-only settles; final tip quiescence must not invent duplicate chooses.
+static func _test_jinx_seed_replays_explicit_intermediate_chooses(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{
+				"pool": {"energy": 10, "power": {"fury": 1}},
+				"hand": ["jinx-demolitionist", "fury-rune", "fury-rune", "void-seeker"],
+				"deck_size": 10, "rune_deck_size": 12,
+			},
+			{"deck_size": 10, "rune_deck_size": 12},
+		],
+	})
+	var searcher = TurnSearchScript.new()
+	var scout: Dictionary = searcher.search(h.gs(), 0, {
+		"seed_moves": ["play jinx-demolitionist"],
+		"node_budget": 80,
+		"time_budget_ms": 1000,
+		"beam_width": 8,
+		"max_depth": 8,
+		"top_n": 8,
+	})
+	var prefix: Array = []
+	for line in scout.get("candidate_lines", []):
+		if not bool(line.get("complete", false)):
+			continue
+		var moves: Array = line.get("moves", [])
+		var contexts: Array = line.get("move_contexts", [])
+		if moves.is_empty() or str(moves[0]) != "play jinx-demolitionist":
+			continue
+		var chooses := 0
+		for i in range(mini(moves.size(), contexts.size())):
+			if str(contexts[i].get("kind", "")) == "intermediate" and str(moves[i]).begins_with("choose "):
+				chooses += 1
+		if chooses >= 2:
+			# Replay through both auto-choices, drop trailing end turn so search
+			# can still expand — but the seed itself must apply cleanly.
+			for m in moves:
+				if str(m) == "end turn":
+					break
+				prefix.append(str(m))
+			break
+	assertions.assert_true(prefix.size() >= 3,
+		"scout produced a jinx line with play + intermediate chooses to reseeds")
+	if prefix.size() < 3:
+		return
+	var reseed: Dictionary = searcher.search(h.gs(), 0, {
+		"seed_moves": prefix,
+		"node_budget": 40,
+		"time_budget_ms": 1000,
+		"beam_width": 6,
+		"max_depth": 6,
+	})
+	assertions.assert_true(bool(reseed.get("legal", false)),
+		"reseeding explicit jinx intermediate chooses is legal")
+	assertions.assert_true(
+		str(reseed.get("search_stats", {}).get("stopped_reason", "")) != "seed_failed",
+		"explicit choose seed must not seed_fail")
+	assertions.assert_true(str(reseed.get("error", "")) == "",
+		"no seed error when replaying intermediate chooses: %s" % str(reseed.get("error", "")))
 
 
 static func _test_scoring_breakdown(assertions) -> void:

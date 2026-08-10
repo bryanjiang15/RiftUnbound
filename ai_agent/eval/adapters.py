@@ -508,7 +508,11 @@ def _metrics_from_engine_payload(
         if "my_score_after" in resolved:
             metrics["my_score_after"] = resolved.get("my_score_after")
         metrics["conquers_if_unanswered"] = bool(resolved.get("conquer", False))
-        surviving = resolved.get("my_units_surviving") or []
+        surviving = (
+            resolved.get("my_units_on_battlefields")
+            or resolved.get("my_units_surviving")
+            or []
+        )
         metrics["attacker_survives_trade"] = bool(surviving) or bool(resolved.get("trade"))
     else:
         metrics["chosen_line_complete"] = bool(payload.get("chosen_line_complete", False))

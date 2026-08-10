@@ -347,30 +347,30 @@ def _strategic_prefix_commands(
 
 
 def _render_resolved_state(resolved: Any) -> dict[str, Any]:
+    """Compact line delta for the Reasoner (keys match MoveSimulator.build_delta)."""
     if not isinstance(resolved, dict):
         return {}
     keep = (
         "wins_game",
+        "conquer",
         "my_score_after",
-        "opponent_score_after",
-        "points_scored",
-        "my_units_killed",
-        "opponent_units_killed",
-        "battlefields_controlled",
-        "hand_size",
-        "ready_runes",
-        "energy",
-        "power",
+        "opp_score_after",
+        "controllers_after",
+        "battlefields",
+        "trade",
+        "units_killed",
+        "units_damaged",
+        "my_units_on_battlefields",
+        "my_units_in_base",
+        "cards_drawn",
+        "energy_spent",
+        "runes_recycled",
+        "next_decision",
     )
     out: dict[str, Any] = {}
     for key in keep:
         if key in resolved:
             out[key] = resolved[key]
-    # Preserve compact unknown keys when small.
-    if not out:
-        for key, value in list(resolved.items())[:8]:
-            if isinstance(value, (str, int, float, bool)) or value is None:
-                out[str(key)] = value
     return out
 
 
@@ -762,6 +762,10 @@ async def _request_reasoning(
         msg = response.choices[0].message
         if msg.tool_calls:
             messages.append(msg)  # type: ignore[arg-type]
+            # OpenAI requires every tool_call_id to receive a contiguous tool
+            # reply before any other role. Defer feedback envelopes until all
+            # tool replies for this assistant turn are appended.
+            pending_envelopes: list[str] = []
             for tc in msg.tool_calls:
                 name = tc.function.name
                 try:
@@ -934,17 +938,7 @@ async def _request_reasoning(
                             )
                         result_text = json.dumps(result)
 
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result_text,
-                    })
-                    if envelope:
-                        messages.append({
-                            "role": "user",
-                            "content": envelope,
-                        })
-                    if context is not None:
+                    if context is not None and name in SEARCH_DRIVING_TOOLS:
                         context.telemetry.update({
                             "failed_search_calls": failed_search_calls,
                             "recovered_failed_searches": recovered_failed_searches,
@@ -954,11 +948,17 @@ async def _request_reasoning(
                             "last_result_status": last_result_status,
                             "comparison_required": comparison_required,
                         })
-                    continue
+                    if envelope:
+                        pending_envelopes.append(envelope)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
                     "content": result_text,
+                })
+            for envelope in pending_envelopes:
+                messages.append({
+                    "role": "user",
+                    "content": envelope,
                 })
             continue
 
