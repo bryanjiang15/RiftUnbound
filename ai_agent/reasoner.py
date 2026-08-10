@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -10,6 +11,15 @@ from typing import Any, Callable
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 
+from .investigation_metrics import (
+    advisory_critic_notes,
+    build_feedback_envelope,
+    classify_search_result,
+    extract_result_lines,
+    has_novel_suffix,
+    is_novel_vs_scout,
+    rationale_is_score_primary,
+)
 from .prompts import load_prompt
 from .reasoner_context import current_context
 from .schemas import GoalSet, ReasonerEmit
@@ -35,11 +45,13 @@ REASONER_TOOL_NAMES = frozenset({
 })
 SEARCH_DRIVING_TOOLS = frozenset({"search_for", "deepen"})
 TERMINAL_TOOL_NAMES = frozenset({"commit_line", "emit_goals"})
+DEFAULT_SCORE_TIE_BAND = 0.15
 
 _ROLE = load_prompt("reasoner_role_base")
 _DISCIPLINE = load_prompt("reasoner_output_discipline_think")
 _TASK = load_prompt("reasoner_task")
 _FORMAT = load_prompt("reasoner_format_phase")
+_FEW_SHOT = load_prompt("reasoner_few_shot_traces")
 
 
 @dataclass
@@ -284,8 +296,88 @@ def _tool_schemas(agent_module: Any) -> list[dict[str, Any]]:
     return tools + _terminal_tool_schemas()
 
 
+def _score_tie_band() -> float:
+    raw = os.environ.get("RIFTBOUND_SCORE_TIE_BAND", str(DEFAULT_SCORE_TIE_BAND))
+    try:
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_SCORE_TIE_BAND
+
+
+def _hide_raw_scores() -> bool:
+    return os.environ.get("RIFTBOUND_REASONER_HIDE_RAW_SCORE", "1").strip().lower() not in {
+        "0",
+        "false",
+        "off",
+        "no",
+    }
+
+
+def _score_band_label(score: Any, *, band: float) -> str:
+    try:
+        value = float(score)
+    except (TypeError, ValueError):
+        return "unknown"
+    # Quantize into coarse bands so tiny gaps are not decision-looking.
+    width = max(band, 0.05)
+    bucket = round(value / width) * width
+    return f"~{bucket:.2f}±{width:.2f}"
+
+
+def _strategic_prefix_commands(
+    moves: list[Any],
+    contexts: list[Any],
+    *,
+    max_steps: int = 3,
+) -> list[str]:
+    prefix: list[str] = []
+    for index, command in enumerate(moves):
+        text = str(command)
+        lower = text.strip().lower()
+        context = contexts[index] if index < len(contexts) else {}
+        kind = str(context.get("kind", "scripted") or "scripted")
+        if kind in {"choose", "auto_choice"} or lower.startswith("choose "):
+            continue
+        if lower in {"pass", "end turn"}:
+            continue
+        prefix.append(text)
+        if len(prefix) >= max_steps:
+            break
+    return prefix
+
+
+def _render_resolved_state(resolved: Any) -> dict[str, Any]:
+    """Compact line delta for the Reasoner (keys match MoveSimulator.build_delta)."""
+    if not isinstance(resolved, dict):
+        return {}
+    keep = (
+        "wins_game",
+        "conquer",
+        "my_score_after",
+        "opp_score_after",
+        "controllers_after",
+        "battlefields",
+        "trade",
+        "units_killed",
+        "units_damaged",
+        "my_units_on_battlefields",
+        "my_units_in_base",
+        "cards_drawn",
+        "energy_spent",
+        "runes_recycled",
+        "next_decision",
+    )
+    out: dict[str, Any] = {}
+    for key in keep:
+        if key in resolved:
+            out[key] = resolved[key]
+    return out
+
+
 def _render_scout_lines(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rendered: list[dict[str, Any]] = []
+    hide_scores = _hide_raw_scores()
+    band = _score_tie_band()
     for line in lines:
         moves = list(line.get("moves", []) or [])
         contexts = list(line.get("move_contexts", []) or [])
@@ -295,6 +387,7 @@ def _render_scout_lines(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
             step = {
                 "command": command,
                 "kind": context.get("kind", "scripted"),
+                "prefix_steps": index + 1,
             }
             if context.get("context"):
                 step["context"] = context["context"]
@@ -309,17 +402,28 @@ def _render_scout_lines(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
             key=lambda item: abs(item[1]),
             reverse=True,
         )[:4]
-        rendered.append({
+        entry: dict[str, Any] = {
             "line_id": line.get("line_id"),
             "steps": steps,
-            "score": line.get("score", 0.0),
+            "strategic_prefix_moves": _strategic_prefix_commands(moves, contexts),
+            "deepen_hint": {
+                "line_id": line.get("line_id"),
+                "prefix_steps_options": list(
+                    range(1, min(4, max(1, len(moves))))
+                ),
+            },
+            "score_band": _score_band_label(line.get("score", 0.0), band=band),
             "top_score_terms": dict(drivers),
+            "resolved_state": _render_resolved_state(line.get("resolved_state")),
             "complete": bool(line.get("complete")),
             "terminal_reason": line.get("terminal_reason", ""),
             "contested": bool(line.get("opponent_windows")),
             "opponent_windows": len(line.get("opponent_windows", []) or []),
             "root_state_hash": line.get("root_state_hash", ""),
-        })
+        }
+        if not hide_scores:
+            entry["score"] = line.get("score", 0.0)
+        rendered.append(entry)
     return rendered
 
 
@@ -340,18 +444,24 @@ def _investigation_exemption(
 
 
 def _successful_search(name: str, result: Any) -> bool:
+    """Non-empty live engine result (may still be a scout duplicate)."""
     if name not in SEARCH_DRIVING_TOOLS or not isinstance(result, dict):
         return False
     if result.get("error") or result.get("legal") is False:
         return False
     if result.get("source") != "live_engine":
         return False
-    lines = (
-        result.get("matches", [])
-        if name == "search_for"
-        else result.get("candidate_lines", [])
-    )
-    return bool(lines)
+    return bool(extract_result_lines(name, result))
+
+
+def _novel_search(
+    name: str,
+    result: Any,
+    scout_leader: tuple[str, ...],
+) -> bool:
+    if not _successful_search(name, result):
+        return False
+    return is_novel_vs_scout(name, result, scout_leader)
 
 
 def _engine_unavailable(result: Any) -> bool:
@@ -359,6 +469,18 @@ def _engine_unavailable(result: Any) -> bool:
         "unavailable",
         "presim_corpus",
     }
+
+
+def _resolved_delta_summary(lines: list[dict[str, Any]]) -> str:
+    chunks: list[str] = []
+    for line in lines[:3]:
+        line_id = line.get("line_id", "?")
+        resolved = _render_resolved_state(line.get("resolved_state"))
+        if resolved:
+            chunks.append(f"{line_id}:{resolved}")
+        else:
+            chunks.append(f"{line_id}:(no resolved_state)")
+    return "; ".join(chunks)
 
 
 def _terminal_emit(
@@ -376,8 +498,9 @@ def _terminal_emit(
         return None, "Reasoner request context is unavailable"
     if not investigation_satisfied and exemption is None:
         return None, (
-            "Before terminating, make one successful search_for or deepen call. "
-            "An empty or failed call does not satisfy this gate."
+            "Before terminating, make one successful novel search_for or deepen "
+            "call (a scout-duplicate result does not satisfy this gate). "
+            "An empty or failed call does not count."
         )
     rationale = str(args.get("rationale", "")).strip()
     if not rationale:
@@ -386,6 +509,12 @@ def _terminal_emit(
         return None, (
             "A distinct alternative was found. Compare it with the scout leader "
             "explicitly in rationale before terminating."
+        )
+    if comparison_required and rationale_is_score_primary(rationale):
+        return None, (
+            "Score-only rationale rejected while a distinct alternative remains. "
+            "Compare concrete resulting-state deltas (points, board, resources, "
+            f"windows); scores may break ties only inside band {_score_tie_band()}."
         )
     if name == "emit_goals":
         goal_set, error = _strict_goal_set(args.get("goal_set"), turn)
@@ -468,7 +597,7 @@ async def _request_reasoning(
         ["goal_and_role", "core_rules", "keywords_in_play", "goal_vocabulary"],
         brief_state=brief_state,
     )
-    system = f"{_ROLE}\n\n{_DISCIPLINE}\n\n{rules}".strip()
+    system = f"{_ROLE}\n\n{_DISCIPLINE}\n\n{_FEW_SHOT}\n\n{rules}".strip()
     scout_block = (
         json.dumps(_render_scout_lines(known_lines), indent=2, default=str)
         if known_lines
@@ -491,8 +620,16 @@ async def _request_reasoning(
     terminal_errors: list[str] = []
     exemption = _investigation_exemption(brief_state, known_lines)
     investigation_satisfied = False
+    novel_investigation = False
     comparison_required = False
-    scout_leader = tuple(known_lines[0].get("moves", []) or []) if known_lines else ()
+    local_fork_attempted = False
+    novel_suffix_found = False
+    failed_search_calls = 0
+    recovered_failed_searches = 0
+    pending_failure = False
+    seen_queries: set[str] = set()
+    last_result_status = ""
+    scout_leader = tuple(str(m) for m in (known_lines[0].get("moves", []) or [])) if known_lines else ()
 
     if context is not None:
         context.telemetry.update({
@@ -501,6 +638,11 @@ async def _request_reasoning(
             "root_state_hash": root_state_hash,
             "successful_search_tools": [],
             "terminal_validation_errors": terminal_errors,
+            "failed_search_calls": 0,
+            "recovered_failed_searches": 0,
+            "novel_investigation": False,
+            "local_fork_attempted": False,
+            "novel_suffix_found": False,
         })
 
     def finish(emit: ReasonerEmit, outcome: str) -> ReasonerEmit:
@@ -523,7 +665,13 @@ async def _request_reasoning(
                     len(emit.goal_set.goals) if emit.goal_set is not None else 0
                 ),
                 "investigation_satisfied": investigation_satisfied,
+                "novel_investigation": novel_investigation,
+                "local_fork_attempted": local_fork_attempted,
+                "novel_suffix_found": novel_suffix_found,
+                "failed_search_calls": failed_search_calls,
+                "recovered_failed_searches": recovered_failed_searches,
                 "comparison_required": comparison_required,
+                "score_primary_rationale": rationale_is_score_primary(emit.rationale),
                 "tool_mix": [entry.get("name") for entry in tool_trace],
                 "budget": active_budget.status() if active_budget else {},
                 "scout_agreement": bool(
@@ -614,6 +762,10 @@ async def _request_reasoning(
         msg = response.choices[0].message
         if msg.tool_calls:
             messages.append(msg)  # type: ignore[arg-type]
+            # OpenAI requires every tool_call_id to receive a contiguous tool
+            # reply before any other role. Defer feedback envelopes until all
+            # tool replies for this assistant turn are appended.
+            pending_envelopes: list[str] = []
             for tc in msg.tool_calls:
                 name = tc.function.name
                 try:
@@ -692,32 +844,121 @@ async def _request_reasoning(
                         result = json.loads(result_text)
                     except (json.JSONDecodeError, TypeError):
                         result = result_text
-                    if _successful_search(name, result):
-                        investigation_satisfied = True
-                        if context is not None:
-                            context.telemetry["successful_search_tools"].append(name)
-                            context.telemetry["alternative_query"] = args
-                        lines = (
-                            result.get("matches", [])
-                            if name == "search_for"
-                            else result.get("candidate_lines", [])
+
+                    envelope = ""
+                    if name in SEARCH_DRIVING_TOOLS and isinstance(result, dict):
+                        status = classify_search_result(name, result, scout_leader)
+                        last_result_status = status
+                        result["result_status"] = status
+                        query_key = json.dumps(
+                            {"name": name, "args": args},
+                            sort_keys=True,
+                            default=str,
                         )
-                        comparison_required = bool(
+                        is_repeat = query_key in seen_queries
+                        seen_queries.add(query_key)
+                        prefix_steps = int(args.get("prefix_steps") or 0)
+                        if name == "deepen" and (
+                            prefix_steps > 0 or bool(args.get("moves"))
+                        ):
+                            local_fork_attempted = True
+                        if has_novel_suffix(
+                            name, result, scout_leader, prefix_steps or 1
+                        ):
+                            novel_suffix_found = True
+
+                        lines = extract_result_lines(name, result)
+                        distinct = bool(
                             scout_leader
                             and any(
-                                tuple(line.get("moves", []) or []) != scout_leader
+                                tuple(str(m) for m in (line.get("moves", []) or []))
+                                != scout_leader
                                 for line in lines
-                                if isinstance(line, dict)
                             )
                         )
-                    elif name in SEARCH_DRIVING_TOOLS and _engine_unavailable(result):
-                        exemption = "engine_unavailable"
-                        if context is not None:
-                            context.telemetry["investigation_exemption"] = exemption
+                        # Preserve comparison_required across rounds (logical OR).
+                        comparison_required = comparison_required or distinct
+
+                        if status in {"illegal_seed", "empty", "unavailable"}:
+                            failed_search_calls += 1
+                            pending_failure = True
+                        elif _novel_search(name, result, scout_leader):
+                            novel_investigation = True
+                            investigation_satisfied = True
+                            if pending_failure:
+                                recovered_failed_searches += 1
+                                pending_failure = False
+                            if context is not None:
+                                context.telemetry["successful_search_tools"].append(name)
+                                context.telemetry["alternative_query"] = args
+                        elif status == "duplicate":
+                            # Explicitly do not satisfy the novelty gate.
+                            if context is not None:
+                                context.telemetry.setdefault(
+                                    "duplicate_search_tools", []
+                                ).append(name)
+
+                        if name in SEARCH_DRIVING_TOOLS and _engine_unavailable(result):
+                            exemption = "engine_unavailable"
+                            if context is not None:
+                                context.telemetry["investigation_exemption"] = exemption
+
+                        critic = advisory_critic_notes(
+                            novel_investigation=novel_investigation,
+                            local_fork_attempted=local_fork_attempted,
+                            failed_queries=failed_search_calls,
+                            recovered_failures=recovered_failed_searches,
+                            result_status=status,
+                            comparison_required=comparison_required,
+                        )
+                        branch = (
+                            "switch_frontier"
+                            if status in {"duplicate", "illegal_seed", "empty"}
+                            else "continue_current"
+                        )
+                        envelope = build_feedback_envelope(
+                            previous_query={"tool": name, **args},
+                            result_status=status,
+                            engine_state_delta=_resolved_delta_summary(lines),
+                            opponent_windows=sum(
+                                len(line.get("opponent_windows", []) or [])
+                                for line in lines
+                            ),
+                            tool_error=str(result.get("error", "") or ""),
+                            is_repeat=is_repeat,
+                            forward_progress=novel_investigation or distinct,
+                            branch_control=branch,
+                            revised_hypothesis=(
+                                "; ".join(critic) if critic else ""
+                            ),
+                        )
+                        if result.get("suggested_prefix") is not None:
+                            envelope += (
+                                f"SUGGESTED PREFIX: {result.get('suggested_prefix')}\n"
+                            )
+                        result_text = json.dumps(result)
+
+                    if context is not None and name in SEARCH_DRIVING_TOOLS:
+                        context.telemetry.update({
+                            "failed_search_calls": failed_search_calls,
+                            "recovered_failed_searches": recovered_failed_searches,
+                            "novel_investigation": novel_investigation,
+                            "local_fork_attempted": local_fork_attempted,
+                            "novel_suffix_found": novel_suffix_found,
+                            "last_result_status": last_result_status,
+                            "comparison_required": comparison_required,
+                        })
+                    if envelope:
+                        pending_envelopes.append(envelope)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
                     "content": result_text,
+                })
+            for envelope in pending_envelopes:
+                messages.append({
+                    "role": "user",
+                    "content": envelope,
                 })
             continue
 

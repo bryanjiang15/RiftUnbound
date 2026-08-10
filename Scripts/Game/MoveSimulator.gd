@@ -185,6 +185,45 @@ func advance_to_quiescence(sc: GameController, after_move: String, windows: Arra
 	return "ply_budget"
 
 
+# Seed-prefix helper: after an explicit AI seed command, only settle opponent
+# response windows / opponent prompts. Stops as soon as the AI seat must act
+# (pending prompt, showdown focus, or chain priority) so the next seed command
+# — including an intermediate `pass` / `choose` already stored on the line —
+# can be applied as that seat's next move. Does not auto-pass or auto-choose
+# for the AI.
+func advance_opponent_windows(
+	sc: GameController, after_move: String, windows: Array
+) -> String:
+	var steps := 0
+	while steps < PLY_BUDGET:
+		steps += 1
+
+		if sc.gs.game_over:
+			return "game_over"
+
+		if not sc.gs.pending_prompt.is_empty():
+			var prompt_pi: int = sc.gs.pending_prompt.get("player_index", ai_index)
+			if prompt_pi == ai_index:
+				return "ai_decision"
+			_resolve_prompt(sc)
+			if sc.last_command_error:
+				return "quiescence"
+			continue
+
+		var seat := _acting_seat(sc.gs)
+		if seat < 0:
+			return "quiescence"
+		if seat == ai_index:
+			return "ai_decision"
+
+		_record_window(sc.gs, after_move, windows)
+		sc.submit_command(seat, "pass")
+		if sc.last_command_error:
+			return "quiescence"
+
+	return "ply_budget"
+
+
 # Returns the seat currently obliged to act in a chain/showdown/combat context,
 # or -1 if the state is quiescent (neutral-open / nobody forced to respond).
 func _acting_seat(gs: GameState) -> int:
@@ -327,9 +366,13 @@ func build_delta(before: Dictionary, after: Dictionary, gs: GameState) -> Dictio
 
 	var conquer := false
 	var bf_changes: Dictionary = {}
+	# Absolute end-state controllers for every battlefield — compare lines on
+	# this map, not only on sparse before→after changes.
+	var controllers_after: Dictionary = {}
 	for bf_id in after["bf"]:
 		var before_ctrl: int = before["bf"].get(bf_id, -1)
 		var after_ctrl: int = after["bf"][bf_id]
+		controllers_after[bf_id] = _ctrl_label(after_ctrl)
 		if before_ctrl != after_ctrl:
 			bf_changes[bf_id] = {
 				"controller_before": _ctrl_label(before_ctrl),
@@ -338,12 +381,14 @@ func build_delta(before: Dictionary, after: Dictionary, gs: GameState) -> Dictio
 			if after_ctrl == ai_index:
 				conquer = true
 	delta["conquer"] = conquer
+	delta["controllers_after"] = controllers_after
 	if not bf_changes.is_empty():
 		delta["battlefields"] = bf_changes
 
 	# ── board deltas ──
 	var killed: Array = []
-	var my_surviving: Array = []
+	var my_on_bf: Array = []
+	var my_played_to_base: Array = []
 	var damaged: Array = []
 	for inst_id in before["units"]:
 		if not after["units"].has(inst_id):
@@ -354,14 +399,22 @@ func build_delta(before: Dictionary, after: Dictionary, gs: GameState) -> Dictio
 			var bu: Dictionary = before["units"][inst_id]
 			if au["damage"] > bu["damage"]:
 				damaged.append({"id": inst_id, "damage": au["damage"]})
-		if au["owner"] == ai_index and au["location"] != "base":
-			my_surviving.append(inst_id)
+		if au["owner"] != ai_index:
+			continue
+		if au["location"] != "base":
+			# End-state presence on battlefields (not "survived combat").
+			my_on_bf.append(inst_id)
+		elif not before["units"].has(inst_id):
+			# New board presence at base this line = played to base.
+			my_played_to_base.append(inst_id)
 	if not killed.is_empty():
 		delta["units_killed"] = killed
 	if not damaged.is_empty():
 		delta["units_damaged"] = damaged
-	if not my_surviving.is_empty():
-		delta["my_units_surviving"] = my_surviving
+	if not my_on_bf.is_empty():
+		delta["my_units_on_battlefields"] = my_on_bf
+	if not my_played_to_base.is_empty():
+		delta["my_units_in_base"] = my_played_to_base
 
 	var trade := _trade_string(before, after, killed)
 	if trade != "":
@@ -374,6 +427,11 @@ func build_delta(before: Dictionary, after: Dictionary, gs: GameState) -> Dictio
 	var spent: int = before["my_energy"] - after["my_energy"]
 	if spent > 0:
 		delta["energy_spent"] = spent
+	# Net channeled-rune loss over the line (Power payment recycles a rune off the
+	# board back to the rune deck). Omit when zero; not a per-rune / tap count.
+	var recycled: int = int(before.get("my_channeled_runes", 0)) - int(after.get("my_channeled_runes", 0))
+	if recycled > 0:
+		delta["runes_recycled"] = recycled
 
 	delta["next_decision"] = _next_decision(gs)
 	return delta

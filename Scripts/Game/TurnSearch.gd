@@ -221,9 +221,15 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 
 
 # Apply a forced move prefix on the root sim controller before beam expansion.
-# Records scripted + intermediate steps the same way normal expansion does so
-# deepen()/seeded search_for lines stay replayable. Returns "" on success or an
-# error string if a seed command is illegal.
+#
+# Seed commands are the AI seat's next actions in order — including intermediate
+# `pass` / `choose` steps already stored on a scout line. Between seed commands
+# only opponent windows are settled (see MoveSimulator.advance_opponent_windows)
+# so those AI intermediates are not double-applied by full quiescence. After the
+# whole prefix, full advance_to_quiescence collapses any remaining AI-forced
+# tip (same as normal expansion after a scripted move).
+#
+# Returns "" on success or an error string if a seed command is illegal.
 func _apply_seed_moves(
 	sc: GameController,
 	seed_moves: Array,
@@ -231,27 +237,45 @@ func _apply_seed_moves(
 	windows: Array,
 	choice_ranker: Callable,
 ) -> String:
+	var last_cmd := ""
 	for raw in seed_moves:
 		var cmd_str := str(raw)
 		if cmd_str.strip_edges() == "":
 			continue
-		var scripted_pre_hash := ScoreModelScript.structural_hash(
+		var pre_hash := ScoreModelScript.structural_hash(
 			ScoreModelScript.snapshot(sc.gs, _ai_index)
 		)
+		var kind := "scripted"
+		var context := ""
+		if cmd_str == "pass" or cmd_str.begins_with("choose "):
+			kind = "intermediate"
+			if cmd_str == "pass":
+				context = _sim._describe_ai_pass(sc.gs)
+			elif not sc.gs.pending_prompt.is_empty():
+				var choice := cmd_str.substr("choose ".length()).strip_edges()
+				context = _sim._describe_prompt(sc.gs.pending_prompt, choice)
 		sc.submit_command(_ai_index, cmd_str)
 		if sc.last_command_error:
 			return "seed move illegal: %s" % cmd_str
 		steps.append({
-			"command": cmd_str, "context": "", "kind": "scripted",
-			"pre_hash": scripted_pre_hash,
+			"command": cmd_str, "context": context, "kind": kind,
+			"pre_hash": pre_hash,
 		})
+		last_cmd = cmd_str
 		var child_windows: Array = []
-		var ai_steps: Array = []
-		_sim.advance_to_quiescence(sc, cmd_str, child_windows, ai_steps, choice_ranker)
-		steps.append_array(ai_steps)
+		_sim.advance_opponent_windows(sc, cmd_str, child_windows)
 		windows.append_array(child_windows)
 		if sc.gs.game_over:
-			break
+			return ""
+	# Tip settlement: auto-resolve any AI-forced acts not present in the seed
+	# (e.g. seed was only the strategic move; showdown pass / prompt chooses
+	# still need to land before beam expansion).
+	if last_cmd != "" and not sc.gs.game_over:
+		var tip_windows: Array = []
+		var tip_ai_steps: Array = []
+		_sim.advance_to_quiescence(sc, last_cmd, tip_windows, tip_ai_steps, choice_ranker)
+		steps.append_array(tip_ai_steps)
+		windows.append_array(tip_windows)
 	return ""
 
 

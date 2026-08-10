@@ -508,7 +508,11 @@ def _metrics_from_engine_payload(
         if "my_score_after" in resolved:
             metrics["my_score_after"] = resolved.get("my_score_after")
         metrics["conquers_if_unanswered"] = bool(resolved.get("conquer", False))
-        surviving = resolved.get("my_units_surviving") or []
+        surviving = (
+            resolved.get("my_units_on_battlefields")
+            or resolved.get("my_units_surviving")
+            or []
+        )
         metrics["attacker_survives_trade"] = bool(surviving) or bool(resolved.get("trade"))
     else:
         metrics["chosen_line_complete"] = bool(payload.get("chosen_line_complete", False))
@@ -621,28 +625,9 @@ def _metrics_from_reasoner(
     committed: Optional[dict[str, Any]],
     telemetry: dict[str, Any],
 ) -> dict[str, Any]:
-    kind = str(emit.get("kind", ""))
-    model_calls = int(
-        telemetry.get("model_calls")
-        or telemetry.get("reasoner_model_calls")
-        or 0
-    )
-    return {
-        "model_calls": model_calls,
-        "prompt_tokens": int(telemetry.get("prompt_tokens", 0) or 0),
-        "completion_tokens": int(telemetry.get("completion_tokens", 0) or 0),
-        "total_tokens": int(telemetry.get("total_tokens", 0) or 0),
-        "engine_nodes": int(
-            telemetry.get("nodes_used", telemetry.get("engine_nodes", 0)) or 0
-        ),
-        "fallback": kind in {"base_search_fallback", "fallback"},
-        "timeout": bool(telemetry.get("timeout", False)),
-        "reasoner_kind": kind,
-        "committed": committed is not None and kind == "line",
-        "chosen_line_complete": bool((committed or {}).get("complete", False))
-        if committed
-        else False,
-    }
+    from ai_agent.investigation_metrics import metrics_from_reasoner_telemetry
+
+    return metrics_from_reasoner_telemetry(emit, committed, telemetry)
 
 
 def _decision_from_metrics(

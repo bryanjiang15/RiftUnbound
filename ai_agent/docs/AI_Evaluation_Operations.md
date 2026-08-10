@@ -98,6 +98,22 @@ python -m ai_agent.eval run --manifest Data/AI/Eval/manifests/agent-argmax-smoke
 export GODOT=...
 # Prefer repo-root .env (OPENAI_API_KEY / Azure vars). Eval loads it automatically.
 python -m ai_agent.eval run --manifest Data/AI/Eval/manifests/reasoner-live-smoke.json
+# A/B current vs investigation redesign profile (gold/trap + investigation metrics)
+python -m ai_agent.eval run --manifest Data/AI/Eval/manifests/reasoner-investigate-accept.json
+```
+
+### Investigation-quality reports
+
+Eval `metrics.json` now includes investigation aggregates (`novel_investigation_rate`,
+`local_fork_rate`, `scout_agreement_rate`, …) when Reasoner telemetry is present.
+
+```bash
+# Summarize an existing run
+python -m ai_agent.eval investigate-report --run-dir Data/AI/Eval/runs/reasoner-live-smoke
+# Archive a §5.3-shaped baseline stub (or pass --from-run-dir for a live run)
+python -m ai_agent.eval investigate-baseline
+# SPRT strength report from arena pair JSONL
+python -m ai_agent.eval sprt-report --pairs-jsonl /tmp/pairs.jsonl --out Data/AI/Eval/runs/sprt/report.md
 ```
 
 `eval_lanes: ["agent"]` only — e.g. win-from-seven, turn8 continuation, card-play preferences. Spawns `EvalPositionRunner --mode agent_ready`, pins `EngineServer`, then runs in-process `run_reasoner`.

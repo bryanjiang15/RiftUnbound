@@ -8,6 +8,8 @@ Usage:
   python -m ai_agent.eval run --manifest Data/AI/Eval/manifests/agent-argmax-smoke.json
   python -m ai_agent.eval run --manifest Data/AI/Eval/manifests/reasoner-live-smoke.json
   python -m ai_agent.eval report --run-dir Data/AI/Eval/runs/<run_id>
+  python -m ai_agent.eval investigate-report --run-dir Data/AI/Eval/runs/<run_id>
+  python -m ai_agent.eval investigate-baseline
 """
 from __future__ import annotations
 
@@ -21,7 +23,12 @@ from .env import ensure_dotenv
 
 ensure_dotenv()
 
-from .arena import analyze_pairs, expand_pairs, load_arena_manifest
+from .arena import (
+    analyze_pairs,
+    expand_pairs,
+    load_arena_manifest,
+    write_sprt_report,
+)
 from .corpus import (
     DEFAULT_CATALOG_PATH,
     DEFAULT_POSITIONS_DIR,
@@ -29,6 +36,7 @@ from .corpus import (
     validate_corpus,
     write_catalog,
 )
+from .investigate_report import archive_baseline_stub, write_investigation_report
 from .runner import DEFAULT_PROFILES_DIR, DEFAULT_RUNS_DIR, run_eval
 from .schemas import EvalRunManifest
 from .transforms import available_transforms
@@ -59,6 +67,35 @@ def main(argv: list[str] | None = None) -> int:
     p_ar = sub.add_parser("expand-arena", help="Expand arena manifest into pair legs")
     p_ar.add_argument("--manifest", required=True)
     p_ar.add_argument("--out", help="Optional JSON output path")
+
+    p_inv = sub.add_parser(
+        "investigate-report",
+        help="Write investigation-quality metrics from an existing eval run",
+    )
+    p_inv.add_argument("--run-dir", required=True)
+
+    p_base = sub.add_parser(
+        "investigate-baseline",
+        help="Archive a §5.3-style investigation baseline report under Data/AI/Eval/runs",
+    )
+    p_base.add_argument("--runs-dir", default=str(DEFAULT_RUNS_DIR))
+    p_base.add_argument("--run-id", default=None)
+    p_base.add_argument(
+        "--from-run-dir",
+        default=None,
+        help="Optional existing eval run to summarize instead of the synthetic stub",
+    )
+
+    p_sprt = sub.add_parser(
+        "sprt-report",
+        help="Analyze arena pair JSONL and write an SPRT strength report",
+    )
+    p_sprt.add_argument(
+        "--pairs-jsonl",
+        required=True,
+        help="JSONL of aggregate pair records (both_finished, candidate_wins, ...)",
+    )
+    p_sprt.add_argument("--out", required=True, help="Markdown report output path")
 
     args = parser.parse_args(argv)
 
@@ -120,6 +157,35 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Wrote {args.out} ({len(jobs)} legs)")
         else:
             print(text)
+        return 0
+
+    if args.cmd == "investigate-report":
+        path = write_investigation_report(args.run_dir)
+        print(f"Wrote {path}")
+        return 0
+
+    if args.cmd == "investigate-baseline":
+        if args.from_run_dir:
+            src = Path(args.from_run_dir)
+            out = write_investigation_report(
+                src,
+                title="Reasoner investigation baseline (§5.3 harness)",
+                extra={"baseline_kind": "from_existing_run", "source_run": str(src)},
+            )
+            print(f"Wrote {out}")
+            return 0
+        run_dir = archive_baseline_stub(args.runs_dir, run_id=args.run_id)
+        print(f"Archived baseline: {run_dir}")
+        print(f"Report: {run_dir / 'investigation_report.md'}")
+        return 0
+
+    if args.cmd == "sprt-report":
+        pairs: list[dict] = []
+        for line in Path(args.pairs_jsonl).read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                pairs.append(json.loads(line))
+        path = write_sprt_report(pairs, args.out)
+        print(f"Wrote {path}")
         return 0
 
     return 1

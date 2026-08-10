@@ -543,7 +543,9 @@ TOOLS: list[dict] = [
                 "canonical line_id from search_for/deepen, OR propose a short 1-3 "
                 "move strategic prefix in moves; the engine applies it, resolves "
                 "intermediate choices, and searches the continuation with hashes. "
-                "This is the only way to turn a novel model idea into a committable line."
+                "Use prefix_steps with line_id to fork after the first k commands "
+                "(local pivot). This is the only way to turn a novel model idea "
+                "into a committable line."
             ),
             "parameters": {
                 "type": "object",
@@ -555,6 +557,13 @@ TOOLS: list[dict] = [
                     "extra_depth": {
                         "type": "integer",
                         "description": "Extra search depth to add (default 4).",
+                    },
+                    "prefix_steps": {
+                        "type": "integer",
+                        "description": (
+                            "When set with line_id, replay only the first k commands "
+                            "of that line, then beam-search alternate suffixes."
+                        ),
                     },
                     "moves": {
                         "type": "array",
@@ -614,6 +623,7 @@ def _dispatch_tool(name: str, arguments: dict) -> Any:
             line_id=arguments.get("line_id"),
             extra_depth=arguments.get("extra_depth", 4),
             moves=arguments.get("moves"),
+            prefix_steps=arguments.get("prefix_steps"),
         )
     return f"Unknown skill: {name}"
 
