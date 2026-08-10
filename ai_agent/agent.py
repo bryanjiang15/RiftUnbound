@@ -1316,7 +1316,7 @@ async def build_goal_overlay(
     eval_metrics: Optional[dict] = None,
     candidate_lines: Optional[list[CandidateLine]] = None,
     search_stats: Optional[SearchStats] = None,
-) -> ProfileOverlay:
+) -> tuple[ProfileOverlay, "GoalSet"]:
     """Run the per-turn strategist and compile its GoalSet into an overlay.
 
     Cached once per turn by the Strategist (invalidated when the opponent acts),
@@ -1326,6 +1326,8 @@ async def build_goal_overlay(
     When ``candidate_lines`` are supplied (Phase 1 scout search), they are
     summarized and installed so the strategist's ``search_turn`` tool grounds its
     goals in the engine's actual best lines instead of a static snapshot.
+
+    Returns ``(overlay, goal_set)`` so callers can persist goal telemetry.
     """
     opponent_action_count = memory.count_opponent_material_actions(game_id)
     timeline = memory.timeline_slice(game_id)
@@ -1357,7 +1359,7 @@ async def build_goal_overlay(
     overlay = compile_goals(goal_set)
     if not was_cached:
         _log_goals(game_id, brief_state, goal_set, overlay)
-    return overlay
+    return overlay, goal_set
 
 
 async def run_reasoner(

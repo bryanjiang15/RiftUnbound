@@ -22,14 +22,17 @@ const PRESIM_LINE_MAX := 8
 const PRESIM_DECISION_TYPES := ["main_phase", "showdown_focus", "chain_reaction", "combat_assignment"]
 
 
-static func serialize(gs: GameState, player_index: int) -> Dictionary:
+static func serialize(gs: GameState, player_index: int, include_sims: bool = true) -> Dictionary:
 	var ps: PlayerState = gs.players[player_index]
 	var opp: PlayerState = gs.players[1 - player_index]
 
 	var legal_moves: Array = LegalMoveEnumerator.enumerate(gs, player_index)
 	var decision_type := _decision_type(gs, player_index)
-	var sims := _presimulate_moves(gs, player_index, legal_moves, decision_type)
-	var line_sims := _presimulate_lines(gs, player_index, legal_moves, decision_type)
+	var sims := {}
+	var line_sims := {}
+	if include_sims:
+		sims = _presimulate_moves(gs, player_index, legal_moves, decision_type)
+		line_sims = _presimulate_lines(gs, player_index, legal_moves, decision_type)
 
 	return {
 		"schema_version": SCHEMA_VERSION,

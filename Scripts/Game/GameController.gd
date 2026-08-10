@@ -11,6 +11,9 @@ signal game_log_message(text: String)
 # statistics (storage doc §3). The base definition id is read agent-side from
 # card.definition.id — never reverse-engineered from instance_id.
 signal card_event(event: String, card: CardInstance, energy_spent: int, player_index: int)
+# Emitted at end of Ending Phase, before turn_number increments, so AI capture
+# can record one turn_snapshots pulse labeled with the completed turn.
+signal turn_ended(completed_turn: int, ending_player_index: int)
 
 const P1_DECK = "res://Data/Decks/starter-deck-p1.json"
 const P2_DECK = "res://Data/Decks/starter-deck-p2.json"
@@ -429,6 +432,9 @@ func _execute_end_of_turn() -> void:
 			u.clear_stun()
 
 	_log("> P%d ended their turn." % (turn_pi + 1))
+
+	# Snapshot the completed turn before the counter advances.
+	turn_ended.emit(gs.turn_number, turn_pi)
 
 	# Pass to next player
 	gs.turn_player_index = 1 - turn_pi

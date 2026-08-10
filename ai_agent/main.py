@@ -24,7 +24,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
@@ -99,9 +99,10 @@ _SEARCH_LOG_PATH = os.path.join(os.path.dirname(__file__), "agent_search.log")
 # Cache of profile-JSON text -> weight_versions.id, so a per-request profile is
 # registered/looked up once instead of hitting the DB on every decision.
 _weight_version_cache: dict[str, int] = {}
-# Goal overlays emitted by the Reasoner must also be reused by /decision for
-# situational/card re-ranking (engine generation only consumes weight multipliers).
-_reasoner_overlays: dict[tuple[str, int, str], Any] = {}
+# Goal overlays (+ GoalSet) emitted by the Reasoner must also be reused by
+# /decision for situational/card re-ranking and SQL goal telemetry.
+# Value: (ProfileOverlay, GoalSet | None)
+_reasoner_overlays: dict[tuple[str, int, str], tuple[Any, Any]] = {}
 
 
 def _reasoner_overlay_key(
@@ -484,26 +485,34 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
 
     # Run reasoning loop
     eval_metrics: dict = {}
+    overlay = None
+    goal_set = None
+    goals_source = "none"
     if _search_enabled and request.candidate_lines:
-        overlay = None
         # With fewer than two candidate lines there is nothing to bias/select, so
         # skip the strategist overlay (choose_line will short-circuit to the single
         # line). Goals only matter when the search actually offers a choice.
         if _reasoner_enabled:
-            overlay = _reasoner_overlays.get(
+            cached = _reasoner_overlays.get(
                 _reasoner_overlay_key(game_id, brief_state)
             )
+            if cached is not None:
+                overlay, goal_set = cached
+                goals_source = "reasoner"
         elif _goals_enabled and not _argmax_enabled and len(request.candidate_lines) > 1:
             try:
-                overlay = await build_goal_overlay(
+                overlay, goal_set = await build_goal_overlay(
                     brief_state=brief_state,
                     game_id=game_id,
                     memory=_memory,
                     eval_metrics=eval_metrics,
                 )
+                goals_source = "strategist"
             except Exception as exc:
                 logger.warning("Goal overlay failed (%s); selecting under base profile", exc)
                 overlay = None
+                goal_set = None
+                goals_source = "none"
         decision = await choose_line(
             brief_state=brief_state,
             game_id=game_id,
@@ -538,6 +547,9 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
         data_origin=_data_origin,
         capture_seat=_capture_seat,
         weight_resolver=_resolve_weight_version,
+        goals_source=goals_source,
+        goal_set=goal_set,
+        overlay=overlay,
     )
 
     # Write human-readable decision log
@@ -595,6 +607,14 @@ class CardEventRequest(BaseModel):
     my_player_index: int | None = None
     energy_spent: int = 0
     breakdown_delta: dict[str, Any] | None = None
+
+
+class TurnSnapshotRequest(BaseModel):
+    game_id: str
+    turn: int = 0
+    brief_state: dict[str, Any]
+    my_player_index: int | None = None
+    turn_player_index: int | None = None
 
 
 class GameStateEventRequest(BaseModel):
@@ -832,6 +852,26 @@ async def card_event_endpoint(body: CardEventRequest) -> dict:
     return {"status": "ok"}
 
 
+@app.post("/turn_snapshot")
+async def turn_snapshot_endpoint(body: TurnSnapshotRequest) -> dict:
+    """Godot posts one BriefState pulse at end-of-Ending-Phase (before turn++)."""
+    if _memory is None:
+        return {"status": "no-op"}
+    try:
+        capture_mod.capture_turn_snapshot(
+            memory=_memory,
+            game_id=body.game_id,
+            turn=body.turn,
+            brief_state=body.brief_state,
+            my_player_index=body.my_player_index,
+            turn_player_index=body.turn_player_index,
+        )
+    except Exception as exc:
+        logger.warning("Turn snapshot record failed: %s", exc)
+        return {"status": "error"}
+    return {"status": "ok"}
+
+
 @app.post("/game_state_event")
 async def game_state_event_endpoint(body: GameStateEventRequest) -> dict:
     """
@@ -887,7 +927,7 @@ async def goals_endpoint(request: GoalsRequest) -> dict:
     # get_card_detail, …) resolve against this position.
     skill_module.set_state(brief_state)
     try:
-        overlay = await build_goal_overlay(
+        overlay, _goal_set = await build_goal_overlay(
             brief_state=brief_state,
             game_id=game_id,
             memory=_memory,
@@ -899,6 +939,38 @@ async def goals_endpoint(request: GoalsRequest) -> dict:
         logger.warning("Goal overlay (handshake) failed (%s); empty overlay", exc)
         return {"overlay": {}}
     return {"overlay": overlay.to_dict()}
+
+
+def _capture_reasoner_row(
+    *,
+    game_id: str,
+    turn: int,
+    brief_state: dict[str, Any],
+    root_state_hash: Optional[str],
+    telemetry: dict[str, Any],
+    emit: Any,
+    committed_line: Optional[dict[str, Any]],
+    eval_metrics: Optional[dict[str, Any]] = None,
+) -> None:
+    """Best-effort SQL write for one /reason call."""
+    if _memory is None or not hasattr(_memory, "record_reasoner_decision"):
+        return
+    try:
+        decision_index = _memory._decision_counters.get(game_id, 0)
+        capture_mod.capture_reasoner_decision(
+            memory=_memory,
+            game_id=game_id,
+            turn=turn,
+            decision_index=decision_index,
+            root_state_hash=root_state_hash,
+            telemetry=telemetry,
+            chosen_line_id=getattr(emit, "chosen_line_id", None),
+            committed_line=committed_line,
+            rationale=getattr(emit, "rationale", None),
+            eval_metrics=eval_metrics,
+        )
+    except Exception as exc:  # noqa: BLE001 — never fail /reason on capture
+        logger.warning("Reasoner decision capture failed: %s", exc)
 
 
 @app.post("/reason")
@@ -913,32 +985,53 @@ async def reason_endpoint(request: ReasonRequest) -> dict:
     if not request.root_state_hash:
         _reasoner_overlays.pop(key, None)
         emit = empty_reasoner_emit(turn, "fallback: missing root state hash")
+        telemetry = {"fallback_reason": "missing_root_state_hash", "terminal_kind": emit.kind}
+        _capture_reasoner_row(
+            game_id=game_id,
+            turn=turn,
+            brief_state=brief_state,
+            root_state_hash="",
+            telemetry=telemetry,
+            emit=emit,
+            committed_line=None,
+        )
         return {
             **emit.model_dump(),
             "overlay": {},
             "committed_line": None,
             "root_state_hash": "",
-            "telemetry": {"fallback_reason": "missing_root_state_hash"},
+            "telemetry": telemetry,
         }
     if not _reasoner_enabled:
         _reasoner_overlays.pop(key, None)
         emit = empty_reasoner_emit(turn, "fallback: reasoner disabled")
+        telemetry = {"fallback_reason": "reasoner_disabled", "terminal_kind": emit.kind}
+        _capture_reasoner_row(
+            game_id=game_id,
+            turn=turn,
+            brief_state=brief_state,
+            root_state_hash=request.root_state_hash,
+            telemetry=telemetry,
+            emit=emit,
+            committed_line=None,
+        )
         return {
             **emit.model_dump(),
             "overlay": {},
             "committed_line": None,
             "root_state_hash": request.root_state_hash,
-            "telemetry": {"fallback_reason": "reasoner_disabled"},
+            "telemetry": telemetry,
         }
 
     skill_module.set_state(brief_state)
     skill_module.set_history_context(_memory, game_id)
+    eval_metrics: dict = {}
     try:
         emit, committed_line, telemetry = await run_reasoner(
             brief_state=brief_state,
             game_id=game_id,
             memory=_memory,
-            eval_metrics={},
+            eval_metrics=eval_metrics,
             candidate_lines=request.candidate_lines,
             search_stats=request.search_stats,
             root_state_hash=request.root_state_hash,
@@ -947,7 +1040,11 @@ async def reason_endpoint(request: ReasonRequest) -> dict:
         logger.warning("Reasoner failed (%s); base-profile search", exc)
         emit = empty_reasoner_emit(turn, "fallback: reasoner failure")
         committed_line = None
-        telemetry = {"fallback_reason": "reasoner_failure", "error": str(exc)}
+        telemetry = {
+            "fallback_reason": "reasoner_failure",
+            "error": str(exc),
+            "terminal_kind": emit.kind,
+        }
 
     if emit.kind == "line":
         logger.info(
@@ -968,9 +1065,20 @@ async def reason_endpoint(request: ReasonRequest) -> dict:
 
     overlay = compile_goals(emit.goal_set) if emit.kind == "goals" and emit.goal_set else None
     if overlay is not None and not overlay.is_empty():
-        _reasoner_overlays[key] = overlay
+        _reasoner_overlays[key] = (overlay, emit.goal_set)
     else:
         _reasoner_overlays.pop(key, None)
+
+    _capture_reasoner_row(
+        game_id=game_id,
+        turn=turn,
+        brief_state=brief_state,
+        root_state_hash=request.root_state_hash,
+        telemetry=telemetry,
+        emit=emit,
+        committed_line=committed_line,
+        eval_metrics=eval_metrics,
+    )
     return {
         **emit.model_dump(),
         "overlay": overlay.to_dict() if overlay is not None else {},

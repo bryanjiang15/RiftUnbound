@@ -659,6 +659,8 @@ async def _request_reasoning(
                 if line.get("complete")
             ]
             selected_line = context.registry.get(emit.chosen_line_id)
+            from .capture import compact_tool_trace
+
             context.telemetry.update({
                 "terminal_kind": emit.kind,
                 "valid_goal_count": (
@@ -673,6 +675,7 @@ async def _request_reasoning(
                 "comparison_required": comparison_required,
                 "score_primary_rationale": rationale_is_score_primary(emit.rationale),
                 "tool_mix": [entry.get("name") for entry in tool_trace],
+                "tool_trace": compact_tool_trace(tool_trace),
                 "budget": active_budget.status() if active_budget else {},
                 "scout_agreement": bool(
                     emit.kind == "line"
@@ -850,6 +853,8 @@ async def _request_reasoning(
                         status = classify_search_result(name, result, scout_leader)
                         last_result_status = status
                         result["result_status"] = status
+                        if tool_trace:
+                            tool_trace[-1]["result_status"] = status
                         query_key = json.dumps(
                             {"name": name, "args": args},
                             sort_keys=True,

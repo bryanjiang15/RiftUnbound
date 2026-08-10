@@ -36,7 +36,7 @@ TurnSearch (beam, linear ScoringProfile)
 | **Argmax self-play** | `SEARCH=on`, `SEARCH_ARGMAX=on` | Pure search + weights. Best for Texel / weight A/B. |
 | **LLM selector** | `SEARCH=on`, goals off | Selection vs eval vs search error (classic triad). |
 | **Goals on** | `SEARCH=on`, `GOALS=on` | Also **goal error** (bad overlay steered generation/selection). |
-| **Future Reasoner** | planned `RIFTBOUND_REASONER` | Also **investigation / commit** error (tool misuse or direct line commit). |
+| **Reasoner** | `RIFTBOUND_REASONER=on` | Also **investigation / commit** error (tool misuse or direct line commit); see `reasoner_decisions`. |
 
 Always stratify aggregates by `origin` (`self_play` / `vs_human` / `vs_heuristic`)
 and `selector_source` (`argmax` / `llm` / `fallback` / `single`). Never mix
@@ -47,6 +47,9 @@ argmax weight-tuning data with goals-on quality data without saying so.
 | Piece | Where |
 |---|---|
 | Tuning tables | `search_decisions`, `candidate_lines`, `decision_snapshots`, `weight_versions`, `card_events` in `memory.py` |
+| Goal / overlay telemetry | `search_decisions.goals_source` / `goal_set_json` / `overlay_json` / `chosen_overlay_delta` / `chosen_goal_achieved_json` |
+| Reasoner summary | `reasoner_decisions` (+ compact `tool_trace` on `/reason` telemetry) |
+| Turn pulses | `turn_snapshots` via `/turn_snapshot` + self-play JSONL |
 | Outcome backfill | `/game_over` → `game_outcome`, `final_score_diff`, `went_first` |
 | Self-play harness | `SelfPlaySim.gd` + offline JSONL capture / `import_selfplay_logs.py` |
 | Deterministic reports | `feature_report.py`, `card_report.py`, `texel_tune.py` |
@@ -57,9 +60,6 @@ argmax weight-tuning data with goals-on quality data without saying so.
 
 | Gap | Why it matters |
 |---|---|
-| Persist `goal_set` + overlay deltas + achieved-at-leaf | Without this, goal error is invisible in SQL |
-| Persist strategist/actor tool traces (or a compact summary) | Needed for investigation-error triage |
-| `turn_snapshots` | WPA / swing-turn localization |
 | `hypotheses` + `tuning_runs` | Audit trail for the loop below |
 | Typed analysis API + briefing generator | §1–2 (not built) |
 | Offline counterfactual line search | §3 (not built; reuses EngineServer) |
@@ -319,8 +319,9 @@ set, leaf predicates satisfied, comparison to played line.
 
 ## 9. Build order
 
-1. **Telemetry for goals/tools** — persist GoalSet, overlay deltas, achieved-at-leaf;
-   compact tool-trace summary; extend `selector_source` when Reasoner lands.
+1. ~~**Telemetry for goals/tools**~~ — **shipped:** GoalSet/overlay/achieved-at-leaf
+   on `search_decisions`, compact Reasoner rows in `reasoner_decisions`,
+   `turn_snapshots`.
 2. **Deterministic briefing + typed DB tools** (§2.1, §5) wrapping existing
    reports — useful to humans with no LLM yet.
 3. **Same-turn counterfactual** (§3.1) on logged snapshots via EngineServer.

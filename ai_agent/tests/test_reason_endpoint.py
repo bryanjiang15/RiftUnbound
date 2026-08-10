@@ -30,7 +30,9 @@ def _brief() -> dict:
     }
 
 
-def test_reason_endpoint_returns_full_canonical_committed_line():
+def test_reason_endpoint_returns_full_canonical_committed_line(tmp_path):
+    from ai_agent.memory import Memory
+
     committed = {
         "line_id": "deepen-1-line-1-abc",
         "moves": ["pass", "end turn"],
@@ -55,11 +57,17 @@ def test_reason_endpoint_returns_full_canonical_committed_line():
     )
 
     async def fake_run(**kwargs):
-        return emit, committed, {"terminal_kind": "line"}
+        return emit, committed, {
+            "terminal_kind": "line",
+            "tool_mix": ["search_for"],
+            "tool_trace": [{"round": 0, "name": "search_for", "args": {}, "summary": "ok"}],
+            "novel_investigation": True,
+        }
 
     old_memory = main._memory
     old_enabled = main._reasoner_enabled
-    main._memory = object()
+    mem = Memory(db_path=tmp_path / "reason.db")
+    main._memory = mem
     main._reasoner_enabled = True
     try:
         with patch("ai_agent.main.run_reasoner", side_effect=fake_run):
@@ -70,6 +78,12 @@ def test_reason_endpoint_returns_full_canonical_committed_line():
     assert payload["kind"] == "line"
     assert payload["committed_line"] == committed
     assert payload["root_state_hash"] == "root"
+    with mem._connect() as conn:
+        row = conn.execute("SELECT * FROM reasoner_decisions").fetchone()
+    assert row is not None
+    assert row["terminal_kind"] == "line"
+    assert row["chosen_line_id"] == committed["line_id"]
+    assert row["committed"] == 1
 
 
 def test_reason_endpoint_missing_root_uses_explicit_base_search_fallback():

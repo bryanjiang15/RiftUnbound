@@ -1,9 +1,9 @@
 # Statistical Analysis Storage — Design Doc
 
-Status: **core tuning dataset implemented** (`memory.py` / `capture.py`);
-`turn_snapshots`, `tuning_runs`, and goal/tool telemetry are still open.
+Status: **core tuning dataset + goal/Reasoner/turn telemetry implemented**
+(`memory.py` / `capture.py`); `tuning_runs` and `hypotheses` are still open.
 Scope: queryable data storage for analysis/tuning of the search + linear-eval AI
-(and, once logged, goal overlays / Reasoner decisions).
+(including goal overlays and Reasoner decisions).
 
 Post-game analyst plan: `LLM_Data_Analysis_Loop.md`. Weight-tuning algorithms:
 `Score_Tuning_And_Evolution.md`.
@@ -67,14 +67,15 @@ self-play import). Details in §2.
 
 | Table | Grain |
 |---|---|
-| `search_decisions` | per searched decision (features, breakdown, regret, origin, selector, outcome backfill) |
+| `search_decisions` | per searched decision (features, breakdown, regret, origin, selector, outcome backfill, GoalSet/overlay/achieved-at-leaf) |
 | `candidate_lines` | per candidate per decision |
 | `decision_snapshots` | full BriefState + scalars at decision |
 | `weight_versions` | profile hash/json + git SHA |
 | `card_events` | per card lifecycle event (base `definition_id` stamped) |
+| `reasoner_decisions` | per `/reason` (compact investigation summary + tool_mix/budget) |
+| `turn_snapshots` | per completed turn per AI seat (scalars + rune counts + BriefState) |
 
-**Still missing for full analysis:** GoalSet / overlay / tool-trace persistence,
-`turn_snapshots`, `tuning_runs`, `hypotheses`.
+**Still missing for full analysis:** `tuning_runs`, `hypotheses`.
 
 ---
 
@@ -216,9 +217,16 @@ ever unavoidable, only strip the counter the allocator itself appended, not any
   join-key note); do not reverse from `instance_id`.
 - `game_outcome` / `went_first` / `first_player_index`: `/game_over` backfill
   (seat-aware for two-seat self-play under one `game_id`).
-- GoalSet / overlay / tool traces: written to debug logs when
-  `RIFTBOUND_LOG_INPUTS=1` today; **not yet** in SQL (open item for post-game
-  triage).
+- GoalSet / overlay / achieved-at-leaf: threaded from `/goals` or `/reason`
+  caches into `capture_search_decision` → `search_decisions` columns
+  (`goals_source`, `goal_set_json`, `overlay_json`, `chosen_overlay_delta`,
+  `chosen_goal_achieved_json`). Still mirrored to `agent_search.log` when
+  `RIFTBOUND_LOG_INPUTS=1`.
+- Reasoner investigation summary: `capture_reasoner_decision` on `/reason` →
+  `reasoner_decisions` (compact `tool_mix` / budget / flags). Compact
+  `tool_trace` is also attached to the `/reason` telemetry payload for eval.
+- `turn_snapshots`: Godot `turn_ended` → `POST /turn_snapshot` (and offline
+  JSONL kind `turn_snapshot`) at end of Ending Phase before `turn_number++`.
 
 ---
 
@@ -332,9 +340,11 @@ attribution.
    capture / `import_selfplay_logs.py`.
 6. Texel proposer (`texel_tune.py`) + `feature_report.py`.
 
+**Done (telemetry gaps)**
+7. Persist GoalSet + overlay deltas + achieved-at-leaf on `search_decisions`;
+   compact Reasoner summary in `reasoner_decisions` (+ `tool_trace` on telemetry).
+8. `turn_snapshots` via `/turn_snapshot` + self-play JSONL import.
+
 **Open (next for post-game analysis)**
-7. Persist GoalSet + overlay deltas + achieved-at-leaf; compact tool-trace summary
-   (required for goal / investigation triage — see `LLM_Data_Analysis_Loop.md` §0.2).
-8. `turn_snapshots` (WPA / swing-turn detection).
 9. `tuning_runs` + SPRT gate records.
 10. `hypotheses` (+ optional `counterfactual_runs`) for the analyst audit trail.
