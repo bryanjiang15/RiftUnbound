@@ -1302,9 +1302,10 @@ class Memory:
         """Per-card aggregate statistics (storage doc §3 derived view).
 
         Aggregation key is the base ``card_def_id``. WPA is intentionally
-        omitted (needs turn_snapshots, not yet implemented). Cards below
-        ``min_plays`` are returned in ``low_sample`` rather than ``cards`` so the
-        sample-size caveat is explicit, not silently mixed in.
+        omitted here — ``turn_snapshots`` are now captured, but this report does
+        not yet compute Δ win-probability from them. Cards below ``min_plays``
+        are returned in ``low_sample`` rather than ``cards`` so the sample-size
+        caveat is explicit, not silently mixed in.
         """
         with self._connect() as conn:
             games_total = conn.execute(
@@ -1399,7 +1400,10 @@ class Memory:
             "min_plays": min_plays,
             "cards": cards,
             "low_sample": low_sample,
-            "note": "WPA omitted (requires turn_snapshots). win_rate_when_played is survivorship-biased.",
+            "note": (
+                "WPA not computed yet (turn_snapshots are captured; this report "
+                "does not derive ΔWP). win_rate_when_played is survivorship-biased."
+            ),
         }
 
     # ── Helpers ───────────────────────────────────────────────────────────────

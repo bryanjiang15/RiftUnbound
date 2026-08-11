@@ -334,6 +334,10 @@ def goal_achievement_for_line(
     Returns ``(chosen_overlay_delta, {goal_id: {satisfaction, met, delta}})``.
     Satisfaction is graded ``[0, 1]`` for state/card targets; weight_bias uses
     the signed contribution normalized only as present/absent for ``met``.
+
+    When the overlay dropped a goal (empty or partial compile), state/card
+    targets still evaluate from the Goal's own metric/comparator/threshold /
+    card_id fields so ``chosen_goal_achieved_json`` stays populated.
     """
     parts = overlay_delta_breakdown(
         overlay,
@@ -354,14 +358,20 @@ def goal_achievement_for_line(
         gid = str(goal.id)
         if goal.kind == "state_target":
             term = situational.get(gid)
-            if term is None:
+            # Fall back to Goal fields when the overlay dropped this term
+            # (empty/partial compile) so achievement is still queryable.
+            metric = (term or {}).get("metric") or goal.metric
+            metric_key = (term or {}).get("metric_key") or goal.metric_key
+            comparator = (term or {}).get("comparator") or goal.comparator
+            threshold = (term or {}).get("threshold")
+            if threshold is None:
+                threshold = goal.threshold
+            if metric is None or comparator is None or threshold is None:
                 achieved[gid] = {"satisfaction": 0.0, "met": False, "delta": 0.0}
                 continue
-            val = _metric_from_features(
-                features or {}, term["metric"], term.get("metric_key")
-            )
+            val = _metric_from_features(features or {}, metric, metric_key)
             sat = (
-                graded_value(val, term["comparator"], float(term["threshold"]))
+                graded_value(val, comparator, float(threshold))
                 if val is not None
                 else 0.0
             )

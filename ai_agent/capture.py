@@ -139,19 +139,23 @@ def _goal_telemetry(
         goal_set_dict = (
             goal_set.model_dump() if hasattr(goal_set, "model_dump") else goal_set
         )
-    if overlay is not None and not overlay.is_empty():
-        overlay_dict = overlay.to_dict()
-        if chosen is not None:
-            features = getattr(chosen, "features", None) or {}
-            breakdown = getattr(chosen, "score_breakdown", None) or {}
-            moves = _move_strings(getattr(chosen, "moves", None) or [])
-            chosen_delta, achieved = goal_achievement_for_line(
-                goal_set,
-                overlay,
-                features=features,
-                score_breakdown=breakdown,
-                moves=moves,
-            )
+    effective_overlay = overlay if overlay is not None else ProfileOverlay()
+    if not effective_overlay.is_empty():
+        overlay_dict = effective_overlay.to_dict()
+    # Always record per-goal achievement when a GoalSet is present, even if the
+    # compiled overlay is empty (all goals dropped) — leaf met/satisfaction still
+    # evaluates from Goal fields / features.
+    if goal_set is not None and chosen is not None:
+        features = getattr(chosen, "features", None) or {}
+        breakdown = getattr(chosen, "score_breakdown", None) or {}
+        moves = _move_strings(getattr(chosen, "moves", None) or [])
+        chosen_delta, achieved = goal_achievement_for_line(
+            goal_set,
+            effective_overlay,
+            features=features,
+            score_breakdown=breakdown,
+            moves=moves,
+        )
     elif source == "none" and goal_set is None and overlay is None:
         source = "none"
 

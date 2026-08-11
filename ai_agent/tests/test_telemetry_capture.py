@@ -115,6 +115,98 @@ def test_goal_achievement_state_target_met():
     assert delta == pytest.approx(achieved["runes"]["delta"])
 
 
+def test_goal_achievement_with_empty_overlay_uses_goal_fields():
+    """Even when compile yields an empty overlay, leaf achievement still records."""
+    goal_set = GoalSet(
+        turn=3,
+        rationale="r",
+        goals=[
+            Goal(
+                id="runes",
+                kind="state_target",
+                metric="my_ready_runes",
+                comparator=">=",
+                threshold=1,
+                priority="med",
+            ),
+            Goal(
+                id="play-x",
+                kind="card_target",
+                card_id="vi-destructive",
+                priority="low",
+            ),
+        ],
+    )
+    empty = gc.ProfileOverlay()
+    assert empty.is_empty()
+    delta, achieved = gc.goal_achievement_for_line(
+        goal_set,
+        empty,
+        features={"my_ready_runes": 2},
+        score_breakdown={},
+        moves=["play vi-destructive to base"],
+    )
+    assert delta == 0.0
+    assert achieved["runes"]["met"] is True
+    assert achieved["runes"]["satisfaction"] == pytest.approx(1.0)
+    assert achieved["play-x"]["met"] is True
+
+
+def test_capture_search_decision_persists_achievement_with_empty_overlay(mem: Memory):
+    goal_set = GoalSet(
+        turn=3,
+        rationale="hold",
+        goals=[
+            Goal(
+                id="runes",
+                kind="state_target",
+                metric="my_ready_runes",
+                comparator=">=",
+                threshold=1,
+                priority="high",
+            )
+        ],
+    )
+    line = CandidateLine(
+        line_id="L1",
+        score=10.0,
+        moves=["pass"],
+        features={"my_ready_runes": 1},
+        score_breakdown={},
+    )
+    request = DecisionRequest(
+        brief_state=BriefState.model_validate(_brief()),
+        game_id="g1",
+        candidate_lines=[line],
+    )
+    decision = Decision(
+        reasoning="ok",
+        move=Move(action="pass"),
+        chosen_line_id="L1",
+        selector_source="argmax",
+    )
+    capture_mod.capture_search_decision(
+        memory=mem,
+        game_id="g1",
+        decision_index=0,
+        brief_state=_brief(),
+        request=request,
+        decision=decision,
+        origin="self_play",
+        weight_resolver=lambda _p: None,
+        goals_source="strategist",
+        goal_set=goal_set,
+        overlay=gc.ProfileOverlay(),
+    )
+    with mem._connect() as conn:
+        row = conn.execute("SELECT * FROM search_decisions").fetchone()
+    assert row["goals_source"] == "strategist"
+    assert row["goal_set_json"] is not None
+    assert row["overlay_json"] is None
+    achieved = json.loads(row["chosen_goal_achieved_json"])
+    assert achieved["runes"]["met"] is True
+
+
 def test_capture_search_decision_persists_goal_fields(mem: Memory, monkeypatch):
     monkeypatch.setattr(gc, "weight_bias_features", lambda path=None: {
         "battlefield_control": "state_weights",

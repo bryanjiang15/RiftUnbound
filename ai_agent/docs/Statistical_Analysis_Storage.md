@@ -222,11 +222,18 @@ ever unavoidable, only strip the counter the allocator itself appended, not any
   (`goals_source`, `goal_set_json`, `overlay_json`, `chosen_overlay_delta`,
   `chosen_goal_achieved_json`). Still mirrored to `agent_search.log` when
   `RIFTBOUND_LOG_INPUTS=1`.
+  **Join note:** when the Reasoner commits a line (`kind=line`), the overlay
+  cache is cleared and the following `/decision` row often has
+  `goals_source='none'`. That does *not* mean the Reasoner sat out — join
+  `reasoner_decisions` on `(game_id, turn)` (and `decision_index` when present)
+  to recover investigation/commit telemetry for those turns.
 - Reasoner investigation summary: `capture_reasoner_decision` on `/reason` →
   `reasoner_decisions` (compact `tool_mix` / budget / flags). Compact
   `tool_trace` is also attached to the `/reason` telemetry payload for eval.
 - `turn_snapshots`: Godot `turn_ended` → `POST /turn_snapshot` (and offline
-  JSONL kind `turn_snapshot`) at end of Ending Phase before `turn_number++`.
+  JSONL kind `turn_snapshot`) at end of Ending Phase after cleanup/stun clear,
+  **before** `rune_pool.empty()` and `turn_number++`, so energy/power scalars
+  reflect the turn as played.
 
 ---
 
