@@ -16,8 +16,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Optional
 
+from .goal_compiler import ProfileOverlay, goal_achievement_for_line
 from .memory import Memory
-from .schemas import Decision, DecisionRequest
+from .schemas import Decision, DecisionRequest, GoalSet
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,11 @@ def snapshot_scalars(brief_state: dict) -> dict:
             bf_control_net -= 1
 
     board_might_diff = (_might(my_units) + my_bf_might) - (_might(opp_units) + opp_bf_might)
+    runes = brief_state.get("my_runes", []) or []
+    ready_runes = 0
+    for rune in runes:
+        if isinstance(rune, dict) and not rune.get("is_exhausted", False):
+            ready_runes += 1
     return {
         "my_score": brief_state.get("my_score"),
         "opp_score": brief_state.get("opponent_score"),
@@ -63,6 +69,8 @@ def snapshot_scalars(brief_state: dict) -> dict:
         "cards_in_hand": len(brief_state.get("my_hand", []) or []),
         "cards_in_hand_opp": brief_state.get("opponent_hand_size"),
         "bf_control_net": bf_control_net,
+        "my_rune_count": len(runes),
+        "my_ready_rune_count": ready_runes,
     }
 
 
@@ -77,6 +85,92 @@ def _serialize_moves(moves: list) -> list:
     return out
 
 
+def _move_strings(moves: list) -> list[str]:
+    """Flatten candidate moves to command strings for goal/card matching."""
+    out: list[str] = []
+    for m in moves or []:
+        if isinstance(m, str):
+            out.append(m)
+        elif isinstance(m, dict):
+            cmd = m.get("command") or m.get("to_command")
+            if cmd:
+                out.append(str(cmd))
+            else:
+                out.append(json_dumps_safe(m))
+        elif hasattr(m, "to_command"):
+            try:
+                out.append(str(m.to_command()))
+                continue
+            except Exception:
+                pass
+            if hasattr(m, "model_dump"):
+                out.append(json_dumps_safe(m.model_dump()))
+            else:
+                out.append(str(m))
+        else:
+            out.append(str(m))
+    return out
+
+
+def json_dumps_safe(value: Any) -> str:
+    import json
+
+    try:
+        return json.dumps(value, default=str, sort_keys=True)
+    except Exception:
+        return str(value)
+
+
+def _goal_telemetry(
+    *,
+    goals_source: Optional[str],
+    goal_set: Optional[GoalSet],
+    overlay: Optional[ProfileOverlay],
+    chosen: Any,
+) -> dict[str, Any]:
+    """Build the GoalSet/overlay fields for a search_decisions row."""
+    source = goals_source or "none"
+    goal_set_dict = None
+    overlay_dict = None
+    chosen_delta = None
+    achieved = None
+
+    if goal_set is not None:
+        goal_set_dict = (
+            goal_set.model_dump() if hasattr(goal_set, "model_dump") else goal_set
+        )
+    effective_overlay = overlay if overlay is not None else ProfileOverlay()
+    if not effective_overlay.is_empty():
+        overlay_dict = effective_overlay.to_dict()
+    # Always record per-goal achievement when a GoalSet is present, even if the
+    # compiled overlay is empty (all goals dropped) — leaf met/satisfaction still
+    # evaluates from Goal fields / features.
+    if goal_set is not None and chosen is not None:
+        features = getattr(chosen, "features", None) or {}
+        breakdown = getattr(chosen, "score_breakdown", None) or {}
+        moves = _move_strings(getattr(chosen, "moves", None) or [])
+        chosen_delta, achieved = goal_achievement_for_line(
+            goal_set,
+            effective_overlay,
+            features=features,
+            score_breakdown=breakdown,
+            moves=moves,
+        )
+    elif source == "none" and goal_set is None and overlay is None:
+        source = "none"
+
+    if source not in ("strategist", "reasoner", "none"):
+        source = "none"
+
+    return {
+        "goals_source": source,
+        "goal_set": goal_set_dict,
+        "overlay": overlay_dict,
+        "chosen_overlay_delta": chosen_delta,
+        "chosen_goal_achieved": achieved,
+    }
+
+
 def capture_search_decision(
     *,
     memory: Memory,
@@ -87,6 +181,9 @@ def capture_search_decision(
     decision: Decision,
     origin: str,
     weight_resolver: WeightResolver,
+    goals_source: Optional[str] = None,
+    goal_set: Optional[GoalSet] = None,
+    overlay: Optional[ProfileOverlay] = None,
 ) -> None:
     """Persist the search_decisions / candidate_lines / decision_snapshots rows."""
     candidates = list(request.candidate_lines or [])
@@ -124,6 +221,12 @@ def capture_search_decision(
     # Attribute this row to the seat's actual profile (per-seat), not the single
     # profile the server read at startup.
     weight_version_id = weight_resolver(request.scoring_profile_json)
+    goal_fields = _goal_telemetry(
+        goals_source=goals_source,
+        goal_set=goal_set,
+        overlay=overlay,
+        chosen=chosen,
+    )
 
     memory.record_search_decision(
         game_id=game_id,
@@ -146,6 +249,11 @@ def capture_search_decision(
         origin=origin,
         weight_version_id=weight_version_id,
         candidates=cand_rows,
+        goals_source=goal_fields["goals_source"],
+        goal_set=goal_fields["goal_set"],
+        overlay=goal_fields["overlay"],
+        chosen_overlay_delta=goal_fields["chosen_overlay_delta"],
+        chosen_goal_achieved=goal_fields["chosen_goal_achieved"],
     )
     memory.record_decision_snapshot(
         game_id=game_id,
@@ -167,6 +275,9 @@ def capture_decision(
     data_origin: str,
     capture_seat: Optional[int],
     weight_resolver: WeightResolver,
+    goals_source: Optional[str] = None,
+    goal_set: Optional[GoalSet] = None,
+    overlay: Optional[ProfileOverlay] = None,
 ) -> None:
     """Persist all rows for one produced decision (episodic + eval + tuning).
 
@@ -217,9 +328,122 @@ def capture_decision(
                 decision=decision,
                 origin=data_origin,
                 weight_resolver=weight_resolver,
+                goals_source=goals_source,
+                goal_set=goal_set,
+                overlay=overlay,
             )
         except Exception as exc:
             logger.warning("Search decision capture failed: %s", exc)
+
+
+def compact_tool_trace(tool_trace: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Shrink a Reasoner tool trace for SQL/eval (no full result bodies)."""
+    out: list[dict[str, Any]] = []
+    for entry in tool_trace or []:
+        args = entry.get("args") or {}
+        compact_args: dict[str, Any] = {}
+        if isinstance(args, dict):
+            for key, value in list(args.items())[:8]:
+                if isinstance(value, (str, int, float, bool)) or value is None:
+                    compact_args[key] = (
+                        value if not isinstance(value, str) or len(value) <= 80
+                        else value[:77] + "..."
+                    )
+                else:
+                    rendered = json_dumps_safe(value)
+                    compact_args[key] = (
+                        rendered if len(rendered) <= 80 else rendered[:77] + "..."
+                    )
+        summary = entry.get("summary") or ""
+        if isinstance(summary, str) and len(summary) > 200:
+            summary = summary[:197] + "..."
+        out.append(
+            {
+                "round": entry.get("round"),
+                "name": entry.get("name"),
+                "args": compact_args,
+                "result_status": entry.get("result_status"),
+                "summary": summary,
+            }
+        )
+    return out
+
+
+def capture_reasoner_decision(
+    *,
+    memory: Memory,
+    game_id: str,
+    turn: int,
+    decision_index: Optional[int],
+    root_state_hash: Optional[str],
+    telemetry: dict,
+    chosen_line_id: Optional[str] = None,
+    committed_line: Optional[dict] = None,
+    rationale: Optional[str] = None,
+    eval_metrics: Optional[dict] = None,
+) -> None:
+    """Persist one compact Reasoner investigation row (/reason)."""
+    metrics = eval_metrics or {}
+    committed = None
+    complete = None
+    if committed_line is not None:
+        committed = True
+        complete = bool(committed_line.get("complete"))
+        chosen_line_id = chosen_line_id or committed_line.get("line_id")
+    elif telemetry.get("terminal_kind") == "line":
+        committed = True
+    elif telemetry.get("terminal_kind") in ("goals", "base_search_fallback"):
+        committed = False
+    try:
+        memory.record_reasoner_decision(
+            game_id=game_id,
+            turn=turn,
+            decision_index=decision_index,
+            root_state_hash=root_state_hash,
+            telemetry=telemetry,
+            chosen_line_id=chosen_line_id,
+            committed=committed,
+            chosen_line_complete=complete,
+            rationale=rationale,
+            model_calls=metrics.get("model_calls") or metrics.get("actor_model_calls"),
+            prompt_tokens=metrics.get("prompt_tokens") or metrics.get("actor_prompt_tokens"),
+            completion_tokens=(
+                metrics.get("completion_tokens") or metrics.get("actor_completion_tokens")
+            ),
+        )
+    except Exception as exc:
+        logger.warning("Reasoner decision capture failed: %s", exc)
+
+
+def capture_turn_snapshot(
+    *,
+    memory: Memory,
+    game_id: str,
+    turn: int,
+    brief_state: dict,
+    my_player_index: Optional[int] = None,
+    turn_player_index: Optional[int] = None,
+) -> None:
+    """Persist one end-of-turn board pulse (/turn_snapshot)."""
+    try:
+        memory.record_turn_snapshot(
+            game_id=game_id,
+            turn=turn,
+            my_player_index=(
+                my_player_index
+                if my_player_index is not None
+                else brief_state.get("my_player_index")
+            ),
+            turn_player_index=(
+                turn_player_index
+                if turn_player_index is not None
+                else brief_state.get("turn_player_index")
+            ),
+            scalars=snapshot_scalars(brief_state),
+            brief_state=brief_state,
+        )
+    except Exception as exc:
+        logger.warning("Turn snapshot record failed: %s", exc)
 
 
 # ── Outcome / event / game-over capture ───────────────────────────────────────

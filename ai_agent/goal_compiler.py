@@ -319,3 +319,87 @@ def overlay_delta(
     return sum(overlay_delta_breakdown(
         overlay, features=features, score_breakdown=score_breakdown, moves=moves
     ).values())
+
+
+def goal_achievement_for_line(
+    goal_set: Optional[GoalSet],
+    overlay: ProfileOverlay,
+    *,
+    features: dict[str, Any],
+    score_breakdown: dict[str, Any],
+    moves: list[str],
+) -> tuple[float, dict[str, dict[str, Any]]]:
+    """Per-goal leaf achievement for the chosen line + total overlay delta.
+
+    Returns ``(chosen_overlay_delta, {goal_id: {satisfaction, met, delta}})``.
+    Satisfaction is graded ``[0, 1]`` for state/card targets; weight_bias uses
+    the signed contribution normalized only as present/absent for ``met``.
+
+    When the overlay dropped a goal (empty or partial compile), state/card
+    targets still evaluate from the Goal's own metric/comparator/threshold /
+    card_id fields so ``chosen_goal_achieved_json`` stays populated.
+    """
+    parts = overlay_delta_breakdown(
+        overlay,
+        features=features or {},
+        score_breakdown=score_breakdown or {},
+        moves=moves or [],
+    )
+    total_delta = float(sum(parts.values()))
+    achieved: dict[str, dict[str, Any]] = {}
+    if goal_set is None:
+        return total_delta, achieved
+
+    joined = " ".join(moves or [])
+    situational = {str(t.get("id")): t for t in overlay.situational_terms}
+    card_bonuses = {str(b.get("id")): b for b in overlay.card_bonuses}
+
+    for goal in goal_set.goals:
+        gid = str(goal.id)
+        if goal.kind == "state_target":
+            term = situational.get(gid)
+            # Fall back to Goal fields when the overlay dropped this term
+            # (empty/partial compile) so achievement is still queryable.
+            metric = (term or {}).get("metric") or goal.metric
+            metric_key = (term or {}).get("metric_key") or goal.metric_key
+            comparator = (term or {}).get("comparator") or goal.comparator
+            threshold = (term or {}).get("threshold")
+            if threshold is None:
+                threshold = goal.threshold
+            if metric is None or comparator is None or threshold is None:
+                achieved[gid] = {"satisfaction": 0.0, "met": False, "delta": 0.0}
+                continue
+            val = _metric_from_features(features or {}, metric, metric_key)
+            sat = (
+                graded_value(val, comparator, float(threshold))
+                if val is not None
+                else 0.0
+            )
+            achieved[gid] = {
+                "satisfaction": float(sat),
+                "met": bool(sat >= 1.0),
+                "delta": float(parts.get(gid, 0.0)),
+            }
+        elif goal.kind == "card_target":
+            card_id = str(goal.card_id or (card_bonuses.get(gid) or {}).get("card_id") or "")
+            met = bool(card_id and card_id in joined)
+            achieved[gid] = {
+                "satisfaction": 1.0 if met else 0.0,
+                "met": met,
+                "delta": float(parts.get(gid, 0.0)),
+            }
+        elif goal.kind == "weight_bias":
+            feature = str(goal.feature or "")
+            delta_g = float(parts.get(feature, 0.0)) if feature else 0.0
+            achieved[gid] = {
+                "satisfaction": 1.0 if abs(delta_g) > 1e-9 else 0.0,
+                "met": abs(delta_g) > 1e-9,
+                "delta": delta_g,
+            }
+        else:
+            achieved[gid] = {
+                "satisfaction": 0.0,
+                "met": False,
+                "delta": float(parts.get(gid, 0.0)),
+            }
+    return total_delta, achieved

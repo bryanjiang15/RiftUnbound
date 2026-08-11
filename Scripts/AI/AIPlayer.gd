@@ -168,6 +168,9 @@ func setup(gc: GameController, pi: int, scoring_profile_path: String = "") -> vo
 	controller.game_log_message.connect(_on_game_log_message)
 	# Phase 3: per-card statistics
 	controller.card_event.connect(_on_card_event)
+	# End-of-turn board pulse for turn_snapshots / WPA
+	if controller.has_signal("turn_ended"):
+		controller.turn_ended.connect(_on_turn_ended)
 
 
 # Phase 2: stand up the live engine HTTP server unless explicitly disabled.
@@ -1173,6 +1176,22 @@ func _on_card_event(event: String, card: CardInstance, energy_spent: int, owner_
 	})
 
 
+func _on_turn_ended(completed_turn: int, ending_player_index: int) -> void:
+	# Each AI seat posts its own end-of-turn pulse (my_* scalars from that seat).
+	var gs: GameState = controller.gs if controller else null
+	var game_id := _active_game_id(gs)
+	if game_id.is_empty() or gs == null:
+		return
+	var state := BriefStateSerializer.serialize(gs, player_index, false)
+	_fire_and_forget(AGENT_URL.replace("/decision", "/turn_snapshot"), {
+		"game_id": game_id,
+		"turn": completed_turn,
+		"brief_state": state,
+		"my_player_index": player_index,
+		"turn_player_index": ending_player_index,
+	})
+
+
 func _on_game_log_message(text: String) -> void:
 	# Detect visible opponent commands in the format "[P{n}] > {command}"
 	var opp_index := 1 - player_index
@@ -1276,5 +1295,7 @@ func _capture_kind_for_url(url: String) -> String:
 		return "card_event"
 	if url.ends_with("/opponent_action"):
 		return "opponent_action"
+	if url.ends_with("/turn_snapshot"):
+		return "turn_snapshot"
 	# /game_state_event → no SQL; drop.
 	return ""

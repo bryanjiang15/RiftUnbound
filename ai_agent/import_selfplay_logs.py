@@ -25,6 +25,7 @@ Log format (JSON Lines; one object per line, in emission order)
                               "rejection_retries", "heuristic_fallback", "accepted"}
   {"kind": "card_event",      "game_id", "turn", "card_def_id", "event", ...}
   {"kind": "opponent_action", "game_id", "turn", "action"}
+  {"kind": "turn_snapshot",   "game_id", "turn", "brief_state", ...}
   {"kind": "game_over",       "game_id", "winner_index", "my_player_index", ...}
 
 Usage
@@ -225,6 +226,15 @@ def import_log(
                         game_id=rec["game_id"],
                         turn=int(rec.get("turn", 0)),
                         action=rec["action"],
+                    )
+                elif kind == "turn_snapshot":
+                    capture_mod.capture_turn_snapshot(
+                        memory=memory,
+                        game_id=rec["game_id"],
+                        turn=int(rec.get("turn", 0)),
+                        brief_state=rec.get("brief_state") or {},
+                        my_player_index=rec.get("my_player_index"),
+                        turn_player_index=rec.get("turn_player_index"),
                     )
                 elif kind == "game_over":
                     summary = capture_mod.capture_game_over(

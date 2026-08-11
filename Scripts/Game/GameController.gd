@@ -11,6 +11,10 @@ signal game_log_message(text: String)
 # statistics (storage doc §3). The base definition id is read agent-side from
 # card.definition.id — never reverse-engineered from instance_id.
 signal card_event(event: String, card: CardInstance, energy_spent: int, player_index: int)
+# Emitted at end of Ending Phase after cleanup/stun clear, before rune pools
+# empty and turn_number increments, so AI capture can record one turn_snapshots
+# pulse (energy still reflects the turn as played).
+signal turn_ended(completed_turn: int, ending_player_index: int)
 
 const P1_DECK = "res://Data/Decks/starter-deck-p1.json"
 const P2_DECK = "res://Data/Decks/starter-deck-p2.json"
@@ -418,8 +422,6 @@ func _execute_end_of_turn() -> void:
 	CleanupProcessor.expire_turn_effects(gs)
 	for line in trigger_dispatcher.process_end_of_turn(gs, self):
 		_log(line)
-	gs.players[turn_pi].rune_pool.empty()
-	gs.players[1 - turn_pi].rune_pool.empty()
 
 	# Clear stun from turn player's units (stun clears at Ending Step)
 	for ps in gs.players:
@@ -429,6 +431,14 @@ func _execute_end_of_turn() -> void:
 			u.clear_stun()
 
 	_log("> P%d ended their turn." % (turn_pi + 1))
+
+	# Snapshot the completed turn before pools drain and turn_number advances.
+	# Emit before rune_pool.empty() so my_energy / power reflect the turn as
+	# played (WPA / resource curves), while board state is post-cleanup.
+	turn_ended.emit(gs.turn_number, turn_pi)
+
+	gs.players[turn_pi].rune_pool.empty()
+	gs.players[1 - turn_pi].rune_pool.empty()
 
 	# Pass to next player
 	gs.turn_player_index = 1 - turn_pi

@@ -185,6 +185,12 @@ CREATE TABLE IF NOT EXISTS search_decisions (
     selector_source      TEXT,        -- 'llm' | 'fallback' | 'argmax'
     selector_reasoning   TEXT,
     origin               TEXT,        -- 'self_play' | 'vs_human' | 'vs_heuristic'
+    -- GoalSet / overlay telemetry (may be null when goals off / argmax):
+    goals_source         TEXT,        -- 'strategist' | 'reasoner' | 'none'
+    goal_set_json        TEXT,
+    overlay_json         TEXT,
+    chosen_overlay_delta REAL,
+    chosen_goal_achieved_json TEXT,   -- {goal_id: {satisfaction, met, delta}}
     -- backfilled at game end:
     went_first           INTEGER,     -- 1 = deciding seat took turn 1
     game_outcome         TEXT,        -- 'win' | 'loss' | 'draw'
@@ -258,6 +264,65 @@ CREATE TABLE IF NOT EXISTS card_events (
 );
 CREATE INDEX IF NOT EXISTS idx_card_events_game ON card_events (game_id, turn);
 CREATE INDEX IF NOT EXISTS idx_card_events_def ON card_events (card_def_id, event);
+
+-- Compact Reasoner investigation summary (one row per /reason).
+CREATE TABLE IF NOT EXISTS reasoner_decisions (
+    id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id                   TEXT    NOT NULL,
+    turn                      INTEGER NOT NULL,
+    decision_index            INTEGER,
+    root_state_hash           TEXT,
+    terminal_kind             TEXT,
+    committed                 INTEGER,
+    chosen_line_id            TEXT,
+    chosen_line_complete      INTEGER,
+    fallback_reason           TEXT,
+    cache_hit                 INTEGER,
+    investigation_satisfied   INTEGER,
+    investigation_exemption   TEXT,
+    novel_investigation       INTEGER,
+    local_fork_attempted      INTEGER,
+    novel_suffix_found        INTEGER,
+    comparison_required       INTEGER,
+    scout_agreement           INTEGER,
+    score_primary_rationale   INTEGER,
+    failed_search_calls       INTEGER,
+    recovered_failed_searches INTEGER,
+    unique_sequence_count     INTEGER,
+    max_complete_line_length  INTEGER,
+    tool_mix_json             TEXT,
+    selected_source_lineage_json TEXT,
+    budget_json               TEXT,
+    reasoner_latency_ms       INTEGER,
+    engine_latency_ms         INTEGER,
+    model_calls               INTEGER,
+    prompt_tokens             INTEGER,
+    completion_tokens         INTEGER,
+    rationale_short           TEXT,
+    timestamp                 TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reasoner_dec_game ON reasoner_decisions (game_id, turn);
+
+-- End-of-turn board pulse for WPA / swing-turn analysis.
+CREATE TABLE IF NOT EXISTS turn_snapshots (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id            TEXT    NOT NULL,
+    turn               INTEGER NOT NULL,
+    my_player_index    INTEGER,
+    turn_player_index  INTEGER,
+    my_score           INTEGER,
+    opp_score          INTEGER,
+    my_energy          INTEGER,
+    board_might_diff   INTEGER,
+    cards_in_hand      INTEGER,
+    cards_in_hand_opp  INTEGER,
+    bf_control_net     INTEGER,
+    my_rune_count      INTEGER,
+    my_ready_rune_count INTEGER,
+    brief_state_json   TEXT,
+    timestamp          TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_turn_snap_game ON turn_snapshots (game_id, turn, my_player_index);
 """
 
 # Maximum number of recent events (own decisions + opponent actions, merged) to inject into context
@@ -304,6 +369,13 @@ class Memory:
                 "total_tokens_total INTEGER NOT NULL DEFAULT 0",
                 "planner_total_tokens_total INTEGER NOT NULL DEFAULT 0",
                 "actor_total_tokens_total INTEGER NOT NULL DEFAULT 0",
+            ],
+            "search_decisions": [
+                "goals_source TEXT",
+                "goal_set_json TEXT",
+                "overlay_json TEXT",
+                "chosen_overlay_delta REAL",
+                "chosen_goal_achieved_json TEXT",
             ],
         }
         for table, columns in new_columns.items():
@@ -548,6 +620,11 @@ class Memory:
         origin: Optional[str],
         weight_version_id: Optional[int],
         candidates: Optional[list[dict]] = None,
+        goals_source: Optional[str] = None,
+        goal_set: Optional[dict] = None,
+        overlay: Optional[dict] = None,
+        chosen_overlay_delta: Optional[float] = None,
+        chosen_goal_achieved: Optional[dict] = None,
     ) -> int:
         """Persist one searched decision plus its candidate lines. Returns row id."""
         now = datetime.now(timezone.utc).isoformat()
@@ -560,8 +637,10 @@ class Memory:
                    regret, score_margin, num_candidates,
                    chosen_breakdown_json, chosen_features_json, search_stats_json,
                    selector_source, selector_reasoning, origin,
+                   goals_source, goal_set_json, overlay_json,
+                   chosen_overlay_delta, chosen_goal_achieved_json,
                    weight_version_id, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     game_id,
@@ -582,6 +661,11 @@ class Memory:
                     selector_source,
                     selector_reasoning,
                     origin,
+                    goals_source,
+                    json.dumps(goal_set) if goal_set is not None else None,
+                    json.dumps(overlay) if overlay is not None else None,
+                    chosen_overlay_delta,
+                    json.dumps(chosen_goal_achieved) if chosen_goal_achieved is not None else None,
                     weight_version_id,
                     now,
                 ),
@@ -641,6 +725,149 @@ class Memory:
                     scalars.get("cards_in_hand_opp"),
                     scalars.get("bf_control_net"),
                     json.dumps(brief_state),
+                    now,
+                ),
+            )
+
+    def record_reasoner_decision(
+        self,
+        *,
+        game_id: str,
+        turn: int,
+        decision_index: Optional[int],
+        root_state_hash: Optional[str],
+        telemetry: dict,
+        chosen_line_id: Optional[str] = None,
+        committed: Optional[bool] = None,
+        chosen_line_complete: Optional[bool] = None,
+        rationale: Optional[str] = None,
+        model_calls: Optional[int] = None,
+        prompt_tokens: Optional[int] = None,
+        completion_tokens: Optional[int] = None,
+    ) -> int:
+        """Persist one compact Reasoner investigation summary. Returns row id."""
+        now = datetime.now(timezone.utc).isoformat()
+        tel = telemetry or {}
+        terminal_kind = tel.get("terminal_kind")
+        if committed is None:
+            committed = terminal_kind == "line"
+        rationale_short = None
+        if rationale:
+            rationale_short = rationale if len(rationale) <= 200 else rationale[:197] + "..."
+        elif tel.get("fallback_reason"):
+            fr = str(tel.get("fallback_reason") or "")
+            rationale_short = fr if len(fr) <= 200 else fr[:197] + "..."
+
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO reasoner_decisions
+                  (game_id, turn, decision_index, root_state_hash, terminal_kind,
+                   committed, chosen_line_id, chosen_line_complete, fallback_reason,
+                   cache_hit, investigation_satisfied, investigation_exemption,
+                   novel_investigation, local_fork_attempted, novel_suffix_found,
+                   comparison_required, scout_agreement, score_primary_rationale,
+                   failed_search_calls, recovered_failed_searches,
+                   unique_sequence_count, max_complete_line_length,
+                   tool_mix_json, selected_source_lineage_json, budget_json,
+                   reasoner_latency_ms, engine_latency_ms,
+                   model_calls, prompt_tokens, completion_tokens,
+                   rationale_short, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    game_id,
+                    turn,
+                    decision_index,
+                    root_state_hash or tel.get("root_state_hash"),
+                    terminal_kind,
+                    None if committed is None else (1 if committed else 0),
+                    chosen_line_id,
+                    None if chosen_line_complete is None else (1 if chosen_line_complete else 0),
+                    tel.get("fallback_reason") or None,
+                    None if tel.get("cache_hit") is None else (1 if tel.get("cache_hit") else 0),
+                    None if tel.get("investigation_satisfied") is None else (
+                        1 if tel.get("investigation_satisfied") else 0
+                    ),
+                    tel.get("investigation_exemption"),
+                    None if tel.get("novel_investigation") is None else (
+                        1 if tel.get("novel_investigation") else 0
+                    ),
+                    None if tel.get("local_fork_attempted") is None else (
+                        1 if tel.get("local_fork_attempted") else 0
+                    ),
+                    None if tel.get("novel_suffix_found") is None else (
+                        1 if tel.get("novel_suffix_found") else 0
+                    ),
+                    None if tel.get("comparison_required") is None else (
+                        1 if tel.get("comparison_required") else 0
+                    ),
+                    None if tel.get("scout_agreement") is None else (
+                        1 if tel.get("scout_agreement") else 0
+                    ),
+                    None if tel.get("score_primary_rationale") is None else (
+                        1 if tel.get("score_primary_rationale") else 0
+                    ),
+                    tel.get("failed_search_calls"),
+                    tel.get("recovered_failed_searches"),
+                    tel.get("unique_sequence_count", tel.get("registry_unique_sequences")),
+                    tel.get("max_complete_line_length"),
+                    json.dumps(tel.get("tool_mix")) if tel.get("tool_mix") is not None else None,
+                    json.dumps(tel.get("selected_source_lineage"))
+                    if tel.get("selected_source_lineage") is not None
+                    else None,
+                    json.dumps(tel.get("budget")) if tel.get("budget") is not None else None,
+                    tel.get("reasoner_latency_ms"),
+                    tel.get("engine_latency_ms"),
+                    model_calls if model_calls is not None else tel.get("model_calls"),
+                    prompt_tokens if prompt_tokens is not None else tel.get("prompt_tokens"),
+                    completion_tokens
+                    if completion_tokens is not None
+                    else tel.get("completion_tokens"),
+                    rationale_short,
+                    now,
+                ),
+            )
+            return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def record_turn_snapshot(
+        self,
+        *,
+        game_id: str,
+        turn: int,
+        my_player_index: Optional[int],
+        turn_player_index: Optional[int],
+        scalars: dict,
+        brief_state: Optional[dict] = None,
+    ) -> None:
+        """Persist one end-of-turn board pulse for WPA / swing-turn analysis."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO turn_snapshots
+                  (game_id, turn, my_player_index, turn_player_index,
+                   my_score, opp_score, my_energy, board_might_diff,
+                   cards_in_hand, cards_in_hand_opp, bf_control_net,
+                   my_rune_count, my_ready_rune_count, brief_state_json, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    game_id,
+                    turn,
+                    my_player_index,
+                    turn_player_index,
+                    scalars.get("my_score"),
+                    scalars.get("opp_score"),
+                    scalars.get("my_energy"),
+                    scalars.get("board_might_diff"),
+                    scalars.get("cards_in_hand"),
+                    scalars.get("cards_in_hand_opp"),
+                    scalars.get("bf_control_net"),
+                    scalars.get("my_rune_count"),
+                    scalars.get("my_ready_rune_count"),
+                    json.dumps(brief_state) if brief_state is not None else None,
                     now,
                 ),
             )
@@ -1075,9 +1302,10 @@ class Memory:
         """Per-card aggregate statistics (storage doc §3 derived view).
 
         Aggregation key is the base ``card_def_id``. WPA is intentionally
-        omitted (needs turn_snapshots, not yet implemented). Cards below
-        ``min_plays`` are returned in ``low_sample`` rather than ``cards`` so the
-        sample-size caveat is explicit, not silently mixed in.
+        omitted here — ``turn_snapshots`` are now captured, but this report does
+        not yet compute Δ win-probability from them. Cards below ``min_plays``
+        are returned in ``low_sample`` rather than ``cards`` so the sample-size
+        caveat is explicit, not silently mixed in.
         """
         with self._connect() as conn:
             games_total = conn.execute(
@@ -1172,7 +1400,10 @@ class Memory:
             "min_plays": min_plays,
             "cards": cards,
             "low_sample": low_sample,
-            "note": "WPA omitted (requires turn_snapshots). win_rate_when_played is survivorship-biased.",
+            "note": (
+                "WPA not computed yet (turn_snapshots are captured; this report "
+                "does not derive ΔWP). win_rate_when_played is survivorship-biased."
+            ),
         }
 
     # ── Helpers ───────────────────────────────────────────────────────────────
