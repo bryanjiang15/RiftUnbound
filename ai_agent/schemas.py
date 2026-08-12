@@ -651,6 +651,11 @@ class DecisionRequest(BaseModel):
     # server attributes each captured row to the exact weights that produced it
     # (per-seat). Absent for live play → server falls back to its startup profile.
     scoring_profile_json: Optional[str] = None
+    # Authoritative GameState dump for offline counterfactual replay. Capture-only:
+    # never inject into model prompts or live skills.
+    analysis_state_json: Optional[Any] = None
+    analysis_state_schema_version: Optional[str] = None
+    root_state_hash: Optional[str] = None
 
 
 class GoalsRequest(BaseModel):

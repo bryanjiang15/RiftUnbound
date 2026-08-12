@@ -28,6 +28,7 @@ const TurnSearchScript = preload("res://Scripts/Game/TurnSearch.gd")
 const ScoringProfileScript = preload("res://Scripts/Game/ScoringProfile.gd")
 const MulliganHeuristicScript = preload("res://Scripts/AI/MulliganHeuristic.gd")
 const EngineServerScript = preload("res://Scripts/AI/EngineServer.gd")
+const AnalysisStateCodecScript = preload("res://Scripts/AI/AnalysisStateCodec.gd")
 const ENGINE_PORT_DEFAULT := 8766
 
 # Resolved in setup() so it can differ per OS (see _agent_base_url()).
@@ -409,6 +410,13 @@ func _build_request_payload() -> Dictionary:
 		payload["search_stats"] = _search_stats
 		if _scoring_profile_json != "":
 			payload["scoring_profile_json"] = _scoring_profile_json
+	# Authoritative replay dump — capture/SQL only. Never included in model prompts.
+	var gs: GameState = controller.gs if controller else null
+	if gs != null:
+		var analysis: Dictionary = AnalysisStateCodecScript.export_state(gs)
+		payload["analysis_state_json"] = analysis
+		payload["analysis_state_schema_version"] = AnalysisStateCodecScript.SCHEMA_VERSION
+		payload["root_state_hash"] = _live_hash(gs)
 	return payload
 
 

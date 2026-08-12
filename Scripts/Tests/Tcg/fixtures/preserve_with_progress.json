@@ -1,0 +1,27 @@
+{
+  "first_player": 0,
+  "turn_number": 2,
+  "phase": "MAIN",
+  "state": "NEUTRAL_OPEN",
+  "battlefields": ["zaun-warrens", "targons-peak"],
+  "battlefield_control": [0, -1],
+  "players": [
+    {
+      "score": 1,
+      "pool": {"energy": 0, "power": {}},
+      "hand": [],
+      "base": [{"id": "chemtech-enforcer", "exhausted": false}],
+      "battlefield-a": [{"id": "vi-destructive", "owner": 0, "exhausted": false}],
+      "deck_size": 10,
+      "rune_deck_size": 12
+    },
+    {
+      "score": 0,
+      "pool": {"energy": 0, "power": {}},
+      "hand": [],
+      "base": [],
+      "deck_size": 10,
+      "rune_deck_size": 12
+    }
+  ]
+}

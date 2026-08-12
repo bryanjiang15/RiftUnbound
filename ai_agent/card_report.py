@@ -67,6 +67,7 @@ _SORT_FIELDS = {
     "avg_energy": ("avg_energy_spent", True),
     "deaths": ("deaths", True),
     "win_rate": ("win_rate_when_played", True),
+    "card_wpa": ("card_associated_wpa", True),
     "card": ("card_def_id", False),
 }
 
@@ -203,13 +204,39 @@ def gather(conn: sqlite3.Connection, *, filters: dict) -> dict:
             "scored": r["scored"] or 0,
             "deaths": r["died"] or 0,
             "win_rate_when_played": (pw / pg) if pg else None,
+            "card_associated_wpa": None,
+            "card_associated_wpa_ci95_lo": None,
+            "card_associated_wpa_ci95_hi": None,
+            "multi_card_turn_share": None,
         })
+
+    wpa_ok = False
+    try:
+        from .analysis.wpa_report import build_report
+        report = build_report(
+            conn,
+            origin=filters.get("origin"),
+            min_plays=int(filters.get("min_plays") or 20),
+        )
+        if report.get("model", {}).get("ok"):
+            wpa_ok = True
+            by_card = {c["card_def_id"]: c for c in report.get("card_associated_wpa") or []}
+            for card in cards:
+                rec = by_card.get(card["card_def_id"])
+                if rec:
+                    card["card_associated_wpa"] = rec.get("card_associated_wpa")
+                    card["card_associated_wpa_ci95_lo"] = rec.get("ci95_lo")
+                    card["card_associated_wpa_ci95_hi"] = rec.get("ci95_hi")
+                    card["multi_card_turn_share"] = rec.get("multi_card_turn_share")
+    except Exception:
+        wpa_ok = False
 
     return {
         "games_total": games_total,
         "base_win_rate": base_win_rate,
         "cards": cards,
         "filters": filters,
+        "wpa_available": wpa_ok,
     }
 
 
@@ -313,8 +340,13 @@ def render(data: dict, sort_key: str, desc: bool | None, min_plays: int) -> str:
         _emit(low_sample)
 
     out.append("")
-    out.append(_dim("  WPA omitted (needs turn_snapshots). WR|Pl is "
-                    "survivorship-biased — see doc §3 caveats."))
+    if data.get("wpa_available"):
+        out.append(_dim("  card_associated_wpa is associative (own-turn WPA vs baseline), "
+                        "not causal. Multi-card turns are not split. WR|Pl is "
+                        "survivorship-biased — see doc caveats."))
+    else:
+        out.append(_dim("  WPA unavailable (need turn_snapshots + canonical winner_index). "
+                        "WR|Pl is survivorship-biased — see doc caveats."))
     out.append("")
     return "\n".join(out)
 
@@ -335,6 +367,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="Filter by game origin (self_play|vs_human|vs_heuristic)")
     parser.add_argument("--min-plays", type=int, default=20, dest="min_plays",
                         help="Cards below N plays go to a low-sample section (default: 20)")
+    # card_wpa sort key is registered in _SORT_FIELDS.
     args = parser.parse_args(argv)
 
     filters = {"seat": args.seat, "origin": args.origin}

@@ -57,9 +57,12 @@ CREATE INDEX IF NOT EXISTS idx_opp_game ON opponent_actions (game_id, turn);
 CREATE TABLE IF NOT EXISTS games (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     game_id            TEXT UNIQUE NOT NULL,
-    outcome            TEXT,    -- 'win' | 'loss' | 'draw' | NULL = in progress
+    outcome            TEXT,    -- 'win' | 'loss' | 'draw' | NULL = in progress (seat-relative, last writer)
     my_score           INTEGER,
     opp_score          INTEGER,
+    winner_index       INTEGER, -- canonical seat that won (-1 unknown); WPA labels use this
+    p0_score           INTEGER, -- seat 0 final score (canonical, not reporter-relative)
+    p1_score           INTEGER, -- seat 1 final score
     turns_played       INTEGER,
     first_player_index INTEGER, -- which seat took turn 1 (initiative bias control)
     seed               TEXT,    -- deck/shuffle seed (self-play reproducibility)
@@ -212,7 +215,8 @@ CREATE TABLE IF NOT EXISTS candidate_lines (
     moves_json          TEXT,
     breakdown_json      TEXT,
     features_json       TEXT,
-    resolved_state_json TEXT
+    resolved_state_json TEXT,
+    search_state_json   TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_cand_lines_dec ON candidate_lines (search_decision_id);
 
@@ -231,6 +235,9 @@ CREATE TABLE IF NOT EXISTS decision_snapshots (
     cards_in_hand_opp INTEGER,
     bf_control_net    INTEGER,
     brief_state_json  TEXT,
+    analysis_state_json TEXT,           -- authoritative GameState dump (capture-only)
+    analysis_state_schema_version TEXT,
+    root_state_hash   TEXT,
     timestamp         TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_dec_snap_game ON decision_snapshots (game_id, turn, decision_index);
@@ -323,6 +330,24 @@ CREATE TABLE IF NOT EXISTS turn_snapshots (
     timestamp          TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_turn_snap_game ON turn_snapshots (game_id, turn, my_player_index);
+
+-- Offline same-turn counterfactual runs (Phase 2 move-quality judges).
+CREATE TABLE IF NOT EXISTS counterfactual_runs (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id                TEXT    NOT NULL,
+    turn                   INTEGER NOT NULL,
+    decision_index         INTEGER NOT NULL,
+    root_state_hash        TEXT,
+    predicate_pack_version TEXT,
+    search_inputs_json     TEXT,
+    profile_inputs_json    TEXT,
+    budget_json            TEXT,
+    assumptions_json       TEXT,
+    status                 TEXT,
+    result_json            TEXT,
+    timestamp              TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cf_runs_dec ON counterfactual_runs (game_id, turn, decision_index);
 """
 
 # Maximum number of recent events (own decisions + opponent actions, merged) to inject into context
@@ -376,6 +401,19 @@ class Memory:
                 "overlay_json TEXT",
                 "chosen_overlay_delta REAL",
                 "chosen_goal_achieved_json TEXT",
+            ],
+            "games": [
+                "winner_index INTEGER",
+                "p0_score INTEGER",
+                "p1_score INTEGER",
+            ],
+            "candidate_lines": [
+                "search_state_json TEXT",
+            ],
+            "decision_snapshots": [
+                "analysis_state_json TEXT",
+                "analysis_state_schema_version TEXT",
+                "root_state_hash TEXT",
             ],
         }
         for table, columns in new_columns.items():
@@ -540,6 +578,9 @@ class Memory:
         turns_played: int,
         first_player_index: Optional[int] = None,
         seed: Optional[str] = None,
+        winner_index: Optional[int] = None,
+        p0_score: Optional[int] = None,
+        p1_score: Optional[int] = None,
     ) -> None:
         """Upsert a completed game record. Called via /game_over."""
         now = datetime.now(timezone.utc).isoformat()
@@ -547,13 +588,16 @@ class Memory:
             conn.execute(
                 """
                 INSERT INTO games
-                  (game_id, outcome, my_score, opp_score, turns_played,
-                   first_player_index, seed, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                  (game_id, outcome, my_score, opp_score, winner_index, p0_score, p1_score,
+                   turns_played, first_player_index, seed, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(game_id) DO UPDATE SET
                     outcome=excluded.outcome,
                     my_score=excluded.my_score,
                     opp_score=excluded.opp_score,
+                    winner_index=COALESCE(excluded.winner_index, games.winner_index),
+                    p0_score=COALESCE(excluded.p0_score, games.p0_score),
+                    p1_score=COALESCE(excluded.p1_score, games.p1_score),
                     turns_played=excluded.turns_played,
                     first_player_index=COALESCE(excluded.first_player_index, games.first_player_index),
                     seed=COALESCE(excluded.seed, games.seed),
@@ -564,6 +608,9 @@ class Memory:
                     outcome,
                     my_score,
                     opp_score,
+                    winner_index,
+                    p0_score,
+                    p1_score,
                     turns_played,
                     first_player_index,
                     seed,
@@ -676,8 +723,9 @@ class Memory:
                     """
                     INSERT INTO candidate_lines
                       (search_decision_id, line_id, rank, score, chosen,
-                       moves_json, breakdown_json, features_json, resolved_state_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       moves_json, breakdown_json, features_json, resolved_state_json,
+                       search_state_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         decision_id,
@@ -689,6 +737,7 @@ class Memory:
                         json.dumps(cand.get("breakdown")) if cand.get("breakdown") is not None else None,
                         json.dumps(cand.get("features")) if cand.get("features") is not None else None,
                         json.dumps(cand.get("resolved_state")) if cand.get("resolved_state") is not None else None,
+                        json.dumps(cand.get("search_state")) if cand.get("search_state") is not None else None,
                     ),
                 )
             return decision_id
@@ -701,17 +750,27 @@ class Memory:
         decision_index: int,
         scalars: dict,
         brief_state: dict,
+        analysis_state: Optional[dict] = None,
+        analysis_state_schema_version: Optional[str] = None,
+        root_state_hash: Optional[str] = None,
     ) -> None:
         """Persist the full BriefState at a decision + extracted scalar columns."""
         now = datetime.now(timezone.utc).isoformat()
+        analysis_json = None
+        if analysis_state is not None:
+            analysis_json = (
+                analysis_state if isinstance(analysis_state, str)
+                else json.dumps(analysis_state)
+            )
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO decision_snapshots
                   (game_id, turn, decision_index, my_score, opp_score, my_energy,
                    board_might_diff, cards_in_hand, cards_in_hand_opp, bf_control_net,
-                   brief_state_json, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   brief_state_json, analysis_state_json, analysis_state_schema_version,
+                   root_state_hash, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     game_id,
@@ -725,9 +784,55 @@ class Memory:
                     scalars.get("cards_in_hand_opp"),
                     scalars.get("bf_control_net"),
                     json.dumps(brief_state),
+                    analysis_json,
+                    analysis_state_schema_version,
+                    root_state_hash,
                     now,
                 ),
             )
+
+    def record_counterfactual_run(
+        self,
+        *,
+        game_id: str,
+        turn: int,
+        decision_index: int,
+        root_state_hash: Optional[str],
+        predicate_pack_version: Optional[str],
+        search_inputs: Optional[dict],
+        profile_inputs: Optional[dict],
+        budget: Optional[dict],
+        assumptions: Optional[dict],
+        status: str,
+        result: Optional[dict],
+    ) -> int:
+        """Persist one auditable offline counterfactual run. Returns row id."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO counterfactual_runs
+                  (game_id, turn, decision_index, root_state_hash, predicate_pack_version,
+                   search_inputs_json, profile_inputs_json, budget_json, assumptions_json,
+                   status, result_json, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    game_id,
+                    turn,
+                    decision_index,
+                    root_state_hash,
+                    predicate_pack_version,
+                    json.dumps(search_inputs) if search_inputs is not None else None,
+                    json.dumps(profile_inputs) if profile_inputs is not None else None,
+                    json.dumps(budget) if budget is not None else None,
+                    json.dumps(assumptions) if assumptions is not None else None,
+                    status,
+                    json.dumps(result) if result is not None else None,
+                    now,
+                ),
+            )
+            return int(cur.lastrowid)  # type: ignore[arg-type]
 
     def record_reasoner_decision(
         self,

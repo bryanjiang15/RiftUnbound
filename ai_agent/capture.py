@@ -13,6 +13,7 @@ models — no FastAPI globals — so the importer can call them directly.
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Callable, Optional
 
@@ -113,8 +114,6 @@ def _move_strings(moves: list) -> list[str]:
 
 
 def json_dumps_safe(value: Any) -> str:
-    import json
-
     try:
         return json.dumps(value, default=str, sort_keys=True)
     except Exception:
@@ -212,6 +211,7 @@ def capture_search_decision(
                 "breakdown": c.score_breakdown,
                 "features": c.features,
                 "resolved_state": c.resolved_state,
+                "search_state": c.search_state,
             }
         )
 
@@ -255,12 +255,21 @@ def capture_search_decision(
         chosen_overlay_delta=goal_fields["chosen_overlay_delta"],
         chosen_goal_achieved=goal_fields["chosen_goal_achieved"],
     )
+    analysis_state = request.analysis_state_json
+    if isinstance(analysis_state, str) and analysis_state.strip():
+        try:
+            analysis_state = json.loads(analysis_state)
+        except Exception:
+            pass
     memory.record_decision_snapshot(
         game_id=game_id,
         turn=turn,
         decision_index=decision_index,
         scalars=snapshot_scalars(brief_state),
         brief_state=brief_state,
+        analysis_state=analysis_state if analysis_state else None,
+        analysis_state_schema_version=request.analysis_state_schema_version,
+        root_state_hash=request.root_state_hash,
     )
 
 
@@ -520,6 +529,10 @@ def capture_game_over(*, memory: Memory, game_id: str, winner_index: int,
     """
     outcome = "win" if winner_index == my_player_index else "loss"
     first_player = first_player_index if first_player_index >= 0 else None
+    if my_player_index == 0:
+        p0_score, p1_score = my_score, opp_score
+    else:
+        p0_score, p1_score = opp_score, my_score
     try:
         memory.record_game_outcome(
             game_id=game_id,
@@ -529,6 +542,9 @@ def capture_game_over(*, memory: Memory, game_id: str, winner_index: int,
             turns_played=total_turns,
             first_player_index=first_player,
             seed=seed,
+            winner_index=winner_index if winner_index >= 0 else None,
+            p0_score=p0_score,
+            p1_score=p1_score,
         )
     except Exception as exc:
         logger.warning("Game outcome record failed: %s", exc)

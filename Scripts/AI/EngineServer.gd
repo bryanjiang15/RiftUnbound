@@ -266,7 +266,13 @@ func _worker_entry(kind: String, body: Dictionary, gs: GameState, seat: int, pro
 		options["beam_width"] = int(body["beam_width"])
 	if body.has("seed_moves"):
 		options["seed_moves"] = body["seed_moves"]
-	var searcher = TurnSearchScript.new(profile_path)
+	var overlay: Dictionary = {}
+	if body.get("overlay", null) is Dictionary:
+		overlay = body["overlay"]
+	var search_profile := profile_path
+	if str(body.get("profile_path", "")) != "":
+		search_profile = str(body["profile_path"])
+	var searcher = TurnSearchScript.new(search_profile, overlay)
 	_worker_result = searcher.search(gs, seat, options)
 
 

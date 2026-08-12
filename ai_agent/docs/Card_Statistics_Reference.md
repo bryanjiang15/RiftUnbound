@@ -87,10 +87,15 @@ Cards below `--min-plays` (default 20) are bucketed into a low-sample section.
 | Win-rate-when-played | `win_rate_when_played` | (won games where it was played) ÷ (finished games where it was played) | **survivorship/selection biased** — the AI plays good cards in winning spots, so this overstates causation. Compare against `base_win_rate`, shown green/red in the report. |
 | Deaths | `deaths` | count of `died` events | raw, not yet a rate |
 
-> **WPA (win-probability added) is intentionally omitted.** The honest impact
-> metric needs per-turn win-probability from a `turn_snapshots` table, which is
-> not implemented yet. Until then, `win_rate_when_played` is the only
-> outcome-linked signal and must be read with the bias caveat.
+> **WPA (win-probability added)** is now computed from `turn_snapshots` +
+> canonical `games.winner_index` via `ai_agent/analysis/wpa_model.py`.
+> `card_associated_wpa` is the mean **own-turn** WPA on turns where the card was
+> played minus the mean own-turn WPA baseline, with a game-level bootstrap 95%
+> interval and the existing min-play gate. It is **associative, not causal**.
+> Multi-card turns list all contributing cards (`multi_card_turn_share`) and do
+> **not** split the delta. Event-level card WPA would need future pre/post-action
+> snapshots. Rankings are refused below 150 finished games and marked provisional
+> below 200. `win_rate_when_played` remains the coarse survivorship-biased signal.
 
 ### Caveats baked into the report
 1. **Survivorship bias** — `win_rate_when_played` is confounded by the AI
@@ -109,7 +114,7 @@ python ai_agent/card_report.py --db ai_agent/selfplay.db --sort win_rate --desc
 **Sort keys** (`--sort`, with `--asc` / `--desc` to override default direction):
 `played` (default), `seen`, `draw_rate`, `play_rate`, `play_when_drawn`,
 `mulligan_rate`, `stuck_rate`, `avg_turn`, `avg_energy`, `deaths`, `win_rate`,
-`card`.
+`card_wpa`, `card`.
 
 **Filters:** `--seat 0|1` (reporting seat), `--origin self_play|vs_human|vs_heuristic`
 (joined via `search_decisions.game_id`), `--min-plays N` (low-sample threshold).

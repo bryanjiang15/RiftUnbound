@@ -1,8 +1,8 @@
 extends Control
 
 const DECKS_DIR := "res://Data/Decks/"
-const DEFAULT_P1_DECK := "res://Data/Decks/master-yi-calm-body.json"
-const DEFAULT_P2_DECK := "res://Data/Decks/starter-deck-p2.json"
+const DEFAULT_P1_DECK := "res://Data/Decks/master-yi-shanghai-open.json"
+const DEFAULT_P2_DECK := "res://Data/Decks/kaisa-fury-mind-wip.json"
 
 const PROFILES_DIR := "res://Data/AI/"
 const DEFAULT_PROFILE := "res://Data/AI/scoring_profile.json"
