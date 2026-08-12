@@ -684,3 +684,8 @@ class ReasonRequest(GoalsRequest):
     """
 
     root_state_hash: str = ""
+    # Same capture-only fields as DecisionRequest so a committed reasoner line
+    # can write decision_snapshots / search_decisions without a follow-up /decision.
+    scoring_profile_json: Optional[str] = None
+    analysis_state_json: Optional[Any] = None
+    analysis_state_schema_version: Optional[str] = None

@@ -40,6 +40,9 @@ const C_CHAIN_BDR  := Color(0.44,  0.26,  0.72)
 const C_LABEL_DIM  := Color(0.50,  0.50,  0.55)
 const C_LABEL_BRT  := Color(0.88,  0.90,  0.88)
 
+# When true (Analysis UI), show both hands face-up and reveal facedown cards.
+var reveal_all_hands: bool = false
+
 # ── Dynamic node references ───────────────────────────────────────────────────
 # HUD
 var _hud_turn:  Label
@@ -611,9 +614,10 @@ func _refresh_hand_zone(gs: GameState, pi: int) -> void:
 		hand_hbox.add_child(lbl)
 		return
 
-	# P1 (human) — show card faces; P2 (AI opponent) — show card backs
+	# P1 (human) — show card faces; P2 (AI opponent) — show card backs.
+	# Analysis mode reveals both hands face-up.
 	for card in ps.hand:
-		if pi == 0:
+		if pi == 0 or reveal_all_hands:
 			hand_hbox.add_child(_make_card_thumb(card))
 		else:
 			hand_hbox.add_child(_make_card_back(pi))
@@ -759,8 +763,11 @@ func _refresh_bf_unit_row(bf_index: int, pi: int, units: Array,
 		hbox.add_child(_make_facedown_thumb(bf.facedown_card))
 
 
-static func _is_opponent_hidden_card(inst: CardInstance) -> bool:
+func _is_opponent_hidden_card(inst: CardInstance) -> bool:
 	# P1 is the local human seat (see hand zone: pi == 0 shows faces).
+	# Analysis mode reveals facedown cards so both seats are inspectable.
+	if reveal_all_hands:
+		return false
 	return inst.is_face_down and inst.owner_index != 0
 
 

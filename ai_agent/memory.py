@@ -23,7 +23,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 DEFAULT_DB_PATH = Path(__file__).parent / "agent_memory.db"
 
@@ -1299,6 +1299,133 @@ class Memory:
                 (game_id, turn, move_seq, sentiment, move_desc, reviewer, now),
             )
             return cur.lastrowid  # type: ignore[return-value]
+
+    def list_decisions(
+        self,
+        *,
+        game_id: Optional[str] = None,
+        replay_only: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict]:
+        """List episodic decisions for the Analysis UI (newest first).
+
+        Joins search_decisions / decision_snapshots / games for list columns.
+        ``replay_only`` keeps rows whose snapshot marks ``replay.supported``.
+        """
+        limit = max(1, min(int(limit), 500))
+        offset = max(0, int(offset))
+        where: list[str] = []
+        params: list[Any] = []
+        if game_id:
+            where.append("d.game_id = ?")
+            params.append(game_id)
+        if replay_only:
+            where.append(
+                "json_extract(ds.analysis_state_json, '$.replay.supported') = 1"
+            )
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+        sql = f"""
+            SELECT
+              d.id AS decisions_id,
+              d.game_id,
+              d.turn,
+              d.decision_index,
+              d.decision_type,
+              d.reasoning,
+              d.move_json,
+              d.accepted,
+              d.rejection_reason,
+              d.timestamp,
+              json_extract(d.move_json, '$.action') AS action,
+              json_extract(d.move_json, '$.parameters.card_id') AS card_id,
+              sd.mode AS search_mode,
+              sd.selector_source,
+              sd.chosen_line_id,
+              sd.my_player_index,
+              sd.game_outcome AS search_game_outcome,
+              g.outcome AS game_outcome,
+              g.my_score AS game_my_score,
+              g.opp_score AS game_opp_score,
+              CASE
+                WHEN ds.analysis_state_json IS NOT NULL
+                 AND ds.analysis_state_json != '' THEN 1
+                ELSE 0
+              END AS has_analysis_state,
+              json_extract(ds.analysis_state_json, '$.replay.supported')
+                AS replay_supported_raw,
+              ds.root_state_hash
+            FROM decisions d
+            LEFT JOIN search_decisions sd
+              ON sd.game_id = d.game_id
+             AND sd.turn = d.turn
+             AND sd.decision_index = d.decision_index
+            LEFT JOIN decision_snapshots ds
+              ON ds.game_id = d.game_id
+             AND ds.turn = d.turn
+             AND ds.decision_index = d.decision_index
+            LEFT JOIN games g ON g.game_id = d.game_id
+            {where_sql}
+            ORDER BY d.timestamp DESC, d.id DESC
+            LIMIT ? OFFSET ?
+        """
+        params.extend([limit, offset])
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        out: list[dict] = []
+        for r in rows:
+            raw = r["replay_supported_raw"]
+            if raw is None:
+                replay_supported = None
+            else:
+                replay_supported = bool(raw) if not isinstance(raw, str) else raw.lower() in (
+                    "1", "true", "yes",
+                )
+            out.append({
+                "decisions_id": r["decisions_id"],
+                "game_id": r["game_id"],
+                "turn": r["turn"],
+                "decision_index": r["decision_index"],
+                "decision_type": r["decision_type"],
+                "action": r["action"],
+                "card_id": r["card_id"],
+                "accepted": (
+                    None if r["accepted"] is None else bool(r["accepted"])
+                ),
+                "rejection_reason": r["rejection_reason"],
+                "reasoning": r["reasoning"],
+                "timestamp": r["timestamp"],
+                "search_mode": r["search_mode"],
+                "selector_source": r["selector_source"],
+                "chosen_line_id": r["chosen_line_id"],
+                "my_player_index": r["my_player_index"],
+                "game_outcome": r["game_outcome"] or r["search_game_outcome"],
+                "game_my_score": r["game_my_score"],
+                "game_opp_score": r["game_opp_score"],
+                "has_analysis_state": bool(r["has_analysis_state"]),
+                "replay_supported": replay_supported,
+                "root_state_hash": r["root_state_hash"],
+            })
+        return out
+
+    def get_episodic_decision(
+        self,
+        *,
+        game_id: str,
+        turn: int,
+        decision_index: int,
+    ) -> Optional[dict]:
+        """Return the latest episodic ``decisions`` row for a decision key."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM decisions
+                WHERE game_id=? AND turn=? AND decision_index=?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (game_id, turn, decision_index),
+            ).fetchone()
+        return dict(row) if row is not None else None
 
     def eval_report(self) -> dict:
         """Return an aggregate reliability + human-feedback scorecard across games."""

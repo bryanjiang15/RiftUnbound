@@ -471,6 +471,14 @@ func _fetch_reasoner_emit(scout_lines: Array = [], scout_stats: Dictionary = {})
 	if not scout_lines.is_empty():
 		body_dict["candidate_lines"] = scout_lines.slice(0, 5)
 		body_dict["search_stats"] = scout_stats
+	# Capture-only dump so reasoner line commits can write decision_snapshots
+	# without a follow-up /decision (which this path skips).
+	var gs: GameState = controller.gs if controller else null
+	if gs != null:
+		body_dict["analysis_state_json"] = AnalysisStateCodecScript.export_state(gs)
+		body_dict["analysis_state_schema_version"] = AnalysisStateCodecScript.SCHEMA_VERSION
+	if _scoring_profile_json != "":
+		body_dict["scoring_profile_json"] = _scoring_profile_json
 	var headers := PackedStringArray(["Content-Type: application/json"])
 	_waiting_for_http = true
 	var err := _goals_http.request(
@@ -528,9 +536,11 @@ func _try_commit_reasoner_line(gs: GameState, emit: Dictionary) -> bool:
 	_submit(first)
 	if controller.last_command_error:
 		_drop_committed_line()
+		_report_outcome(false, "Game engine rejected the command.")
 		_report_decision_metrics(false, false)
 		return false
 	_committed_line_index = 1
+	_report_outcome(true)
 	_report_decision_metrics(false, true)
 	ai_move_completed.emit(first, gs.turn_number, _move_seq)
 	_move_seq += 1

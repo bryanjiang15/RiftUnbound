@@ -164,6 +164,16 @@ func _build_ui() -> void:
 	aivai_entry.get_node("Button").pressed.connect(_on_aivai_pressed)
 	vbox.add_child(aivai_entry)
 
+	# Post-game analysis — browse agent_memory.db checkpoints / CF.
+	var analysis_entry := _make_entry(
+		"Post-Game Analysis",
+		"Browse decisions, restore boards, run counterfactuals",
+		Color(0.35, 0.28, 0.55),
+		Color(0.45, 0.36, 0.70)
+	)
+	analysis_entry.get_node("Button").pressed.connect(_on_analysis_pressed)
+	vbox.add_child(analysis_entry)
+
 	# Footer
 	var footer := Label.new()
 	footer.text = "v0.1 — Riftbound Simulation"
@@ -392,3 +402,7 @@ func _on_aivai_pressed() -> void:
 	_apply_profile_overrides()
 	_apply_eval_override()
 	get_tree().change_scene_to_file("res://Scenes/GameScene.tscn")
+
+
+func _on_analysis_pressed() -> void:
+	get_tree().change_scene_to_file("res://Scenes/AnalysisScene.tscn")
