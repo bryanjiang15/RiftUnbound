@@ -153,6 +153,7 @@ static func _default_profile() -> Dictionary:
 			"point_scored": 8.0,
 			"card_drawn": 0.4,
 			"power_used": -0.05,
+			"rune_recycled": -1.0,
 		},
 		"keyword_weights": {
 			"assault": 0.4,

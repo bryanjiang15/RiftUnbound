@@ -64,12 +64,8 @@ from .search_log_fmt import (
     CYAN,
     DIM,
     MAGENTA,
-    YELLOW,
     format_banner,
-    format_breakdown_line,
-    format_delta_line,
-    format_line_header,
-    format_stats_line,
+    format_candidate_corpus,
     paint,
 )
 
@@ -343,41 +339,16 @@ def _log_search_payload(game_id: str, request: DecisionRequest) -> None:
             f"type={request.brief_state.decision_type}"
         )
         lines = format_banner(title)
-        if request.search_stats:
-            lines.append(format_stats_line(request.search_stats.model_dump()))
-        lines.append(paint("Candidate lines:", BOLD))
-        for line in request.candidate_lines:
-            lines.append("")
-            lines.append(format_line_header(line.line_id, float(line.score)))
-            commands = [
-                m.to_command() if hasattr(m, "to_command") else str(m)
-                for m in line.moves
-            ]
-            for i, cmd in enumerate(commands):
-                ctx = line.move_contexts[i] if i < len(line.move_contexts) else {}
-                kind = ctx.get("kind", "scripted")
-                context_text = ctx.get("context", "")
-                if kind == "intermediate":
-                    note = context_text or "auto-resolved decision"
-                    lines.append(
-                        f"  - {cmd}    "
-                        f"{paint('← [intermediate]', DIM + YELLOW)} "
-                        f"{paint(note, DIM)}"
-                    )
-                elif context_text:
-                    lines.append(f"  - {cmd}    {paint(f'({context_text})', DIM)}")
-                else:
-                    lines.append(f"  - {cmd}")
-            lines.append("  " + format_breakdown_line(line.score_breakdown or {}))
-            lines.append("  " + format_delta_line(line.resolved_state or {}))
-            if line.opponent_windows:
-                windows = [w.model_dump() for w in line.opponent_windows]
-                lines.append(
-                    "  "
-                    + paint("Opp windows:", DIM)
-                    + " "
-                    + paint(json.dumps(windows, default=str, separators=(",", ":")), DIM)
-                )
+        lines.extend(
+            format_candidate_corpus(
+                request.candidate_lines,
+                stats=(
+                    request.search_stats.model_dump()
+                    if request.search_stats
+                    else None
+                ),
+            )
+        )
         with open(_SEARCH_LOG_PATH, "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
     except Exception as exc:

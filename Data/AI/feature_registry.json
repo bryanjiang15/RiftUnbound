@@ -219,6 +219,15 @@
       "kind": "scalar",
       "sign_hint": -1,
       "weight_key": "power_used"
+    },
+    {
+      "doc": "own channeled runes permanently recycled/removed root→leaf",
+      "feature_key": "runes_recycled",
+      "group": "action",
+      "id": "rune_recycled",
+      "kind": "scalar",
+      "sign_hint": -1,
+      "weight_key": "rune_recycled"
     }
   ]
 }

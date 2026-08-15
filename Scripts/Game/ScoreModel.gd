@@ -207,8 +207,11 @@ static func build_score_features(root_snap: Dictionary, leaf_snap: Dictionary, s
 	features["cards_drawn"] = maxi(0, int(leaf_snap.get("my_hand", 0)) - int(root_snap.get("my_hand", 0)))
 	# Spending runes is not penalised (the pool empties each turn anyway, and
 	# reactive_potential already values leftover ready runes); spending domain
-	# power is slightly penalised below as a tempo cost.
+	# power is slightly penalised below as a tempo cost. Permanently recycling a
+	# channeled rune is tracked separately from temporary pool spending.
 	features["power_used"] = maxi(0, int(root_snap.get("my_energy", 0)) - int(leaf_snap.get("my_energy", 0)))
+	features["runes_recycled"] = maxi(0,
+		int(root_snap.get("my_channeled_runes", 0)) - int(leaf_snap.get("my_channeled_runes", 0)))
 
 	var kills := _unit_losses(root_snap, leaf_snap, ai_index)
 	features["enemy_units_killed"] = kills["enemy"]

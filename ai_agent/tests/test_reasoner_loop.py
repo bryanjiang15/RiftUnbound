@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from unittest.mock import patch
 
 from ai_agent import reasoner
@@ -101,6 +102,56 @@ def test_reasoner_does_not_repeat_inlined_scout_before_native_commit():
     assert line["line_id"] in initial_user
     assert emit.kind == "line"
     assert emit.chosen_line_id == line["line_id"]
+
+
+def test_reasoner_search_log_prints_scout_lines(tmp_path, monkeypatch):
+    from ai_agent import agent as agent_module
+
+    log_path = tmp_path / "agent_search.log"
+    monkeypatch.setattr(agent_module, "_SEARCH_LOG_PATH", log_path)
+    monkeypatch.setattr(agent_module, "_LOG_INPUTS", True)
+
+    state = {
+        "turn_number": 3,
+        "decision_type": "main_phase",
+        "current_state": "Neutral Open",
+        "legal_moves": ["pass"],
+    }
+    context = ReasonerTurnContext("g-scout-log", state, "root")
+    context.scout_stats = {"mode": "main", "nodes_explored": 12}
+    line = _complete_line(context)
+    line["score"] = 2.25
+    line["score_breakdown"] = {"unit_might_on_board": 2.25, "total": 2.25}
+    line["resolved_state"] = {"next_decision": "opponent's turn"}
+    context.scout_lines = [line]
+    client = _Client([
+        _Message(tool_calls=[_ToolCall("commit_line", {
+            "line_id": line["line_id"],
+            "rationale": "Forced line; scout is complete and root matched.",
+        })]),
+    ])
+    token = install_context(context)
+    try:
+        asyncio.run(reasoner._request_reasoning(
+            client=client,
+            model="gpt-4o",
+            game_id="g-scout-log",
+            brief_state=state,
+            memory_summary="",
+            known_lines=[line],
+            root_state_hash="root",
+        ))
+    finally:
+        reset_context(token)
+
+    content = log_path.read_text(encoding="utf-8")
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", content)
+    assert "reasoner" in plain
+    assert "Scout lines (1):" in plain
+    assert line["line_id"] in plain
+    assert "pass" in plain
+    assert "end turn" in plain
+    assert "score=+2.250" in plain
 
 
 def test_investigation_gate_rejects_early_terminal_then_accepts_search():

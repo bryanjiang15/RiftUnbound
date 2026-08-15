@@ -891,13 +891,22 @@ def _log_tools(
     stage: str = "actor",
     reasoning: str = "",
     final_output: Any = None,
+    scout_lines: list | None = None,
+    scout_stats: dict | None = None,
 ) -> None:
     """Append Claude/Cursor-style tool calls to the search-and-goal log.
 
     Each entry lists the tool name, key args, and a one-line ⎿ result summary so
     you can see what the model investigated alongside the search and goals.
+    Reasoner sessions also reprint the original scout candidate lines so a
+    direct line commit (which skips /decision) still shows the engine baseline.
     """
-    if not _LOG_INPUTS or (not tool_trace and not reasoning and final_output is None):
+    if not _LOG_INPUTS or (
+        not tool_trace
+        and not reasoning
+        and final_output is None
+        and not scout_lines
+    ):
         return
     from .tool_log_fmt import format_tools_session
 
@@ -913,6 +922,8 @@ def _log_tools(
         outcome=outcome,
         reasoning=reasoning,
         final_output=final_output,
+        scout_lines=scout_lines,
+        scout_stats=scout_stats,
     )
     try:
         with _SEARCH_LOG_PATH.open("a", encoding="utf-8") as f:

@@ -1,6 +1,7 @@
 """ANSI-colored, compact formatters for agent_search.log."""
 from __future__ import annotations
 
+import json
 from typing import Any, Mapping
 
 # ESC sequences — render in a terminal (`less -R`, `cat`) or an ANSI Colors
@@ -159,6 +160,83 @@ def format_line_header(line_id: str, score: float) -> str:
         GREEN if score > 0 else RED if score < 0 else DIM,
     )
     return f"{paint(line_id, BOLD + CYAN)} | score={colored_score}"
+
+
+def _line_mapping(line: Any) -> Mapping[str, Any]:
+    if isinstance(line, Mapping):
+        return line
+    if hasattr(line, "model_dump"):
+        return line.model_dump()
+    return {}
+
+
+def _move_command(move: Any) -> str:
+    if hasattr(move, "to_command"):
+        return str(move.to_command())
+    return str(move)
+
+
+def format_candidate_line(line: Any) -> list[str]:
+    """One candidate: id/score, moves, breakdown, delta, opponent windows."""
+    data = _line_mapping(line)
+    line_id = str(data.get("line_id") or "?")
+    try:
+        score = float(data.get("score") or 0.0)
+    except (TypeError, ValueError):
+        score = 0.0
+    out = [format_line_header(line_id, score)]
+    moves = list(data.get("moves") or [])
+    contexts = list(data.get("move_contexts") or [])
+    for i, move in enumerate(moves):
+        cmd = _move_command(move)
+        ctx = contexts[i] if i < len(contexts) else {}
+        if not isinstance(ctx, Mapping):
+            ctx = {}
+        kind = ctx.get("kind", "scripted")
+        context_text = ctx.get("context", "") or ""
+        if kind == "intermediate":
+            note = context_text or "auto-resolved decision"
+            out.append(
+                f"  - {cmd}    "
+                f"{paint('← [intermediate]', DIM + YELLOW)} "
+                f"{paint(note, DIM)}"
+            )
+        elif context_text:
+            out.append(f"  - {cmd}    {paint(f'({context_text})', DIM)}")
+        else:
+            out.append(f"  - {cmd}")
+    out.append("  " + format_breakdown_line(data.get("score_breakdown") or {}))
+    out.append("  " + format_delta_line(data.get("resolved_state") or {}))
+    windows = data.get("opponent_windows") or []
+    if windows:
+        dumped = [
+            w.model_dump() if hasattr(w, "model_dump") else w for w in windows
+        ]
+        out.append(
+            "  "
+            + paint("Opp windows:", DIM)
+            + " "
+            + paint(json.dumps(dumped, default=str, separators=(",", ":")), DIM)
+        )
+    return out
+
+
+def format_candidate_corpus(
+    lines: list[Any] | None,
+    *,
+    stats: Mapping[str, Any] | None = None,
+    heading: str | None = "Candidate lines:",
+) -> list[str]:
+    """Stats + heading + each candidate line. Used by search and Reasoner logs."""
+    out: list[str] = []
+    if stats:
+        out.append(format_stats_line(stats))
+    if heading:
+        out.append(paint(heading, BOLD))
+    for line in lines or []:
+        out.append("")
+        out.extend(format_candidate_line(line))
+    return out
 
 
 def format_banner(title: str) -> list[str]:

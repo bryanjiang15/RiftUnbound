@@ -12,6 +12,7 @@ from .search_log_fmt import (
     MAGENTA,
     RED,
     YELLOW,
+    format_candidate_corpus,
     paint,
 )
 
@@ -167,6 +168,8 @@ def format_tools_session(
     outcome: str,
     reasoning: str = "",
     final_output: Any = None,
+    scout_lines: list[Any] | None = None,
+    scout_stats: dict[str, Any] | None = None,
 ) -> list[str]:
     """Full tool-call block embedded in agent_search.log."""
     title = (
@@ -178,6 +181,17 @@ def format_tools_session(
     )
     bar = paint("─" * 72, DIM)
     lines = ["", bar, title, bar]
+
+    if scout_lines:
+        heading = f"Scout lines ({len(scout_lines)}):"
+        lines.extend(
+            format_candidate_corpus(
+                scout_lines,
+                stats=scout_stats,
+                heading=heading,
+            )
+        )
+        lines.append("")
 
     if not tool_trace:
         lines.append(paint("  (no tools — model answered directly)", DIM))

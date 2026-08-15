@@ -17,6 +17,7 @@ static func run(assertions) -> void:
 	_test_hold_income(assertions)
 	_test_control_fragility_sign(assertions)
 	_test_asymmetric_card_advantage(assertions)
+	_test_recycled_rune_action_cost(assertions)
 	_test_damage_fragility(assertions)
 	_test_registry_drives_breakdown(assertions)
 	_test_overlay_scales_weight(assertions)
@@ -116,6 +117,21 @@ static func _test_asymmetric_card_advantage(assertions) -> void:
 	# 5 - 0.8*5 = 1.0 (own cards worth more than denying theirs).
 	assertions.assert_true(absf(float(feats["cards_in_hand_net"]) - 1.0) < 1e-6,
 		"cards_in_hand is asymmetric (my - 0.8*opp)")
+
+
+static func _test_recycled_rune_action_cost(assertions) -> void:
+	var feats := ScoreModelScript.build_score_features(
+		_snap({"my_channeled_runes": 3}),
+		_snap({"my_channeled_runes": 2}),
+		[]
+	)
+	assertions.assert_eq(int(feats["runes_recycled"]), 1,
+		"one permanently removed channeled rune is tracked as recycled")
+	var profile := ScoringProfileScript.new()
+	var term := float(profile.score_with_breakdown(feats)["breakdown"]["rune_recycled"])
+	var weight := float(profile.profile["action_weights"]["rune_recycled"])
+	assertions.assert_true(absf(term - weight) < 1e-6,
+		"each recycled rune applies the configured action penalty")
 
 
 static func _test_damage_fragility(assertions) -> void:

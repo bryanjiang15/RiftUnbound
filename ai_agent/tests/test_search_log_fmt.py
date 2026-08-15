@@ -4,6 +4,8 @@ from __future__ import annotations
 from ai_agent.search_log_fmt import (
     RESET,
     format_breakdown_line,
+    format_candidate_corpus,
+    format_candidate_line,
     format_delta_line,
     format_line_header,
     format_stats_line,
@@ -125,3 +127,43 @@ def test_format_line_header_colored_score():
     plain = _strip_ansi(format_line_header("line-1", 2.6))
     assert plain == "line-1 | score=+2.600"
     assert RESET in format_line_header("line-1", 2.6)
+
+
+def test_format_candidate_line_includes_moves_breakdown_and_delta():
+    plain = "\n".join(
+        _strip_ansi(line)
+        for line in format_candidate_line(
+            {
+                "line_id": "scout-line-1",
+                "score": 2.25,
+                "moves": ["play scout-unit", "end turn"],
+                "move_contexts": [
+                    {"kind": "scripted", "context": "main"},
+                    {"kind": "scripted"},
+                ],
+                "score_breakdown": {"unit_might_on_board": 2.25, "total": 2.25},
+                "resolved_state": {"next_decision": "opponent's turn"},
+            }
+        )
+    )
+    assert "scout-line-1 | score=+2.250" in plain
+    assert "play scout-unit" in plain
+    assert "(main)" in plain
+    assert "end turn" in plain
+    assert "unit_might_on_board" in plain
+    assert "next=opponent's turn" in plain
+
+
+def test_format_candidate_corpus_prepends_stats_and_heading():
+    plain = "\n".join(
+        _strip_ansi(line)
+        for line in format_candidate_corpus(
+            [{"line_id": "scout-line-2", "score": 1.0, "moves": ["pass"]}],
+            stats={"mode": "main", "nodes_explored": 4},
+            heading="Scout lines (1):",
+        )
+    )
+    assert "Scout lines (1):" in plain
+    assert "mode=main" in plain
+    assert "scout-line-2 | score=+1.000" in plain
+    assert "pass" in plain

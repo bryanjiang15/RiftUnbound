@@ -709,6 +709,8 @@ async def _request_reasoning(
                 **emit.model_dump(exclude_none=True),
                 "telemetry": dict(context.telemetry) if context is not None else {},
             },
+            scout_lines=known_lines,
+            scout_stats=context.scout_stats if context is not None else None,
         )
         return emit
 

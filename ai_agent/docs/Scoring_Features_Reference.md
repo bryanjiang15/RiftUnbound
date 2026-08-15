@@ -164,6 +164,7 @@ Net presence = (# my units with the keyword) − (# opp units with it), over
 | `point_scored` | `my_score` delta | 8.0 |
 | `card_drawn` | non-negative `my_hand` increase | 0.4 |
 | `power_used` | non-negative `my_energy` decrease (small tempo cost) | −0.05 |
+| `rune_recycled` | own channeled runes permanently recycled/removed root→leaf | −1.0 |
 
 ## End-of-turn term (`end_of_turn`)
 A single composite term:
