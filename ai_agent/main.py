@@ -736,6 +736,12 @@ class AnalysisDecisionKey(BaseModel):
     turn: int
     decision_index: int
     persist: bool = True
+    mode: str = "outcome_rollout"  # outcome_rollout | same_turn
+    preset: str = "deep"  # fast | deep
+    future_player_turns: int = 4
+    force_same_turn: bool = False
+    target: dict[str, Any] | None = None
+    budget: dict[str, Any] | None = None
 
 
 class FailureReportRequest(AnalysisDecisionKey):
@@ -753,14 +759,65 @@ def _json_maybe(value: Any) -> Any:
     return value
 
 
+_SEARCH_DECISION_UI_KEYS = (
+    "id",
+    "game_id",
+    "turn",
+    "decision_index",
+    "decision_type",
+    "mode",
+    "my_player_index",
+    "chosen_line_id",
+    "chosen_line_score",
+    "best_candidate_score",
+    "regret",
+    "score_margin",
+    "num_candidates",
+    "selector_source",
+    "selector_reasoning",
+    "origin",
+    "timestamp",
+)
+
+_SNAPSHOT_UI_DROP = {
+    "analysis_state_json",
+    "brief_state_json",
+    "brief_state",
+}
+
+
+def _slim_candidate_for_ui(cand: dict[str, Any]) -> dict[str, Any]:
+    """Keep line identity + moves; drop per-candidate search/feature snapshots."""
+    return {
+        "line_id": cand.get("line_id"),
+        "rank": cand.get("rank"),
+        "score": cand.get("score"),
+        "chosen": bool(cand.get("chosen")),
+        "moves": cand.get("moves") or [],
+    }
+
+
+def _slim_search_decision_for_ui(dec: Any) -> Optional[dict[str, Any]]:
+    if not isinstance(dec, dict):
+        return None
+    return {k: dec.get(k) for k in _SEARCH_DECISION_UI_KEYS if k in dec}
+
+
 def _analysis_decision_detail(
     memory: Memory,
     *,
     game_id: str,
     turn: int,
     decision_index: int,
+    include_state: bool = True,
 ) -> dict[str, Any]:
-    """Bundle for the Analysis UI: load_decision_bundle + episodic row."""
+    """Bundle for the Analysis UI: load_decision_bundle + episodic row.
+
+    ``include_state=False`` skips shipping ``analysis_state`` (the full GameState
+    dump). Open-on-board fetches that separately via ``/analysis/checkpoint``.
+    Candidates are always slimmed: search_state / features / resolved_state are
+    not needed to list or replay a line.
+    """
     from .analysis import counterfactual as cf
 
     bundle = cf.load_decision_bundle(
@@ -768,6 +825,8 @@ def _analysis_decision_detail(
         game_id=game_id,
         turn=turn,
         decision_index=decision_index,
+        candidate_detail=False,
+        include_analysis_state=include_state,
     )
     episodic = memory.get_episodic_decision(
         game_id=game_id, turn=turn, decision_index=decision_index,
@@ -780,16 +839,28 @@ def _analysis_decision_detail(
     snap = bundle.get("snapshot")
     analysis_state = None
     replay = None
-    if isinstance(snap, dict) and snap.get("analysis_state_json"):
-        analysis_state = _json_maybe(snap.get("analysis_state_json"))
-        if isinstance(analysis_state, dict):
-            replay = analysis_state.get("replay")
-
-    status = cf.snapshot_status(bundle)
+    if include_state:
+        raw_state = snap.get("analysis_state_json") if isinstance(snap, dict) else None
+        if raw_state:
+            parsed = _json_maybe(raw_state)
+            if isinstance(parsed, dict):
+                replay = parsed.get("replay")
+                analysis_state = parsed
+        status = cf.snapshot_status(bundle)
+    elif isinstance(snap, dict) and snap.get("has_analysis_state"):
+        status = cf.STATUS_OK
+    else:
+        status = cf.snapshot_status(bundle)
     seat = 0
     dec = bundle.get("search_decision") or {}
     if dec.get("my_player_index") is not None:
         seat = int(dec["my_player_index"])
+
+    snap_out = None
+    if isinstance(snap, dict):
+        snap_out = {k: v for k, v in snap.items() if k not in _SNAPSHOT_UI_DROP}
+        snap_out["analysis_state"] = analysis_state
+        snap_out["analysis_state_json"] = None
 
     return {
         "game_id": game_id,
@@ -798,22 +869,74 @@ def _analysis_decision_detail(
         "seat": seat,
         "snapshot_status": status,
         "episodic": episodic,
-        "search_decision": bundle.get("search_decision"),
-        "snapshot": {
-            **(snap or {}),
-            # Prefer parsed object for Godot; keep raw key out of the hot path.
-            "analysis_state": analysis_state,
-            "analysis_state_json": None,
-        } if snap else None,
+        "search_decision": _slim_search_decision_for_ui(bundle.get("search_decision")),
+        "snapshot": snap_out,
         "root_state_hash": (snap or {}).get("root_state_hash") if snap else None,
         "replay": replay,
-        "candidates": bundle.get("candidates") or [],
+        "candidates": [_slim_candidate_for_ui(c) for c in (bundle.get("candidates") or [])],
         "reasoner": bundle.get("reasoner"),
         "game": bundle.get("game"),
         "weight_version": {
             "id": (bundle.get("weight_version") or {}).get("id"),
             "label": (bundle.get("weight_version") or {}).get("label"),
         } if bundle.get("weight_version") else None,
+    }
+
+
+def _analysis_checkpoint(
+    memory: Memory,
+    *,
+    game_id: str,
+    turn: int,
+    decision_index: int,
+) -> dict[str, Any]:
+    """Just the restore blob for Open on Board — no candidate / CF payloads."""
+    from .analysis import counterfactual as cf
+
+    with memory._connect() as conn:
+        snap = conn.execute(
+            """
+            SELECT analysis_state_json, root_state_hash
+            FROM decision_snapshots
+            WHERE game_id=? AND turn=? AND decision_index=?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (game_id, turn, decision_index),
+        ).fetchone()
+        dec = conn.execute(
+            """
+            SELECT my_player_index FROM search_decisions
+            WHERE game_id=? AND turn=? AND decision_index=?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (game_id, turn, decision_index),
+        ).fetchone()
+    analysis_state = None
+    replay = None
+    root_hash = None
+    status = cf.STATUS_NO_SNAPSHOT
+    if snap is not None:
+        root_hash = snap["root_state_hash"]
+        parsed = _json_maybe(snap["analysis_state_json"])
+        if isinstance(parsed, dict):
+            analysis_state = parsed
+            replay = parsed.get("replay")
+            if isinstance(replay, dict) and replay.get("supported") is False:
+                status = cf.STATUS_UNSUPPORTED
+            else:
+                status = cf.STATUS_OK
+    seat = 0
+    if dec is not None and dec["my_player_index"] is not None:
+        seat = int(dec["my_player_index"])
+    return {
+        "game_id": game_id,
+        "turn": turn,
+        "decision_index": decision_index,
+        "seat": seat,
+        "root_state_hash": root_hash,
+        "replay": replay,
+        "snapshot_status": status,
+        "analysis_state": analysis_state,
     }
 
 
@@ -927,8 +1050,14 @@ async def analysis_get_decision(
     game_id: str,
     turn: int,
     decision_index: int,
+    include_state: bool = False,
 ) -> dict:
-    """Full decision bundle (snapshot, candidates, analysis_state) for one key."""
+    """Decision bundle for the Analysis UI.
+
+    Default omits ``analysis_state`` (full GameState dump). Pass
+    ``include_state=true`` or GET ``/analysis/checkpoint`` when restoring
+    the board.
+    """
     if _memory is None:
         raise HTTPException(status_code=503, detail="Service not ready")
     detail = _analysis_decision_detail(
@@ -936,6 +1065,7 @@ async def analysis_get_decision(
         game_id=game_id,
         turn=turn,
         decision_index=decision_index,
+        include_state=include_state,
     )
     if (
         detail.get("episodic") is None
@@ -946,9 +1076,29 @@ async def analysis_get_decision(
     return detail
 
 
+@app.get("/analysis/checkpoint")
+async def analysis_get_checkpoint(
+    game_id: str,
+    turn: int,
+    decision_index: int,
+) -> dict:
+    """Restore blob only: analysis_state + hash. Used by Open on Board."""
+    if _memory is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    payload = _analysis_checkpoint(
+        _memory,
+        game_id=game_id,
+        turn=turn,
+        decision_index=decision_index,
+    )
+    if payload.get("analysis_state") is None:
+        raise HTTPException(status_code=404, detail="No analysis_state for this decision")
+    return payload
+
+
 @app.post("/analysis/counterfactual")
 async def analysis_counterfactual(body: AnalysisDecisionKey) -> dict:
-    """Run same-turn offline counterfactual for one decision key."""
+    """Run outcome rollout (default) or same-turn offline counterfactual."""
     if _memory is None:
         raise HTTPException(status_code=503, detail="Service not ready")
     from .analysis import counterfactual as cf
@@ -960,6 +1110,12 @@ async def analysis_counterfactual(body: AnalysisDecisionKey) -> dict:
             turn=body.turn,
             decision_index=body.decision_index,
             persist=body.persist,
+            mode=body.mode,
+            preset=body.preset,
+            future_player_turns=body.future_player_turns,
+            target=body.target,
+            force_same_turn=body.force_same_turn,
+            budget=body.budget,
         )
     except Exception as exc:
         logger.exception("Counterfactual analysis failed")
@@ -968,6 +1124,42 @@ async def analysis_counterfactual(body: AnalysisDecisionKey) -> dict:
         "result": result,
         "markdown": cf.render_markdown(result),
     }
+
+
+@app.get("/analysis/counterfactual-runs")
+async def analysis_counterfactual_runs(
+    game_id: str,
+    turn: int,
+    decision_index: int,
+    limit: int = 20,
+    include_result: bool = False,
+) -> dict:
+    """List persisted CF / rollout runs for a decision (newest first).
+
+    Results are omitted by default; fetch one run via
+    ``GET /analysis/counterfactual-runs/{run_id}``.
+    """
+    if _memory is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    rows = _memory.list_counterfactual_runs(
+        game_id=game_id,
+        turn=turn,
+        decision_index=decision_index,
+        limit=limit,
+        include_result=include_result,
+    )
+    return {"runs": rows, "count": len(rows)}
+
+
+@app.get("/analysis/counterfactual-runs/{run_id}")
+async def analysis_counterfactual_run(run_id: int) -> dict:
+    """One persisted CF / rollout run including the full result tree."""
+    if _memory is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    row = _memory.get_counterfactual_run(run_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return row
 
 
 @app.post("/analysis/failure-report")
@@ -993,6 +1185,12 @@ async def analysis_failure_report(body: FailureReportRequest) -> dict:
                 turn=body.turn,
                 decision_index=body.decision_index,
                 persist=body.persist,
+                mode=body.mode,
+                preset=body.preset,
+                future_player_turns=body.future_player_turns,
+                target=body.target,
+                force_same_turn=body.force_same_turn,
+                budget=body.budget,
             )
         report = fm.classify_with_counterfactual(bundle, cf_result)
     except Exception as exc:

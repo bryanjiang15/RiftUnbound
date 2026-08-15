@@ -81,6 +81,7 @@ static func export_state(gs: GameState) -> Dictionary:
 		"victory_score": gs.victory_score,
 		"game_session_id": gs.game_session_id,
 		"rng_seed": gs.rng_seed,
+		"rng_counter": gs.rng_counter,
 		"pending_prompt": _export_variant(gs.pending_prompt),
 		"death_replacement_recalls": _export_variant(gs.death_replacement_recalls),
 		"prevent_spell_ability_damage": gs.prevent_spell_ability_damage,
@@ -152,6 +153,7 @@ static func restore_state(payload: Dictionary) -> Dictionary:
 	gs.victory_score = int(payload.get("victory_score", 8))
 	gs.game_session_id = str(payload.get("game_session_id", ""))
 	gs.rng_seed = str(payload.get("rng_seed", ""))
+	gs.rng_counter = int(payload.get("rng_counter", 0))
 	gs.pending_prompt = _restore_variant(payload.get("pending_prompt", {}), card_map)
 	gs.death_replacement_recalls = _restore_variant(payload.get("death_replacement_recalls", {}), card_map)
 	gs.prevent_spell_ability_damage = bool(payload.get("prevent_spell_ability_damage", false))

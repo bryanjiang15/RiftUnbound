@@ -134,7 +134,16 @@ def test_analysis_decision_detail_shape(tmp_path):
     assert detail["snapshot"]["analysis_state"]["replay"]["supported"] is True
     assert detail["root_state_hash"] == "abc123"
     assert detail["candidates"][0]["moves"] == ["play vi-destructive", "end turn"]
+    assert "search_state" not in detail["candidates"][0]
+    assert "features" not in detail["candidates"][0]
     assert detail["snapshot"]["analysis_state_json"] is None
+
+    lite = main_mod._analysis_decision_detail(
+        mem, game_id="g1", turn=3, decision_index=0, include_state=False,
+    )
+    assert lite["snapshot"]["analysis_state"] is None
+    assert lite["candidates"][0]["moves"] == ["play vi-destructive", "end turn"]
+    assert lite["snapshot_status"] == "ok"
 
 
 def test_analysis_http_list_and_detail(tmp_path, monkeypatch):
@@ -156,7 +165,25 @@ def test_analysis_http_list_and_detail(tmp_path, monkeypatch):
     assert detail.status_code == 200
     d = detail.json()
     assert d["candidates"][0]["line_id"] == "L0"
-    assert isinstance(d["snapshot"]["analysis_state"], dict)
+    assert d["snapshot"]["analysis_state"] is None
+    assert "search_state" not in d["candidates"][0]
+
+    with_state = client.get(
+        "/analysis/decision",
+        params={"game_id": "g1", "turn": 3, "decision_index": 0, "include_state": True},
+    )
+    assert with_state.status_code == 200
+    assert isinstance(with_state.json()["snapshot"]["analysis_state"], dict)
+
+    checkpoint = client.get(
+        "/analysis/checkpoint",
+        params={"game_id": "g1", "turn": 3, "decision_index": 0},
+    )
+    assert checkpoint.status_code == 200
+    cp = checkpoint.json()
+    assert isinstance(cp["analysis_state"], dict)
+    assert cp["root_state_hash"] == "abc123"
+    assert "candidates" not in cp
 
     missing = client.get(
         "/analysis/decision",
@@ -223,3 +250,96 @@ def test_analysis_http_run_endpoints_mock(tmp_path, monkeypatch):
     )
     assert fr.status_code == 200
     assert fr.json()["report"]["modes"] == ["selection"]
+
+    # Persisted run list endpoint (empty initially for this mock path)
+    runs = client.get(
+        "/analysis/counterfactual-runs",
+        params={"game_id": "g1", "turn": 3, "decision_index": 0},
+    )
+    assert runs.status_code == 200
+    assert "runs" in runs.json()
+
+
+def test_counterfactual_run_list_omits_result_until_fetched(tmp_path, monkeypatch):
+    mem = Memory(db_path=tmp_path / "mem.db")
+    _seed(mem)
+    fat_result = {
+        "ok": True,
+        "run_kind": "outcome_rollout",
+        "candidate_lines": [{"line_id": "p", "moves": ["end turn"], "search_state": {"x": "y" * 100}}],
+    }
+    run_id = mem.record_counterfactual_run(
+        game_id="g1",
+        turn=3,
+        decision_index=0,
+        root_state_hash="abc123",
+        predicate_pack_version=None,
+        search_inputs=None,
+        profile_inputs=None,
+        budget={"node_budget": 1},
+        assumptions={"horizon": "multi_turn"},
+        status="ok",
+        result=fat_result,
+    )
+    monkeypatch.setattr(main_mod, "_memory", mem)
+    client = TestClient(main_mod.app)
+
+    listed = client.get(
+        "/analysis/counterfactual-runs",
+        params={"game_id": "g1", "turn": 3, "decision_index": 0},
+    )
+    assert listed.status_code == 200
+    rows = listed.json()["runs"]
+    assert len(rows) == 1
+    assert rows[0]["id"] == run_id
+    assert rows[0]["result"] is None
+    assert rows[0]["status"] == "ok"
+
+    one = client.get(f"/analysis/counterfactual-runs/{run_id}")
+    assert one.status_code == 200
+    assert one.json()["result"]["run_kind"] == "outcome_rollout"
+    assert one.json()["result"]["candidate_lines"][0]["line_id"] == "p"
+
+
+def test_analysis_http_accepts_rollout_body(tmp_path, monkeypatch):
+    mem = Memory(db_path=tmp_path / "mem.db")
+    _seed(mem)
+    monkeypatch.setattr(main_mod, "_memory", mem)
+
+    captured = {}
+
+    def _fake_analyze(*_a, **kwargs):
+        captured.update(kwargs)
+        return {
+            "ok": True,
+            "status": "ok",
+            "run_kind": "outcome_rollout",
+            "horizon": "multi_turn",
+            "future_player_turns": kwargs.get("future_player_turns", 4),
+            "outcome_tiers": {"by_root": []},
+        }
+
+    monkeypatch.setattr("ai_agent.analysis.counterfactual.analyze_decision", _fake_analyze)
+    monkeypatch.setattr(
+        "ai_agent.analysis.counterfactual.render_markdown",
+        lambda r: "# Rollout\nok",
+    )
+    client = TestClient(main_mod.app)
+    resp = client.post(
+        "/analysis/counterfactual",
+        json={
+            "game_id": "g1",
+            "turn": 3,
+            "decision_index": 0,
+            "persist": False,
+            "mode": "outcome_rollout",
+            "preset": "fast",
+            "future_player_turns": 2,
+            "target": {"kind": "win"},
+        },
+    )
+    assert resp.status_code == 200
+    assert captured.get("preset") == "fast"
+    assert captured.get("future_player_turns") == 2
+    assert captured.get("mode") == "outcome_rollout"
+    assert resp.json()["result"]["run_kind"] == "outcome_rollout"

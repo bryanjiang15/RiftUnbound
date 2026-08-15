@@ -198,3 +198,31 @@ def test_goal_error_when_base_finds_overlay_misses():
     assert "goal_error" in modes
     assert "eval_error" not in modes
     assert "search_coverage_error" not in modes
+
+
+def test_horizon_setup_miss_from_outcome_tiers():
+    cf_result = {
+        "ok": True,
+        "status": "ok",
+        "run_kind": "outcome_rollout",
+        "horizon": "multi_turn",
+        "information_mode": "oracle_hidden_state",
+        "future_player_turns": 4,
+        "outcome_tiers": {
+            "any_possible_improvement": True,
+            "any_policy_likely_improvement": True,
+            "any_robust_improvement": False,
+            "improved_roots": ["alt-1"],
+            "by_root": [],
+        },
+    }
+    report = fm.classify_with_counterfactual(
+        _bundle(search_decision={**_bundle()["search_decision"], "game_outcome": "loss", "regret": 0.0}),
+        cf_result,
+    )
+    modes = [f["mode"] for f in report["findings"]]
+    assert "horizon_setup_miss_policy_likely" in modes
+    assert not any(
+        a.get("abstention_reason") == "loss_or_zero_regret_without_counterfactual"
+        for a in report.get("abstentions") or []
+    )

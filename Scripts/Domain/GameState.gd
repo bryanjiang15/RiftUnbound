@@ -30,6 +30,9 @@ var game_session_id: String = ""
 # Deck/shuffle seed for this match, when started from a seeded config (self-play
 # reproducibility). Empty string when unseeded. Set in start_game_from_config().
 var rng_seed: String = ""
+# Monotonic counter for deterministic shuffle streams derived from rng_seed.
+# Copied by clone() so branched simulations stay aligned after the same events.
+var rng_counter: int = 0
 
 # Pending prompt for player choices
 var pending_prompt: Dictionary = {}
@@ -278,6 +281,8 @@ func clone() -> GameState:
 	g.winner_index = winner_index
 	g.victory_score = victory_score
 	g.game_session_id = game_session_id
+	g.rng_seed = rng_seed
+	g.rng_counter = rng_counter
 	g.pending_prompt = _clone_variant(pending_prompt, map)
 	g.death_replacement_recalls = _clone_variant(death_replacement_recalls, map)
 	g.prevent_spell_ability_damage = prevent_spell_ability_damage

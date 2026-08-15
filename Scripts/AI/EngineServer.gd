@@ -12,9 +12,11 @@ extends Node
 #   GET  /engine/health
 #   POST /engine/simulate  {moves: [...], seat?: int}
 #   POST /engine/search    {budget?, top_n?, mode?, seed_moves?, ...}
+#   POST /engine/rollout   {roots?, future_player_turns?, budget?, ...}
 
 const MoveSimulatorScript = preload("res://Scripts/Game/MoveSimulator.gd")
 const TurnSearchScript = preload("res://Scripts/Game/TurnSearch.gd")
+const OutcomeRolloutScript = preload("res://Scripts/Game/OutcomeRollout.gd")
 
 const DEFAULT_PORT := 8766
 const MAX_QUEUE := 8
@@ -183,7 +185,7 @@ func _dispatch(peer: StreamPeerTCP, method: String, path: String, body: Variant)
 		})
 		peer.disconnect_from_host()
 		return
-	if method == "POST" and path_only in ["/engine/simulate", "/engine/search"]:
+	if method == "POST" and path_only in ["/engine/simulate", "/engine/search", "/engine/rollout"]:
 		if _pinned == null:
 			_write_json(peer, 409, {"error": "no game state pinned for this decision"})
 			peer.disconnect_from_host()
@@ -221,7 +223,11 @@ func _kick_queue() -> void:
 	_worker_peer = peer
 	_worker_result = {}
 	_worker = Thread.new()
-	var kind := "simulate" if path.ends_with("/simulate") else "search"
+	var kind := "simulate"
+	if path.ends_with("/search"):
+		kind = "search"
+	elif path.ends_with("/rollout"):
+		kind = "rollout"
 	var start_err := _worker.start(_worker_entry.bind(kind, body, work_gs, seat, _profile_path))
 	if start_err != OK:
 		_busy = false
@@ -242,26 +248,59 @@ func _worker_entry(kind: String, body: Dictionary, gs: GameState, seat: int, pro
 		var sim = MoveSimulatorScript.new()
 		_worker_result = sim.simulate_line(gs, seat, cmds)
 		return
+	if kind == "rollout":
+		var rollout_opts := {
+			"future_player_turns": int(body.get("future_player_turns", 4)),
+			"profile_path": profile_path,
+		}
+		if body.has("until_turn_number"):
+			rollout_opts["until_turn_number"] = int(body["until_turn_number"])
+		elif body.has("until_turn"):
+			rollout_opts["until_turn_number"] = int(body["until_turn"])
+		if str(body.get("profile_path", "")) != "":
+			rollout_opts["profile_path"] = str(body["profile_path"])
+		if body.get("overlay", null) is Dictionary:
+			rollout_opts["overlay"] = body["overlay"]
+		if body.get("profile_path_by_seat", null) is Dictionary:
+			rollout_opts["profile_path_by_seat"] = body["profile_path_by_seat"]
+		if body.get("roots", null) is Array:
+			rollout_opts["roots"] = body["roots"]
+		elif body.has("seed_moves"):
+			rollout_opts["seed_moves"] = body["seed_moves"]
+		var budget: Dictionary = body.get("budget", {}) if body.get("budget", null) is Dictionary else {}
+		for key in [
+			"frontier_cap", "global_node_budget", "global_time_ms", "seat_top_n",
+			"opponent_top_n", "turn_beam_width", "per_turn_node_budget",
+			"per_turn_time_budget_ms", "per_turn_max_depth", "reactive_depth_guard",
+			"root_alt_cap", "until_turn_number", "until_turn",
+		]:
+			if budget.has(key):
+				rollout_opts[key] = int(budget[key])
+			elif body.has(key):
+				rollout_opts[key] = int(body[key])
+		var roller = OutcomeRolloutScript.new()
+		_worker_result = roller.search_rollout(gs, seat, rollout_opts)
+		return
 	# search
 	var options := {
 		"mode": str(body.get("mode", "main")),
 		"top_n": int(body.get("top_n", 5)),
 	}
-	var budget: Dictionary = body.get("budget", {}) if body.get("budget", null) is Dictionary else {}
-	if budget.has("node_budget"):
-		options["node_budget"] = int(budget["node_budget"])
+	var budget2: Dictionary = body.get("budget", {}) if body.get("budget", null) is Dictionary else {}
+	if budget2.has("node_budget"):
+		options["node_budget"] = int(budget2["node_budget"])
 	elif body.has("node_budget"):
 		options["node_budget"] = int(body["node_budget"])
-	if budget.has("time_budget_ms"):
-		options["time_budget_ms"] = int(budget["time_budget_ms"])
+	if budget2.has("time_budget_ms"):
+		options["time_budget_ms"] = int(budget2["time_budget_ms"])
 	elif body.has("time_budget_ms"):
 		options["time_budget_ms"] = int(body["time_budget_ms"])
-	if budget.has("max_depth"):
-		options["max_depth"] = int(budget["max_depth"])
+	if budget2.has("max_depth"):
+		options["max_depth"] = int(budget2["max_depth"])
 	elif body.has("max_depth"):
 		options["max_depth"] = int(body["max_depth"])
-	if budget.has("beam_width"):
-		options["beam_width"] = int(budget["beam_width"])
+	if budget2.has("beam_width"):
+		options["beam_width"] = int(budget2["beam_width"])
 	elif body.has("beam_width"):
 		options["beam_width"] = int(body["beam_width"])
 	if body.has("seed_moves"):

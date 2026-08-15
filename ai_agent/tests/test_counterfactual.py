@@ -142,7 +142,8 @@ def test_legacy_and_hash_mismatch_abstain(tmp_path: Path):
     mem = Memory(db_path=tmp_path / "cf.db")
     # No snapshot at all.
     result = cf.analyze_decision(
-        mem, game_id="g", turn=1, decision_index=0, persist=True, host_factory=None
+        mem, game_id="g", turn=1, decision_index=0, persist=True, host_factory=None,
+        force_same_turn=True,
     )
     assert result["status"] == cf.STATUS_NO_SNAPSHOT
     assert result["ok"] is False
@@ -178,7 +179,8 @@ def test_legacy_and_hash_mismatch_abstain(tmp_path: Path):
 
     with patch("ai_agent.analysis.counterfactual.run_offline_search", return_value={"candidate_lines": []}):
         result = cf.analyze_decision(
-            mem, game_id="g2", turn=2, decision_index=0, persist=True, host_factory=bad_hash_host
+            mem, game_id="g2", turn=2, decision_index=0, persist=True, host_factory=bad_hash_host,
+            force_same_turn=True,
         )
     assert result["status"] == cf.STATUS_HASH_MISMATCH
 

@@ -65,8 +65,15 @@ def load_decision_bundle(
     game_id: str,
     turn: int,
     decision_index: int,
+    candidate_detail: bool = True,
+    include_analysis_state: bool = True,
 ) -> dict[str, Any]:
-    """Load search_decision + snapshot + candidates + reasoner + goals for one key."""
+    """Load search_decision + snapshot + candidates + reasoner + goals for one key.
+
+    ``candidate_detail=False`` skips per-line search_state / features /
+    resolved_state JSON — Analysis UI list/detail only needs moves.
+    ``include_analysis_state=False`` skips the GameState dump column.
+    """
     with memory._connect() as conn:
         dec = conn.execute(
             """
@@ -76,14 +83,30 @@ def load_decision_bundle(
             """,
             (game_id, turn, decision_index),
         ).fetchone()
-        snap = conn.execute(
-            """
-            SELECT * FROM decision_snapshots
-            WHERE game_id=? AND turn=? AND decision_index=?
-            ORDER BY id DESC LIMIT 1
-            """,
-            (game_id, turn, decision_index),
-        ).fetchone()
+        if include_analysis_state:
+            snap = conn.execute(
+                """
+                SELECT * FROM decision_snapshots
+                WHERE game_id=? AND turn=? AND decision_index=?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (game_id, turn, decision_index),
+            ).fetchone()
+        else:
+            snap = conn.execute(
+                """
+                SELECT id, game_id, turn, decision_index, my_score, opp_score,
+                       my_energy, board_might_diff, cards_in_hand, cards_in_hand_opp,
+                       bf_control_net, analysis_state_schema_version, root_state_hash,
+                       timestamp,
+                       (analysis_state_json IS NOT NULL AND analysis_state_json != '')
+                         AS has_analysis_state
+                FROM decision_snapshots
+                WHERE game_id=? AND turn=? AND decision_index=?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (game_id, turn, decision_index),
+            ).fetchone()
         reasoner = conn.execute(
             """
             SELECT * FROM reasoner_decisions
@@ -112,29 +135,43 @@ def load_decision_bundle(
         candidates: list[dict[str, Any]] = []
         if dec is not None:
             if dec["weight_version_id"]:
+                weight_sql = (
+                    "SELECT id FROM weight_versions WHERE id=?"
+                    if not candidate_detail
+                    else "SELECT * FROM weight_versions WHERE id=?"
+                )
                 weight_row = conn.execute(
-                    "SELECT * FROM weight_versions WHERE id=?",
+                    weight_sql,
                     (int(dec["weight_version_id"]),),
                 ).fetchone()
-            for row in conn.execute(
+            cand_sql = (
                 """
+                SELECT line_id, rank, score, chosen, moves_json
+                FROM candidate_lines
+                WHERE search_decision_id=?
+                ORDER BY rank ASC
+                """
+                if not candidate_detail
+                else """
                 SELECT * FROM candidate_lines
                 WHERE search_decision_id=?
                 ORDER BY rank ASC
-                """,
-                (int(dec["id"]),),
-            ).fetchall():
-                candidates.append({
+                """
+            )
+            for row in conn.execute(cand_sql, (int(dec["id"]),)).fetchall():
+                item = {
                     "line_id": row["line_id"],
                     "rank": row["rank"],
                     "score": row["score"],
                     "chosen": bool(row["chosen"]),
                     "moves": _json_load(row["moves_json"]) or [],
-                    "breakdown": _json_load(row["breakdown_json"]) or {},
-                    "features": _json_load(row["features_json"]) or {},
-                    "resolved_state": _json_load(row["resolved_state_json"]) or {},
-                    "search_state": _json_load(row["search_state_json"]) or {},
-                })
+                }
+                if candidate_detail:
+                    item["breakdown"] = _json_load(row["breakdown_json"]) or {}
+                    item["features"] = _json_load(row["features_json"]) or {}
+                    item["resolved_state"] = _json_load(row["resolved_state_json"]) or {}
+                    item["search_state"] = _json_load(row["search_state_json"]) or {}
+                candidates.append(item)
         game = conn.execute(
             "SELECT * FROM games WHERE game_id=?", (game_id,)
         ).fetchone()
@@ -460,7 +497,7 @@ def run_offline_search(
             os.environ["RIFTBOUND_ENGINE_TIMEOUT_S"] = prev
 
 
-def analyze_decision(
+def analyze_same_turn_decision(
     memory: Memory,
     *,
     game_id: str,
@@ -469,9 +506,11 @@ def analyze_decision(
     budget: Optional[dict] = None,
     persist: bool = True,
     host_factory=None,
+    bundle: Optional[dict] = None,
 ) -> dict[str, Any]:
     """Full same-turn counterfactual for one decision. Optionally persist a run row."""
-    bundle = load_decision_bundle(memory, game_id=game_id, turn=turn, decision_index=decision_index)
+    if bundle is None:
+        bundle = load_decision_bundle(memory, game_id=game_id, turn=turn, decision_index=decision_index)
     assumptions = v1_assumptions()
     status = snapshot_status(bundle)
     snap = bundle.get("snapshot") or {}
@@ -499,6 +538,10 @@ def analyze_decision(
                 assumptions=assumptions,
                 status=status_val,
                 result=result,
+                run_kind="same_turn",
+                result_schema_version="1",
+                future_player_turns=0,
+                opponent_policy=OPPONENT_POLICY_NONE,
             )
         result = {
             **result,
@@ -508,6 +551,8 @@ def analyze_decision(
             "decision_index": decision_index,
             "assumptions": assumptions,
             "predicate_pack_version": packs.PREDICATE_PACK_VERSION,
+            "run_kind": "same_turn",
+            "result_schema_version": "1",
         }
         return result
 
@@ -540,17 +585,6 @@ def analyze_decision(
     elif snap.get("my_score") is not None:
         played_score = float(snap["my_score"])
 
-    root_state = packs.build_root_search_state(
-        brief_state=brief,
-        snapshot_scalars={
-            "my_score": snap.get("my_score"),
-            "opp_score": snap.get("opp_score"),
-            "my_ready_rune_count": None,
-        },
-        search_state=(played or {}).get("search_state") or None,
-    )
-    # Root should reflect pre-line board; prefer first original candidate's implied root
-    # via brief projection (played search_state is the leaf). Rebuild without leaf.
     root_state = packs.build_root_search_state(brief_state=brief, snapshot_scalars={
         "my_score": snap.get("my_score"),
         "opp_score": snap.get("opp_score"),
@@ -641,7 +675,53 @@ def analyze_decision(
                 pass
 
 
+def analyze_decision(
+    memory: Memory,
+    *,
+    game_id: str,
+    turn: int,
+    decision_index: int,
+    budget: Optional[dict] = None,
+    persist: bool = True,
+    host_factory=None,
+    mode: str = "outcome_rollout",
+    preset: str = "deep",
+    future_player_turns: int = 4,
+    target: Optional[dict] = None,
+    force_same_turn: bool = False,
+) -> dict[str, Any]:
+    """Unified entry: default multi-turn outcome rollout; same-turn on request/fallback."""
+    if force_same_turn or mode in ("same_turn", "1_player_turn"):
+        return analyze_same_turn_decision(
+            memory,
+            game_id=game_id,
+            turn=turn,
+            decision_index=decision_index,
+            budget=budget,
+            persist=persist,
+            host_factory=host_factory,
+        )
+    from . import outcome_rollout as ocr
+
+    return ocr.analyze_outcome_rollout(
+        memory,
+        game_id=game_id,
+        turn=turn,
+        decision_index=decision_index,
+        future_player_turns=future_player_turns,
+        preset=preset,
+        budget_overrides=budget,
+        target=target,
+        persist=persist,
+        host_factory=host_factory,
+        include_same_turn=True,
+    )
+
+
 def render_markdown(result: dict) -> str:
+    if str(result.get("run_kind") or "") == "outcome_rollout" or str(result.get("horizon") or "") == "multi_turn":
+        from . import outcome_rollout as ocr
+        return ocr.render_markdown(result)
     lines = [
         f"# Counterfactual {result.get('game_id')} t{result.get('turn')} d{result.get('decision_index')}",
         "",

@@ -115,6 +115,22 @@ columns for fast SQL filtering without JSON parsing.
 - scalars: `my_score, opp_score, my_energy, board_might_diff, cards_in_hand,
   cards_in_hand_opp, bf_control_net`
 - `brief_state_json` (full compact snapshot)
+- **`analysis_state_json`** — authoritative `GameState` dump via
+  `AnalysisStateCodec` (schema `"1"`). Required for offline counterfactual /
+  outcome rollout restore. Never sent to LLM prompts.
+- `analysis_state_schema_version`, `root_state_hash` (`ScoreModel.structural_hash`)
+
+**Readiness:** `validate-db` / `/analysis/db-status` set
+`ready_for_counterfactual` only when at least one row has non-null
+`analysis_state_json`. Bulk JSONL self-play import may omit this field — those
+rows are not rollout-ready until captured via the live agent path.
+
+### C2. `counterfactual_runs` — auditable offline CF / rollouts (**shipped**)
+- `game_id, turn, decision_index`, `root_state_hash`, `status`, `result_json`
+- `assumptions_json`, `budget_json`, `search_inputs_json`, `profile_inputs_json`
+- `run_kind` (`same_turn` | `outcome_rollout`), `result_schema_version` (`1`|`2`)
+- `future_player_turns`, `opponent_policy`
+- Listed by `GET /analysis/counterfactual-runs` for the Analysis UI prior-run picker
 
 ### D. Game-end backfill (mechanism, not a table)
 On `/game_over`: `UPDATE search_decisions SET game_outcome=?, final_score_diff=?
@@ -354,4 +370,6 @@ attribution.
 
 **Open (next for post-game analysis)**
 9. `tuning_runs` + SPRT gate records.
-10. `hypotheses` (+ optional `counterfactual_runs`) for the analyst audit trail.
+10. `hypotheses` (+ `tuning_runs`) for the analyst audit trail.
+    `counterfactual_runs` is **already shipped** (same-turn + multi-turn outcome
+    rollouts); do not treat it as open.

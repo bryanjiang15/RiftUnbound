@@ -24,12 +24,30 @@ def _memory(db: Path | None) -> Memory:
 
 def cmd_counterfactual(args: argparse.Namespace) -> int:
     memory = _memory(args.db)
+    target = None
+    if getattr(args, "target_json", None):
+        target = json.loads(Path(args.target_json).read_text(encoding="utf-8"))
+    elif getattr(args, "target", None):
+        target = {"kind": args.target}
+        if args.battlefield_id:
+            target["battlefield_id"] = args.battlefield_id
+        if getattr(args, "until_turn", None):
+            target["until_turn"] = int(args.until_turn)
+        if getattr(args, "after_player_turns", None):
+            target["after_player_turns"] = int(args.after_player_turns)
+        if args.target in ("max_score_after_turns", "max_score") and getattr(args, "metric", None):
+            target["metric"] = args.metric
     result = cf.analyze_decision(
         memory,
         game_id=args.game_id,
         turn=args.turn,
         decision_index=args.decision_index,
         persist=not args.no_persist,
+        mode=args.mode,
+        preset=args.preset,
+        future_player_turns=args.future_player_turns,
+        force_same_turn=args.same_turn,
+        target=target,
     )
     if args.format == "json":
         print(json.dumps(result, default=str, indent=2))
@@ -100,13 +118,39 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m ai_agent.analysis")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p_cf = sub.add_parser("counterfactual", help="Same-turn offline counterfactual")
+    p_cf = sub.add_parser("counterfactual", help="Outcome rollout (default) or same-turn CF")
     p_cf.add_argument("--db", type=Path)
     p_cf.add_argument("--game-id", required=True)
     p_cf.add_argument("--turn", type=int, required=True)
     p_cf.add_argument("--decision-index", type=int, required=True)
     p_cf.add_argument("--format", choices=("markdown", "json"), default="markdown")
     p_cf.add_argument("--no-persist", action="store_true")
+    p_cf.add_argument("--mode", choices=("outcome_rollout", "same_turn"), default="outcome_rollout")
+    p_cf.add_argument("--preset", choices=("fast", "deep"), default="deep")
+    p_cf.add_argument("--future-player-turns", type=int, default=4)
+    p_cf.add_argument("--same-turn", action="store_true", help="Force same-turn CF")
+    p_cf.add_argument(
+        "--target",
+        choices=("win", "control_battlefield", "score_at_least", "max_score_after_turns"),
+    )
+    p_cf.add_argument("--battlefield-id", type=str)
+    p_cf.add_argument(
+        "--until-turn",
+        type=int,
+        help="For max_score_after_turns: simulate until this absolute game turn ends (e.g. decision on turn 2, --until-turn 4)",
+    )
+    p_cf.add_argument(
+        "--after-player-turns",
+        type=int,
+        help="Deprecated relative count; prefer --until-turn",
+    )
+    p_cf.add_argument(
+        "--metric",
+        choices=("position", "my_score", "score_diff"),
+        default="position",
+        help="position = scoring profile (both boards); score_diff = VP lead; my_score = own VP only",
+    )
+    p_cf.add_argument("--target-json", type=Path)
     p_cf.set_defaults(func=cmd_counterfactual)
 
     p_fr = sub.add_parser("failure-report", help="Failure-mode classification")

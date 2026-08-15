@@ -185,6 +185,90 @@ func advance_to_quiescence(sc: GameController, after_move: String, windows: Arra
 	return "ply_budget"
 
 
+# Decision-boundary driver for multi-turn / reactive rollouts.
+# Like advance_to_quiescence for the *scripting seat*, but stops (without
+# auto-passing) the moment another seat must act — either via pending prompt
+# or chain/showdown priority/focus. Returns:
+#   "game_over" | "quiescence" | "ply_budget" | "decision_boundary"
+# When stopped at a boundary, `windows` receives a record describing it.
+func advance_until_decision_boundary(
+	sc: GameController,
+	after_move: String,
+	windows: Array,
+	ai_steps: Array = [],
+	choice_ranker: Callable = Callable(),
+) -> String:
+	var steps := 0
+	while steps < PLY_BUDGET:
+		steps += 1
+
+		if sc.gs.game_over:
+			return "game_over"
+
+		if not sc.gs.pending_prompt.is_empty():
+			var prompt_pi: int = sc.gs.pending_prompt.get("player_index", ai_index)
+			if prompt_pi == ai_index:
+				var pre_hash := ScoreModelScript.structural_hash(ScoreModelScript.snapshot(sc.gs, ai_index))
+				var cc := _resolve_ai_prompt(sc, choice_ranker)
+				if sc.last_command_error:
+					return "quiescence"
+				ai_steps.append({
+					"command": cc["command"], "context": cc["context"],
+					"kind": "intermediate", "pre_hash": pre_hash,
+				})
+			else:
+				_record_window(sc.gs, after_move, windows)
+				return "decision_boundary"
+			continue
+
+		var seat := _acting_seat(sc.gs)
+		if seat < 0:
+			return "quiescence"
+
+		if seat == ai_index:
+			var pre_hash := ScoreModelScript.structural_hash(ScoreModelScript.snapshot(sc.gs, ai_index))
+			var ctx := _describe_ai_pass(sc.gs)
+			sc.submit_command(seat, "pass")
+			if sc.last_command_error:
+				return "quiescence"
+			ai_steps.append({
+				"command": "pass", "context": ctx,
+				"kind": "intermediate", "pre_hash": pre_hash,
+			})
+		else:
+			_record_window(sc.gs, after_move, windows)
+			return "decision_boundary"
+
+	return "ply_budget"
+
+
+# Classify the current decision obligation for rollout trees.
+# Returns {kind, acting_seat} where kind is one of:
+#   "none" | "prompt" | "chain" | "showdown" | "main_turn" | "game_over"
+func describe_decision_boundary(gs: GameState, scripting_seat: int = -1) -> Dictionary:
+	if gs == null:
+		return {"kind": "none", "acting_seat": -1}
+	if gs.game_over:
+		return {"kind": "game_over", "acting_seat": -1}
+	if not gs.pending_prompt.is_empty():
+		return {
+			"kind": "prompt",
+			"acting_seat": int(gs.pending_prompt.get("player_index", -1)),
+		}
+	if gs.is_closed_chain_state():
+		return {"kind": "chain", "acting_seat": gs.priority_player_index}
+	if gs.current_state == TurnStateMachine.State.SHOWDOWN_OPEN:
+		return {"kind": "showdown", "acting_seat": gs.focus_player_index}
+	if (
+		gs.current_phase == TurnStateMachine.Phase.MAIN
+		and gs.current_state == TurnStateMachine.State.NEUTRAL_OPEN
+		and gs.pending_prompt.is_empty()
+		and gs.chain.is_empty()
+	):
+		return {"kind": "main_turn", "acting_seat": gs.turn_player_index}
+	return {"kind": "none", "acting_seat": -1}
+
+
 # Seed-prefix helper: after an explicit AI seed command, only settle opponent
 # response windows / opponent prompts. Stops as soon as the AI seat must act
 # (pending prompt, showdown focus, or chain priority) so the next seed command

@@ -159,33 +159,45 @@ chronological game splits, turn / exchange swings, associative card WPA).
 
 ### 3.2 Multi-turn: “was there a better setup for a later goal?”
 
-For swing turns in lost (or high-regret) games, run a **bounded** counterfactual:
+**V2 shipped (post-game Analysis UI + `/analysis/counterfactual`).** For swing
+turns in lost (or high-regret) games, run a **bounded** counterfactual:
 
 ```
 restore snapshot S
-propose roots: played line | top candidates | analyst-named hypotheses
-for horizon H ≤ 2 (hard cap):
-  AI TurnSearch from current state
-  opponent reply under LABELED assumptions (known board; named/generic cards)
-  score leaf: win? score proximity? goal predicate? eval features?
-report: line L, horizon H, assumption set A, leaf summary
+roots: played line | distinct original/offline alternatives (≤4 alts)
+for future completed player-turns H (default 4, hard cap 6):
+  at every decision boundary (main turn or reactive window):
+    TurnSearch for the acting seat (analyzed top-2, opponent top-3, oracle hand)
+    LineReplayer hands state across seats; stale suffixes are discarded
+  checkpoint end-of-player-turn outcomes
+report: possible / policy_likely / robust vs simulated played baseline
 ```
 
-This is the offline counterpart of deferred live `simulate_opponent` + `rollout`.
-**Every result must carry its assumption set.** Hidden hands and draws make
-“winning in two turns” conditional — report *winning under A*, never as certain
-blunder proof.
+Engine entry: `POST /engine/rollout` via headless `CounterfactualRunner`.
+Python: `ai_agent.analysis.outcome_rollout` (default mode of
+`analyze_decision`). Same-turn CF remains available with `mode=same_turn` /
+`--same-turn` and as automatic fallback when rollout cannot run.
 
-**Not in v1.** Contracts live in `ai_agent/analysis/rollout_contracts.py`:
+**Every result carries its assumption set** (`opponent_policy=oracle`,
+`information_mode=oracle_hidden_state`, branch caps, truncation). Hidden hands
+and draws make “winning in N turns” conditional — report *winning under A*,
+never as certain blunder proof. Retained branches are **policy-bounded**, not
+exhaustive.
 
-| Mode | When | Information stamp |
+| Mode | When | `information_mode` stamp |
 |---|---|---|
 | **Same-turn (v1)** | Acting player's current turn only | `public_decision` |
-| **Oracle opponent (future offline)** | Post-game upper bound using the captured real opponent hand | `oracle_hidden_state` |
+| **Oracle opponent (v2 offline)** | Post-game upper bound using the captured real opponent hand | `oracle_hidden_state` |
 | **Belief opponent (future live)** | Sample plausible hidden hands; aggregate expected / worst-case / response distribution | `belief_hidden_state` |
 
 Never blindly replay the opponent's historical commands on a branched state —
-rerun a `TurnPolicy` from that state. Multi-turn horizon is hard-capped at ≤3.
+rerun a `TurnPolicy` / `TurnSearch` from that state. Default horizon is **4
+future player-turns**; hard cap **6**. Reactive windows do not consume the turn
+horizon. Presets: **Deep** (5 roots / opp 3 / seat 2 / frontier 24 / 10k nodes /
+30s) and **Fast** (smaller caps, same semantics).
+
+Imported self-play JSONL rows without `analysis_state_json` are **not**
+rollout-ready — `validate-db` / Analysis UI surface a readiness warning.
 
 ### 3.3 Analysis tools (engine-backed)
 
@@ -221,7 +233,7 @@ causes useless tuning.
 | **Goal error** | GoalSet/overlay steered search away from a clearly better line | Strategist prompts / vocabulary; not base weights |
 | **Investigation error** *(Reasoner)* | Tools available but unused/misused; missed `search_for` hit | Reasoner prompts / tool policy |
 | **Commit error** *(Reasoner)* | Direct line commit illegal or dominated by search | Emit-contract / validation |
-| **Horizon / setup miss** | Same-turn eval fine; counterfactual shows better later goal under mild assumptions | Delayed-value **features** or sharper goals — not deeper live search by default |
+| **Horizon / setup miss** | Same-turn eval fine; multi-turn outcome tiers show better later goal under oracle assumptions (`horizon_setup_miss_{possible,policy_likely,robust}`) | Delayed-value **features** or sharper goals — not deeper live search by default |
 
 Classic triad (selection / search / eval) still applies to argmax and
 selector-only games. Goals-on and future Reasoner **add** rows above; they do

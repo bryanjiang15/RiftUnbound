@@ -110,7 +110,26 @@ func shuffle_trash_into_deck() -> void:
 		c.location = "deck"
 	deck.append_array(trash)
 	trash.clear()
-	deck.shuffle()
+	_shuffle_deck_deterministic()
+
+
+# Prefer a seeded Fisher–Yates when the owning GameState carries rng_seed so
+# cloned / counterfactual branches reshuffle identically. Fall back to Godot's
+# Array.shuffle() for unseeded live play.
+func _shuffle_deck_deterministic() -> void:
+	var gs: GameState = id_registry as GameState if id_registry is GameState else null
+	if gs == null or str(gs.rng_seed) == "":
+		deck.shuffle()
+		return
+	var rng := RandomNumberGenerator.new()
+	gs.rng_counter += 1
+	var material := "%s|%d|%d|shuffle_trash" % [gs.rng_seed, gs.turn_number, gs.rng_counter]
+	rng.seed = hash(material)
+	for i in range(deck.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var tmp = deck[i]
+		deck[i] = deck[j]
+		deck[j] = tmp
 
 
 func move_to_trash(inst: CardInstance) -> void:

@@ -47,6 +47,9 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 	var time_budget_ms := int(options.get("time_budget_ms", DEFAULT_TIME_BUDGET_MS))
 	var default_depth := DEFAULT_REACTIVE_MAX_DEPTH if _mode == "reactive" else DEFAULT_MAX_DEPTH
 	var max_depth := int(options.get("max_depth", default_depth))
+	# Rollout asks for complete end-turn leaves ahead of high-scoring fragments
+	# so opponent policy is not crowded out by unfinished "play X" stubs.
+	var prefer_complete := bool(options.get("prefer_complete", false))
 	var start_ms := Time.get_ticks_msec()
 	var stopped_reason := "exhausted"
 	var nodes_explored := 0
@@ -115,7 +118,7 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 	):
 		_add_leaf(leaves, frontier[0], root_sc, root_snapshot)
 		var elapsed_seed := Time.get_ticks_msec() - start_ms
-		var seeded_lines := _build_candidate_lines(leaves, top_n, root_hash)
+		var seeded_lines := _build_candidate_lines(leaves, top_n, root_hash, prefer_complete)
 		for sc in controllers:
 			if is_instance_valid(sc):
 				sc.free()
@@ -206,7 +209,7 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 			frontier_reason = "frontier"
 		_add_leaf(leaves, node, node["sc"], root_snapshot, frontier_reason)
 	var elapsed := Time.get_ticks_msec() - start_ms
-	var candidate_lines := _build_candidate_lines(leaves, top_n, root_hash)
+	var candidate_lines := _build_candidate_lines(leaves, top_n, root_hash, prefer_complete)
 	# Free every simulated controller Node now that candidate lines (built from
 	# snapshots/deltas, not the controllers) are extracted.
 	for sc in controllers:
@@ -346,8 +349,19 @@ func _best_nodes(nodes: Array, beam_width: int) -> Array:
 	return nodes.slice(0, mini(beam_width, nodes.size()))
 
 
-func _build_candidate_lines(leaves: Array, top_n: int, root_hash: String) -> Array:
-	leaves.sort_custom(func(a, b): return float(a.get("score", 0.0)) > float(b.get("score", 0.0)))
+func _cmp_complete_then_score(a: Dictionary, b: Dictionary) -> bool:
+	var ac := 1 if bool(a.get("complete", false)) else 0
+	var bc := 1 if bool(b.get("complete", false)) else 0
+	if ac != bc:
+		return ac > bc
+	return float(a.get("score", 0.0)) > float(b.get("score", 0.0))
+
+
+func _build_candidate_lines(leaves: Array, top_n: int, root_hash: String, prefer_complete: bool = false) -> Array:
+	if prefer_complete:
+		leaves.sort_custom(_cmp_complete_then_score)
+	else:
+		leaves.sort_custom(func(a, b): return float(a.get("score", 0.0)) > float(b.get("score", 0.0)))
 	var out: Array = []
 	var count := mini(top_n, leaves.size())
 	for i in range(count):

@@ -18,6 +18,7 @@ const RuleSearchTests = preload("res://Scripts/Tests/Tcg/suites/RuleSearchTests.
 const RuleReasonerTests = preload("res://Scripts/Tests/Tcg/suites/RuleReasonerTests.gd")
 const RuleEvaluationTests = preload("res://Scripts/Tests/Tcg/suites/RuleEvaluationTests.gd")
 const RuleAnalysisStateTests = preload("res://Scripts/Tests/Tcg/suites/RuleAnalysisStateTests.gd")
+const RuleRolloutTests = preload("res://Scripts/Tests/Tcg/suites/RuleRolloutTests.gd")
 
 const SUITE_ORDER: Array[String] = [
 	"RuleSetup",
@@ -37,6 +38,7 @@ const SUITE_ORDER: Array[String] = [
 	"RuleReasoner",
 	"RuleEvaluation",
 	"RuleAnalysisState",
+	"RuleRollout",
 ]
 
 const SUITES := {
@@ -57,6 +59,7 @@ const SUITES := {
 	"RuleReasoner": RuleReasonerTests,
 	"RuleEvaluation": RuleEvaluationTests,
 	"RuleAnalysisState": RuleAnalysisStateTests,
+	"RuleRollout": RuleRolloutTests,
 }
 
 

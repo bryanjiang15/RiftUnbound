@@ -22,6 +22,9 @@ RECOMMENDED_FIX = {
     "eval_error": "scoring_weights_or_features",
     "search_coverage_error": "search_budget_beam_or_depth",
     "goal_error": "strategist_prompts_or_overlay",
+    "horizon_setup_miss_possible": "delayed_value_features_or_goals",
+    "horizon_setup_miss_policy_likely": "delayed_value_features_or_goals",
+    "horizon_setup_miss_robust": "delayed_value_features_or_goals",
     "insufficient_evidence": "none_abstain",
 }
 
@@ -309,19 +312,79 @@ def classify_with_counterfactual(
                     decision_key=key,
                 ))
 
+    # Multi-turn outcome rollout evidence (schema v2).
+    if (
+        cf_result
+        and cf_result.get("ok")
+        and (
+            str(cf_result.get("run_kind") or "") == "outcome_rollout"
+            or str(cf_result.get("horizon") or "") == "multi_turn"
+        )
+    ):
+        info_mode = str(cf_result.get("information_mode") or "")
+        if info_mode and info_mode != "oracle_hidden_state":
+            abstentions.append(_abstention(
+                "multi_turn_requires_oracle_stamp",
+                key,
+                evidence=[f"information_mode={info_mode}"],
+            ))
+        else:
+            tiers = cf_result.get("outcome_tiers") or {}
+            if tiers.get("any_robust_improvement"):
+                findings.append(_finding(
+                    "horizon_setup_miss_robust",
+                    confidence="high",
+                    evidence=[
+                        f"improved_roots={tiers.get('improved_roots')}",
+                        f"future_player_turns={cf_result.get('future_player_turns')}",
+                        "opponent_policy=oracle",
+                    ],
+                    decision_key=key,
+                ))
+            elif tiers.get("any_policy_likely_improvement"):
+                findings.append(_finding(
+                    "horizon_setup_miss_policy_likely",
+                    confidence="medium",
+                    evidence=[
+                        f"improved_roots={tiers.get('improved_roots')}",
+                        f"future_player_turns={cf_result.get('future_player_turns')}",
+                        "opponent_policy=oracle",
+                    ],
+                    decision_key=key,
+                ))
+            elif tiers.get("any_possible_improvement"):
+                findings.append(_finding(
+                    "horizon_setup_miss_possible",
+                    confidence="medium",
+                    evidence=[
+                        f"improved_roots={tiers.get('improved_roots')}",
+                        f"future_player_turns={cf_result.get('future_player_turns')}",
+                        "opponent_policy=oracle",
+                        "policy_bounded_branches",
+                    ],
+                    decision_key=key,
+                ))
+            # Nested same-turn fallback may still supply pack evidence.
+            fb = cf_result.get("same_turn_fallback")
+            if isinstance(fb, dict) and fb.get("ok") and not hard:
+                hard = _cf_hard_packs(fb)
+
     outcome = (bundle.get("search_decision") or {}).get("game_outcome")
     regret = (bundle.get("search_decision") or {}).get("regret")
     try:
         regret_f = float(regret) if regret is not None else 0.0
     except (TypeError, ValueError):
         regret_f = 0.0
-    if outcome == "loss" and regret_f <= SELECTION_REGRET_EPS and not hard:
+    has_rollout_signal = any(
+        str(f.get("mode") or "").startswith("horizon_setup_miss") for f in findings
+    )
+    if outcome == "loss" and regret_f <= SELECTION_REGRET_EPS and not hard and not has_rollout_signal:
         abstentions.append(_abstention(
             "loss_or_zero_regret_without_counterfactual",
             key,
             evidence=[f"game_outcome={outcome}", f"regret={regret_f}"],
         ))
-    if not findings and not hard:
+    if not findings and not hard and not has_rollout_signal:
         abstentions.append(_abstention("no_deterministic_or_counterfactual_signal", key))
 
     # Deduplicate modes while keeping first (deterministic) then CF upgrades.

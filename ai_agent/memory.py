@@ -331,7 +331,7 @@ CREATE TABLE IF NOT EXISTS turn_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_turn_snap_game ON turn_snapshots (game_id, turn, my_player_index);
 
--- Offline same-turn counterfactual runs (Phase 2 move-quality judges).
+-- Offline same-turn / multi-turn counterfactual runs (Phase 2 move-quality judges).
 CREATE TABLE IF NOT EXISTS counterfactual_runs (
     id                     INTEGER PRIMARY KEY AUTOINCREMENT,
     game_id                TEXT    NOT NULL,
@@ -345,6 +345,10 @@ CREATE TABLE IF NOT EXISTS counterfactual_runs (
     assumptions_json       TEXT,
     status                 TEXT,
     result_json            TEXT,
+    run_kind               TEXT,
+    result_schema_version  TEXT,
+    future_player_turns    INTEGER,
+    opponent_policy        TEXT,
     timestamp              TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cf_runs_dec ON counterfactual_runs (game_id, turn, decision_index);
@@ -414,6 +418,12 @@ class Memory:
                 "analysis_state_json TEXT",
                 "analysis_state_schema_version TEXT",
                 "root_state_hash TEXT",
+            ],
+            "counterfactual_runs": [
+                "run_kind TEXT",
+                "result_schema_version TEXT",
+                "future_player_turns INTEGER",
+                "opponent_policy TEXT",
             ],
         }
         for table, columns in new_columns.items():
@@ -805,17 +815,38 @@ class Memory:
         assumptions: Optional[dict],
         status: str,
         result: Optional[dict],
+        run_kind: Optional[str] = None,
+        result_schema_version: Optional[str] = None,
+        future_player_turns: Optional[int] = None,
+        opponent_policy: Optional[str] = None,
     ) -> int:
         """Persist one auditable offline counterfactual run. Returns row id."""
         now = datetime.now(timezone.utc).isoformat()
+        # Infer metadata from result/assumptions when callers omit explicit fields.
+        assumptions = assumptions or {}
+        result = result or {}
+        run_kind = run_kind or result.get("run_kind") or (
+            "outcome_rollout" if assumptions.get("horizon") == "multi_turn" else "same_turn"
+        )
+        result_schema_version = result_schema_version or result.get("result_schema_version") or (
+            "2" if run_kind == "outcome_rollout" else "1"
+        )
+        if future_player_turns is None:
+            future_player_turns = result.get("future_player_turns")
+            if future_player_turns is None:
+                future_player_turns = assumptions.get("future_player_turns")
+        opponent_policy = opponent_policy or result.get("opponent_policy") or assumptions.get(
+            "opponent_policy"
+        )
         with self._connect() as conn:
             cur = conn.execute(
                 """
                 INSERT INTO counterfactual_runs
                   (game_id, turn, decision_index, root_state_hash, predicate_pack_version,
                    search_inputs_json, profile_inputs_json, budget_json, assumptions_json,
-                   status, result_json, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   status, result_json, run_kind, result_schema_version, future_player_turns,
+                   opponent_policy, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     game_id,
@@ -829,10 +860,92 @@ class Memory:
                     json.dumps(assumptions) if assumptions is not None else None,
                     status,
                     json.dumps(result) if result is not None else None,
+                    run_kind,
+                    result_schema_version,
+                    future_player_turns,
+                    opponent_policy,
                     now,
                 ),
             )
             return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def list_counterfactual_runs(
+        self,
+        *,
+        game_id: str,
+        turn: int,
+        decision_index: int,
+        limit: int = 20,
+        include_result: bool = False,
+    ) -> list[dict]:
+        """Return recent CF/rollout runs for a decision, newest first.
+
+        ``result_json`` is omitted unless ``include_result`` is set — a single
+        outcome-rollout blob can be multi-megabyte, and the Analysis UI only
+        needs metadata to populate the picker.
+        """
+        cols = (
+            "id, game_id, turn, decision_index, root_state_hash, status, "
+            "run_kind, result_schema_version, future_player_turns, opponent_policy, "
+            "assumptions_json, budget_json, timestamp"
+        )
+        if include_result:
+            cols += ", result_json"
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {cols}
+                FROM counterfactual_runs
+                WHERE game_id=? AND turn=? AND decision_index=?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (game_id, turn, decision_index, max(1, min(int(limit), 100))),
+            ).fetchall()
+        out: list[dict] = []
+        for row in rows:
+            out.append(self._parse_counterfactual_run_row(row, include_result=include_result))
+        return out
+
+    def get_counterfactual_run(self, run_id: int) -> Optional[dict]:
+        """Return one CF/rollout run including the full result payload."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, game_id, turn, decision_index, root_state_hash, status,
+                       run_kind, result_schema_version, future_player_turns, opponent_policy,
+                       assumptions_json, budget_json, result_json, timestamp
+                FROM counterfactual_runs
+                WHERE id=?
+                """,
+                (int(run_id),),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._parse_counterfactual_run_row(row, include_result=True)
+
+    @staticmethod
+    def _parse_counterfactual_run_row(row, *, include_result: bool) -> dict:
+        item = dict(row)
+        pairs = [
+            ("assumptions_json", "assumptions"),
+            ("budget_json", "budget"),
+        ]
+        if include_result:
+            pairs.append(("result_json", "result"))
+        else:
+            item.pop("result_json", None)
+            item["result"] = None
+        for src, dest in pairs:
+            raw = item.pop(src, None)
+            if isinstance(raw, str) and raw:
+                try:
+                    item[dest] = json.loads(raw)
+                except json.JSONDecodeError:
+                    item[dest] = None
+            else:
+                item[dest] = None
+        return item
 
     def record_reasoner_decision(
         self,

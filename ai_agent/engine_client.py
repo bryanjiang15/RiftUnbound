@@ -101,3 +101,12 @@ def simulate(moves: list[str], seat: Optional[int] = None) -> dict[str, Any]:
 def search(payload: dict[str, Any]) -> dict[str, Any]:
     """POST /engine/search — run TurnSearch on the pinned state."""
     return _request("POST", "/engine/search", payload)
+
+
+def rollout(payload: dict[str, Any], timeout: Optional[float] = None) -> dict[str, Any]:
+    """POST /engine/rollout — bounded multi-turn / reactive outcome tree.
+
+    Rollouts keep the engine busy for the full search budget plus JSON
+    serialize, so callers should pass an explicit timeout. Default is 3 minutes.
+    """
+    return _request("POST", "/engine/rollout", payload, timeout=timeout if timeout is not None else 180.0)

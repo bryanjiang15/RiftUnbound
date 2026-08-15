@@ -819,7 +819,8 @@ func _refresh_chain(gs: GameState) -> void:
 
 func _make_card_thumb(inst: CardInstance) -> Control:
 	var wrapper := Control.new()
-	wrapper.custom_minimum_size = Vector2(CARD_W, CARD_H)
+	var layout_width := CARD_H if inst.is_exhausted else CARD_W
+	wrapper.custom_minimum_size = Vector2(layout_width, CARD_H)
 	wrapper.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	wrapper.clip_contents = false
 	wrapper.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -913,6 +914,7 @@ func _make_card_thumb(inst: CardInstance) -> Control:
 		dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		card.add_child(dim)
+		card.position.x = (CARD_H - CARD_W) / 2.0
 		card.pivot_offset = Vector2(CARD_W / 2.0, CARD_H / 2.0)
 		card.rotation_degrees = 90.0
 
@@ -1065,7 +1067,8 @@ func _make_facedown_thumb(inst: CardInstance) -> Control:
 func _make_rune_slot(idx: int, rune: CardInstance, pi: int) -> Control:
 	# Same wrapper/inner pattern so exhausted runes can rotate freely
 	var wrapper := Control.new()
-	wrapper.custom_minimum_size = Vector2(RUNE_W, RUNE_H)
+	var layout_width := RUNE_H if rune.is_exhausted else RUNE_W
+	wrapper.custom_minimum_size = Vector2(layout_width, RUNE_H)
 	wrapper.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	wrapper.clip_contents = false
 
@@ -1101,6 +1104,7 @@ func _make_rune_slot(idx: int, rune: CardInstance, pi: int) -> Control:
 
 	# Rotate inner slot 90° when exhausted; wrapper keeps its layout slot
 	if rune.is_exhausted:
+		slot.position.x = (RUNE_H - RUNE_W) / 2.0
 		slot.pivot_offset = Vector2(RUNE_W / 2.0, RUNE_H / 2.0)
 		slot.rotation_degrees = 90.0
 
