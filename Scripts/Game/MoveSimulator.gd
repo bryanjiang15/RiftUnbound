@@ -269,6 +269,38 @@ func describe_decision_boundary(gs: GameState, scripting_seat: int = -1) -> Dict
 	return {"kind": "none", "acting_seat": -1}
 
 
+# After an explicit scripted command (including a stored `choose` / `pass`),
+# settle only what must not wait for the next command on this line.
+# Never auto-resolves this seat's prompts or chain/showdown passes.
+#   stop_at_opponent true  — if another seat must act, record the window and
+#                            return "decision_boundary" (do not pass them).
+#   stop_at_opponent false — auto-pass opponent windows (search's unanswered
+#                            assumption) via advance_opponent_windows.
+func advance_after_scripted_command(
+	sc: GameController,
+	after_move: String,
+	windows: Array,
+	stop_at_opponent: bool,
+) -> String:
+	if not stop_at_opponent:
+		return advance_opponent_windows(sc, after_move, windows)
+	if sc.gs.game_over:
+		return "game_over"
+	if not sc.gs.pending_prompt.is_empty():
+		var prompt_pi: int = sc.gs.pending_prompt.get("player_index", ai_index)
+		if prompt_pi == ai_index:
+			return "ai_decision"
+		_record_window(sc.gs, after_move, windows)
+		return "decision_boundary"
+	var acting := _acting_seat(sc.gs)
+	if acting < 0:
+		return "quiescence"
+	if acting == ai_index:
+		return "ai_decision"
+	_record_window(sc.gs, after_move, windows)
+	return "decision_boundary"
+
+
 # Seed-prefix helper: after an explicit AI seed command, only settle opponent
 # response windows / opponent prompts. Stops as soon as the AI seat must act
 # (pending prompt, showdown focus, or chain priority) so the next seed command
@@ -350,8 +382,7 @@ func _resolve_prompt(sc: GameController) -> void:
 	if ptype == "choose_optional":
 		choice = "yes"
 	elif not valid.is_empty():
-		var v = valid[0]
-		choice = v.instance_id if v is CardInstance else str(v)
+		choice = _choice_id(valid[0])
 	sc.submit_command(prompt_pi, "choose %s" % choice)
 
 
@@ -371,8 +402,7 @@ func _resolve_ai_prompt(sc: GameController, choice_ranker: Callable) -> Dictiona
 	elif valid.size() > 1 and choice_ranker.is_valid():
 		choice = _best_choice(sc, valid, choice_ranker)
 	elif not valid.is_empty():
-		var v = valid[0]
-		choice = v.instance_id if v is CardInstance else str(v)
+		choice = _choice_id(valid[0])
 	var ctx := _describe_prompt(prompt, choice)
 	sc.submit_command(prompt_pi, "choose %s" % choice)
 	return {"command": "choose %s" % choice, "context": ctx}
@@ -386,7 +416,9 @@ func _best_choice(sc: GameController, valid: Array, choice_ranker: Callable) -> 
 	var best_id := ""
 	var best_score := -INF
 	for v in valid:
-		var cid: String = v.instance_id if v is CardInstance else str(v)
+		var cid := _choice_id(v)
+		if cid == "" or cid == "none":
+			continue
 		var cand: GameController = build_sim_controller(sc.gs)
 		if cand == null:
 			continue
@@ -399,16 +431,24 @@ func _best_choice(sc: GameController, valid: Array, choice_ranker: Callable) -> 
 				best_id = cid
 		cand.free()
 	if best_id == "":
-		var v0 = valid[0]
-		best_id = v0.instance_id if v0 is CardInstance else str(v0)
+		best_id = _choice_id(valid[0]) if not valid.is_empty() else "none"
 	return best_id
+
+
+func _choice_id(v: Variant) -> String:
+	if typeof(v) == TYPE_OBJECT:
+		if is_instance_valid(v) and v is CardInstance:
+			return v.instance_id
+		return "none"
+	var s := str(v)
+	return s if s != "" else "none"
 
 
 func _describe_prompt(prompt: Dictionary, choice: String) -> String:
 	var ptype: String = prompt.get("type", "")
 	var src = prompt.get("source", null)
 	var src_name := ""
-	if src != null and src is CardInstance:
+	if typeof(src) == TYPE_OBJECT and is_instance_valid(src) and src is CardInstance:
 		src_name = src.definition.name
 	match ptype:
 		"choose_target":

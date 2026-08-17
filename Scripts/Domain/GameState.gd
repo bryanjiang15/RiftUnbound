@@ -249,10 +249,10 @@ func board_description() -> String:
 
 # ── Cloning (Phase 2.5 engine-truth simulation) ──────────────────────────────
 # Produce a deep copy of the entire game state for off-line "what-if" simulation.
-# A single shared identity map keyed by the original CardInstance guarantees that
-# every reference to a given card (player zones, board, chain, combat targets)
-# resolves to the SAME cloned object, so applying a move to the clone never
-# touches the live state. CardDefinitions are shared (immutable read-only data).
+# A single shared identity map keyed by the original CardInstance / ChainItem
+# guarantees that every reference to a given card (player zones, board, chain,
+# combat targets, pending_prompt.chain_item) resolves to the SAME cloned object,
+# so applying a move to the clone never touches the live state.
 func clone() -> GameState:
 	var g := GameState.new()
 	var map: Dictionary = {}
@@ -304,19 +304,38 @@ func clone() -> GameState:
 	return g
 
 
-# Deep-copy an arbitrary Variant that may embed CardInstance references
-# (used for pending_prompt). CardInstances resolve through the shared map.
+# Deep-copy an arbitrary Variant that may embed CardInstance / ChainItem
+# references (used for pending_prompt). Both resolve through the shared map so
+# a prompt's chain_item is the same object as gs.chain's copy, and its targets
+# are the cloned board cards.
+#
+# Pending prompts also stash a live GameController in `ctx.controller`. That Node
+# is freed when a search/replay controller is dropped. `x is CardInstance` on a
+# freed Object throws ("Left operand of 'is' is a previously freed instance"),
+# so Objects are validated first and Nodes are not copied into the clone.
 static func _clone_variant(v: Variant, map: Dictionary) -> Variant:
-	if v is CardInstance:
-		return v.clone(map)
-	if v is Dictionary:
+	if typeof(v) == TYPE_OBJECT:
+		return _clone_object(v, map)
+	if typeof(v) == TYPE_DICTIONARY:
 		var d: Dictionary = {}
 		for k in v:
 			d[k] = _clone_variant(v[k], map)
 		return d
-	if v is Array:
+	if typeof(v) == TYPE_ARRAY:
 		var a: Array = []
 		for item in v:
 			a.append(_clone_variant(item, map))
 		return a
+	return v
+
+
+static func _clone_object(v: Object, map: Dictionary) -> Variant:
+	if not is_instance_valid(v):
+		return null
+	if v is CardInstance:
+		return v.clone(map)
+	if v is ChainItem:
+		return v.clone(map)
+	if v is Node:
+		return null
 	return v

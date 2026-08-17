@@ -5,7 +5,6 @@ extends RefCounted
 # counterfactual line — or a multi-seat outcome-rollout path — from a restored
 # analysis-state root.
 
-const MoveSimulatorScript = preload("res://Scripts/Game/MoveSimulator.gd")
 const LineReplayerScript = preload("res://Scripts/Game/LineReplayer.gd")
 
 var steps: Array = []  # Array[Dictionary]: {move, label, gs, legal, error, seat, segment}
@@ -91,47 +90,44 @@ func build_from_line(root_gs: GameState, move_commands: Array, deciding_seat: in
 		"segment": 0,
 	})
 
-	var sim: MoveSimulator = MoveSimulatorScript.new()
-	sim.ai_index = deciding_seat
+	# Same settle as TurnSearch seed replay: opponent windows only, so stored
+	# intermediate choose/pass commands remain the next act for this seat.
+	var replayer = LineReplayerScript.new()
 	var prev_gs: GameState = root_clone
 	var applied := 0
 
 	for cmd in move_commands:
 		var cmd_str := str(cmd)
-		var sc: GameController = sim.build_sim_controller(prev_gs)
-		if sc == null:
-			stopped_reason = "clone_failed"
-			return {"ok": false, "error": "clone_failed", "applied": applied}
+		var one: Dictionary = replayer.replay_line(prev_gs, [cmd_str], deciding_seat, {
+			"stop_at_opponent": false,
+			"settle_tip": false,
+		})
+		if one.get("gs") == null and not bool(one.get("ok", false)):
+			stopped_reason = str(one.get("error", "clone_failed"))
+			return {"ok": false, "error": stopped_reason, "applied": applied}
 
-		sc.submit_command(deciding_seat, cmd_str)
-		var illegal := false
-		var err := ""
-		if sc.last_command_error:
-			illegal = true
-			err = str(sc.last_command_error)
+		if not bool(one.get("ok", false)) or str(one.get("stopped_reason", "")) == "illegal":
 			stopped_reason = "illegal"
+			var err := str(one.get("detail", one.get("error", "")))
+			var illegal_gs: GameState = one.get("gs") as GameState
+			if illegal_gs == null:
+				illegal_gs = prev_gs.clone()
 			steps.append({
 				"move": cmd_str,
 				"label": "illegal: %s" % cmd_str,
-				"gs": sc.gs.clone() if sc.gs != null else prev_gs.clone(),
+				"gs": illegal_gs,
 				"legal": false,
 				"error": err,
 				"seat": deciding_seat,
 				"segment": 0,
 			})
-			sc.free()
 			break
 
-		var windows: Array = []
-		stopped_reason = sim.advance_to_quiescence(sc, cmd_str, windows)
-		var next_gs: GameState = sc.gs.clone()
-		sc.free()
-		if next_gs == null:
-			stopped_reason = "clone_failed"
-			return {"ok": false, "error": "clone_failed_after_move", "applied": applied}
-
+		var next_gs: GameState = one["gs"]
+		stopped_reason = str(one.get("stopped_reason", ""))
+		var windows: Array = one.get("windows", [])
 		var label := cmd_str
-		if not windows.is_empty():
+		if typeof(windows) == TYPE_ARRAY and not windows.is_empty():
 			label = "%s ⚠ opp may respond" % cmd_str
 		steps.append({
 			"move": cmd_str,
@@ -197,13 +193,17 @@ func build_from_path(root_gs: GameState, path: Dictionary, deciding_seat: int = 
 			var cmd_str := str(cmd)
 			var one: Dictionary = replayer.replay_line(prev_gs, [cmd_str], seg_seat, {
 				"stop_at_opponent": true,
+				"settle_tip": false,
 			})
-			if one.get("gs") == null:
+			if one.get("gs") == null or not bool(one.get("ok", false)):
 				stopped_reason = str(one.get("error", "replay_failed"))
+				var fail_gs: GameState = one.get("gs") as GameState
+				if fail_gs == null:
+					fail_gs = prev_gs.clone()
 				steps.append({
 					"move": cmd_str,
 					"label": "fail[%s seat%d]: %s" % [seg_kind, seg_seat, cmd_str],
-					"gs": prev_gs.clone(),
+					"gs": fail_gs,
 					"legal": false,
 					"error": stopped_reason,
 					"seat": seg_seat,

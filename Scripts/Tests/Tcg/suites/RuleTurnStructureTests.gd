@@ -6,6 +6,7 @@ const TcgTestHarness = preload("res://Scripts/Tests/Tcg/TcgTestHarness.gd")
 static func run(assertions) -> void:
 	_test_legend_draw_on_low_hand(assertions)
 	_test_legend_draw_only_on_controller_turn(assertions)
+	_test_legend_readies_on_awaken(assertions)
 	_test_end_turn_heals(assertions)
 
 
@@ -43,6 +44,30 @@ static func _test_legend_draw_only_on_controller_turn(assertions) -> void:
 		p2_hand_before + 1,
 		"p2 gets only the normal draw when active player has more than one card",
 	)
+
+
+static func _test_legend_readies_on_awaken(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0,
+		"turn_number": 2,
+		"phase": "MAIN",
+		"state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"legend": "kaisa-daughter-of-the-void", "hand": ["void-seeker"],
+			 "deck_size": 5, "rune_deck_size": 12},
+			{"legend": "kaisa-daughter-of-the-void", "hand": ["void-seeker"],
+			 "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.gs().players[0].legend.is_exhausted = true
+	h.gs().players[1].legend.is_exhausted = true
+	h.controller._execute_start_of_turn()
+	assertions.assert_true(not h.gs().players[0].legend.is_exhausted,
+		"awaken readies the turn player's legend")
+	assertions.assert_true(h.gs().players[1].legend.is_exhausted,
+		"awaken does not ready the opponent's legend")
 
 
 static func _test_end_turn_heals(assertions) -> void:

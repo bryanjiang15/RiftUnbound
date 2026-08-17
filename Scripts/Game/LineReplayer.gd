@@ -4,7 +4,12 @@ extends RefCounted
 # Replays a TurnSearch candidate line onto a cloned GameState, stopping at the
 # first decision boundary for another seat (or at line completion / game over).
 # Used by OutcomeRollout to hand state across seats without relying on TurnSearch
-# leaf controllers (which are freed after search).
+# leaf controllers (which are freed after search), and by AnalysisTimeline to
+# step a stored line onto the board.
+#
+# Intermediate `choose` / `pass` already on the line are submitted as commands.
+# Full quiescence between commands would auto-play those same acts and make the
+# stored follow-up illegal.
 
 const MoveSimulatorScript = preload("res://Scripts/Game/MoveSimulator.gd")
 const ScoreModelScript = preload("res://Scripts/Game/ScoreModel.gd")
@@ -13,8 +18,15 @@ var _sim: RefCounted = MoveSimulatorScript.new()
 
 
 ## Replay `moves` for `seat` starting from `root_gs`.
+## Stored lines include intermediate `choose` / `pass` steps that search already
+## resolved. Between commands only opponent windows are settled (or we stop if
+## `stop_at_opponent`), so those intermediates are applied as this seat's next
+## act instead of being auto-played twice.
 ## options:
 ##   stop_at_opponent (bool, default true)
+##   settle_tip (bool, default true) — after the last command, auto-resolve any
+##     leftover AI-forced prompt/pass that was not in `moves`. Timeline stepping
+##     sets this false so each stored command stays its own ply.
 ##   choice_ranker (Callable)
 ## Returns: ok, gs, applied, remaining, stopped_reason, boundary, hashes,
 ##   search_state, complete, terminal_reason, error, windows
@@ -27,6 +39,7 @@ func replay_line(
 	if root_gs == null:
 		return _fail("null_root")
 	var stop_at_opponent := bool(options.get("stop_at_opponent", true))
+	var settle_tip := bool(options.get("settle_tip", true))
 	var choice_ranker: Callable = options.get("choice_ranker", Callable())
 	var sc: GameController = _sim.build_sim_controller(root_gs)
 	if sc == null:
@@ -37,7 +50,6 @@ func replay_line(
 	var remaining: Array = []
 	var hashes: Array = []
 	var windows: Array = []
-	var ai_steps: Array = []
 	var stopped_reason := "quiescence"
 	var last_cmd := ""
 
@@ -75,18 +87,9 @@ func replay_line(
 			}
 		applied.append(cmd_str)
 		last_cmd = cmd_str
-		ai_steps.clear()
-		windows.clear()
-		if stop_at_opponent:
-			stopped_reason = _sim.advance_until_decision_boundary(
-				sc, cmd_str, windows, ai_steps, choice_ranker
-			)
-		else:
-			stopped_reason = _sim.advance_to_quiescence(
-				sc, cmd_str, windows, ai_steps, choice_ranker
-			)
-		for step in ai_steps:
-			applied.append(str(step.get("command", "")))
+		stopped_reason = _sim.advance_after_scripted_command(
+			sc, cmd_str, windows, stop_at_opponent
+		)
 		if stopped_reason == "game_over":
 			remaining = cmds.slice(i + 1)
 			break
@@ -96,6 +99,24 @@ func replay_line(
 		if stopped_reason == "ply_budget":
 			remaining = cmds.slice(i + 1)
 			break
+
+	if (
+		settle_tip
+		and last_cmd != ""
+		and remaining.is_empty()
+		and stopped_reason not in ["game_over", "decision_boundary", "ply_budget"]
+	):
+		var tip_steps: Array = []
+		if stop_at_opponent:
+			stopped_reason = _sim.advance_until_decision_boundary(
+				sc, last_cmd, windows, tip_steps, choice_ranker
+			)
+		else:
+			stopped_reason = _sim.advance_to_quiescence(
+				sc, last_cmd, windows, tip_steps, choice_ranker
+			)
+		for step in tip_steps:
+			applied.append(str(step.get("command", "")))
 
 	var leaf_gs: GameState = sc.gs.clone()
 	sc.free()

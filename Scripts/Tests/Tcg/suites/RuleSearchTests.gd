@@ -25,6 +25,9 @@ static func run(assertions) -> void:
 	_test_jinx_seed_search_captures_auto_choices(assertions)
 	_test_seed_with_intermediate_pass_replays_without_double_quiescence(assertions)
 	_test_jinx_seed_replays_explicit_intermediate_chooses(assertions)
+	_test_resource_setup_changes_structural_hash(assertions)
+	_test_diverse_leaves_keep_distinct_openers(assertions)
+	_test_diverse_beam_reserves_unique_openers(assertions)
 
 
 # A forced discard during search must be resolved greedily — keeping the card
@@ -564,3 +567,71 @@ static func _test_reactive_search_in_showdown_window(assertions) -> void:
 			ok_first_step = false
 	assertions.assert_true(ok_first_step, "reactive lines start with a window response (pass/play), not a main-phase move")
 	assertions.assert_eq(_hash(gs, 0), before, "reactive search leaves live state unchanged")
+
+
+static func _step(cmd: String, kind: String = "scripted") -> Dictionary:
+	return {"command": cmd, "kind": kind, "context": "", "pre_hash": ""}
+
+
+static func _test_resource_setup_changes_structural_hash(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"legend": "kaisa-daughter-of-the-void", "pool": {"energy": 3, "power": {}},
+			 "hand": ["void-seeker"], "deck_size": 5, "rune_deck_size": 12},
+			{"battlefield-a": [{"id": "magma-wurm", "owner": 1}], "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	var root := ScoreModelScript.structural_hash(ScoreModelScript.snapshot(h.gs(), 0))
+	var snap := ScoreModelScript.snapshot(h.gs(), 0)
+	assertions.assert_eq(int(snap.get("my_power", {}).get("spell_rainbow", 0)), 0,
+		"root snapshot has no spell-rainbow power")
+	assertions.assert_eq(bool(snap.get("my_legend", {}).get("exhausted", true)), false,
+		"root snapshot records a ready legend")
+	h.cmd(0, "use legend-p0")
+	var after := ScoreModelScript.structural_hash(ScoreModelScript.snapshot(h.gs(), 0))
+	assertions.assert_true(root != after, "using Kai'Sa legend must change the search hash")
+	var after_snap := ScoreModelScript.snapshot(h.gs(), 0)
+	assertions.assert_eq(int(after_snap.get("my_power", {}).get("spell_rainbow", 0)), 1,
+		"post-use snapshot includes spell-rainbow power")
+	assertions.assert_eq(bool(after_snap.get("my_legend", {}).get("exhausted", false)), true,
+		"post-use snapshot records an exhausted legend")
+
+
+static func _test_diverse_leaves_keep_distinct_openers(assertions) -> void:
+	var leaves: Array = [
+		{"score": 3.9, "complete": true, "steps": [_step("play falling-star target a"), _step("end turn")]},
+		{"score": 3.8, "complete": true, "steps": [_step("play falling-star target b"), _step("end turn")]},
+		{"score": 3.7, "complete": true, "steps": [_step("play falling-star target c"), _step("end turn")]},
+		{"score": 2.1, "complete": true, "steps": [_step("play hextech-ray target a"), _step("end turn")]},
+		{"score": 0.4, "complete": true, "steps": [_step("use legend-p0"), _step("play falling-star target a"), _step("end turn")]},
+	]
+	var selected: Array = TurnSearchScript.select_diverse_leaves(leaves, 3, 0, false)
+	assertions.assert_eq(selected.size(), 3, "diversity returns top_n cluster representatives")
+	var keys: Array = []
+	for entry in selected:
+		keys.append(str(entry.get("cluster_key", "")))
+	assertions.assert_true("play falling-star" in keys, "keeps best falling-star cluster")
+	assertions.assert_true("play hextech-ray" in keys, "keeps distinct hextech opener")
+	assertions.assert_true("use legend-p0" in keys, "keeps distinct legend-use opener")
+	assertions.assert_eq(int(selected[0].get("cluster_size", 0)), 3,
+		"falling-star cluster reports collapsed sibling count")
+
+
+static func _test_diverse_beam_reserves_unique_openers(assertions) -> void:
+	var nodes: Array = [
+		{"score": 3.0, "steps": [_step("play falling-star target a")]},
+		{"score": 2.9, "steps": [_step("play falling-star target b")]},
+		{"score": 2.8, "steps": [_step("play falling-star target c")]},
+		{"score": 1.0, "steps": [_step("use legend-p0")]},
+	]
+	var beam: Array = TurnSearchScript.select_diverse_beam(nodes, 2)
+	assertions.assert_eq(beam.size(), 2, "beam width is honored")
+	var keys: Array = []
+	for node in beam:
+		keys.append(TurnSearchScript.cluster_key_from_steps(node.get("steps", [])))
+	assertions.assert_true("play falling-star" in keys, "beam keeps the high-score opener")
+	assertions.assert_true("use legend-p0" in keys, "beam reserves a slot for the distinct setup opener")
+

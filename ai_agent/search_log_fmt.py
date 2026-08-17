@@ -154,12 +154,18 @@ def format_delta_line(delta: Mapping[str, Any] | None) -> str:
     return paint("Delta:", DIM) + " " + body
 
 
-def format_line_header(line_id: str, score: float) -> str:
+def format_line_header(line_id: str, score: float, cluster_key: str = "", cluster_size: int = 0) -> str:
     colored_score = paint(
         f"{score:+.3f}",
         GREEN if score > 0 else RED if score < 0 else DIM,
     )
-    return f"{paint(line_id, BOLD + CYAN)} | score={colored_score}"
+    header = f"{paint(line_id, BOLD + CYAN)} | score={colored_score}"
+    if cluster_key and int(cluster_size or 0) > 1:
+        header += (
+            f" | cluster={paint(str(cluster_key), WHITE)}"
+            f" {paint(f'×{int(cluster_size)}', DIM)}"
+        )
+    return header
 
 
 def _line_mapping(line: Any) -> Mapping[str, Any]:
@@ -184,7 +190,12 @@ def format_candidate_line(line: Any) -> list[str]:
         score = float(data.get("score") or 0.0)
     except (TypeError, ValueError):
         score = 0.0
-    out = [format_line_header(line_id, score)]
+    out = [format_line_header(
+        line_id,
+        score,
+        cluster_key=str(data.get("cluster_key") or ""),
+        cluster_size=int(data.get("cluster_size") or 0),
+    )]
     moves = list(data.get("moves") or [])
     contexts = list(data.get("move_contexts") or [])
     for i, move in enumerate(moves):

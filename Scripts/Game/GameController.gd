@@ -304,6 +304,8 @@ func _execute_start_of_turn() -> void:
 		rune.ready()
 	if ps.champion_zone:
 		ps.champion_zone.ready()
+	if ps.legend:
+		ps.legend.ready()
 
 	# Beginning Phase — triggers before Hold scoring
 	gs.current_phase = TurnStateMachine.Phase.BEGINNING

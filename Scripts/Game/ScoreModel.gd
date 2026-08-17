@@ -73,6 +73,10 @@ static func snapshot(gs: GameState, ai_index: int) -> Dictionary:
 		"my_hand": me.hand.size(),
 		"opp_hand": opp.hand.size(),
 		"my_energy": me.rune_pool.energy,
+		"my_power": _pool_power(me.rune_pool.power),
+		"opp_power": _pool_power(opp.rune_pool.power),
+		"my_legend": _legend_snap(me.legend),
+		"opp_legend": _legend_snap(opp.legend),
 		"my_ready_runes": ready_runes(me),
 		"opp_ready_runes": ready_runes(opp),
 		"my_channeled_runes": me.channeled_runes.size(),
@@ -86,6 +90,26 @@ static func snapshot(gs: GameState, ai_index: int) -> Dictionary:
 		"bf": bf,
 		"bf_scored": bf_scored,
 		"units": units,
+	}
+
+
+static func _pool_power(power: Dictionary) -> Dictionary:
+	## Non-zero domain / spell-rainbow pool counters. Used by structural_hash so
+	## resource-setup (Kai'Sa legend, etc.) is not a transposition of the root.
+	var out: Dictionary = {}
+	for domain in power:
+		var amount := int(power[domain])
+		if amount != 0:
+			out[str(domain)] = amount
+	return out
+
+
+static func _legend_snap(legend: CardInstance) -> Dictionary:
+	if legend == null:
+		return {}
+	return {
+		"id": str(legend.instance_id),
+		"exhausted": legend.is_exhausted,
 	}
 
 

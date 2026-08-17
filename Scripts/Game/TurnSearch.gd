@@ -118,7 +118,7 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 	):
 		_add_leaf(leaves, frontier[0], root_sc, root_snapshot)
 		var elapsed_seed := Time.get_ticks_msec() - start_ms
-		var seeded_lines := _build_candidate_lines(leaves, top_n, root_hash, prefer_complete)
+		var seeded_lines := _build_candidate_lines(leaves, top_n, root_hash, prefer_complete, seed_steps)
 		for sc in controllers:
 			if is_instance_valid(sc):
 				sc.free()
@@ -209,7 +209,7 @@ func search(live_gs: GameState, ai_index: int, options: Dictionary = {}) -> Dict
 			frontier_reason = "frontier"
 		_add_leaf(leaves, node, node["sc"], root_snapshot, frontier_reason)
 	var elapsed := Time.get_ticks_msec() - start_ms
-	var candidate_lines := _build_candidate_lines(leaves, top_n, root_hash, prefer_complete)
+	var candidate_lines := _build_candidate_lines(leaves, top_n, root_hash, prefer_complete, seed_steps)
 	# Free every simulated controller Node now that candidate lines (built from
 	# snapshots/deltas, not the controllers) are extracted.
 	for sc in controllers:
@@ -345,8 +345,7 @@ func _ai_has_response_window(gs: GameState) -> bool:
 
 
 func _best_nodes(nodes: Array, beam_width: int) -> Array:
-	nodes.sort_custom(func(a, b): return float(a.get("score", 0.0)) > float(b.get("score", 0.0)))
-	return nodes.slice(0, mini(beam_width, nodes.size()))
+	return select_diverse_beam(nodes, beam_width)
 
 
 func _cmp_complete_then_score(a: Dictionary, b: Dictionary) -> bool:
@@ -357,15 +356,19 @@ func _cmp_complete_then_score(a: Dictionary, b: Dictionary) -> bool:
 	return float(a.get("score", 0.0)) > float(b.get("score", 0.0))
 
 
-func _build_candidate_lines(leaves: Array, top_n: int, root_hash: String, prefer_complete: bool = false) -> Array:
-	if prefer_complete:
-		leaves.sort_custom(_cmp_complete_then_score)
-	else:
-		leaves.sort_custom(func(a, b): return float(a.get("score", 0.0)) > float(b.get("score", 0.0)))
+func _build_candidate_lines(
+	leaves: Array,
+	top_n: int,
+	root_hash: String,
+	prefer_complete: bool = false,
+	seed_steps: Array = [],
+) -> Array:
+	var skip_strategic := strategic_commands(seed_steps).size()
+	var selected: Array = select_diverse_leaves(leaves, top_n, skip_strategic, prefer_complete)
 	var out: Array = []
-	var count := mini(top_n, leaves.size())
-	for i in range(count):
-		var leaf: Dictionary = leaves[i]
+	for i in range(selected.size()):
+		var entry: Dictionary = selected[i]
+		var leaf: Dictionary = entry.get("leaf", {})
 		var steps: Array = leaf.get("steps", [])
 		var moves: Array = []
 		var move_contexts: Array = []
@@ -393,8 +396,154 @@ func _build_candidate_lines(leaves: Array, top_n: int, root_hash: String, prefer
 			"resolved_state": leaf.get("resolved_state", {}),
 			"search_state": leaf.get("search_state", {}),
 			"opponent_windows": leaf.get("windows", []),
+			"cluster_key": str(entry.get("cluster_key", "")),
+			"cluster_size": int(entry.get("cluster_size", 1)),
+			"cluster_prefix_steps": int(entry.get("cluster_prefix_steps", 1)),
 		})
 	return out
+
+
+# Identity of a command for clustering: verb + primary card, dropping target /
+# destination so "play falling-star target A" and "... target B" share a cluster.
+static func action_identity(cmd: String) -> String:
+	var s := cmd.strip_edges()
+	var t := s.find(" target ")
+	if t >= 0:
+		s = s.substr(0, t)
+	var dest := s.find(" to ")
+	if dest >= 0:
+		s = s.substr(0, dest)
+	return s.strip_edges()
+
+
+static func _is_strategic_step(step: Dictionary) -> bool:
+	var cmd := str(step.get("command", "")).strip_edges().to_lower()
+	var kind := str(step.get("kind", "scripted"))
+	if kind in ["intermediate", "choose", "auto_choice"]:
+		return false
+	if cmd == "pass" or cmd == "end turn" or cmd.begins_with("choose "):
+		return false
+	return cmd != ""
+
+
+static func strategic_commands(steps: Array) -> Array:
+	var out: Array = []
+	for step in steps:
+		if step is Dictionary and _is_strategic_step(step):
+			out.append(str(step.get("command", "")))
+	return out
+
+
+static func cluster_key_from_steps(steps: Array, skip_strategic: int = 0) -> String:
+	var seen := 0
+	for step in steps:
+		if not (step is Dictionary) or not _is_strategic_step(step):
+			continue
+		if seen < skip_strategic:
+			seen += 1
+			continue
+		return action_identity(str(step.get("command", "")))
+	return "(other)"
+
+
+static func cluster_prefix_steps_from_steps(steps: Array, skip_strategic: int = 0) -> int:
+	## 1-based index of the command that defines the cluster (includes intermediates).
+	var seen := 0
+	for i in range(steps.size()):
+		var step = steps[i]
+		if not (step is Dictionary) or not _is_strategic_step(step):
+			continue
+		if seen < skip_strategic:
+			seen += 1
+			continue
+		return i + 1
+	return 1
+
+
+static func select_diverse_leaves(
+	leaves: Array,
+	top_n: int,
+	skip_strategic: int = 0,
+	prefer_complete: bool = false,
+) -> Array:
+	var ranked: Array = leaves.duplicate()
+	if prefer_complete:
+		ranked.sort_custom(func(a, b):
+			var ac := 1 if bool(a.get("complete", false)) else 0
+			var bc := 1 if bool(b.get("complete", false)) else 0
+			if ac != bc:
+				return ac > bc
+			return float(a.get("score", 0.0)) > float(b.get("score", 0.0))
+		)
+	else:
+		ranked.sort_custom(func(a, b): return float(a.get("score", 0.0)) > float(b.get("score", 0.0)))
+	var groups: Dictionary = {}
+	var order: Array = []
+	for leaf in ranked:
+		var key := cluster_key_from_steps(leaf.get("steps", []), skip_strategic)
+		if not groups.has(key):
+			groups[key] = []
+			order.append(key)
+		groups[key].append(leaf)
+	var out: Array = []
+	for key in order:
+		if out.size() >= top_n:
+			break
+		var group: Array = groups[key]
+		var best: Dictionary = group[0]
+		out.append({
+			"leaf": best,
+			"cluster_key": key,
+			"cluster_size": group.size(),
+			"cluster_prefix_steps": cluster_prefix_steps_from_steps(
+				best.get("steps", []), skip_strategic
+			),
+		})
+	if out.size() < top_n:
+		for key in order:
+			var group: Array = groups[key]
+			for i in range(1, group.size()):
+				if out.size() >= top_n:
+					break
+				var extra: Dictionary = group[i]
+				out.append({
+					"leaf": extra,
+					"cluster_key": key,
+					"cluster_size": group.size(),
+					"cluster_prefix_steps": cluster_prefix_steps_from_steps(
+						extra.get("steps", []), skip_strategic
+					),
+				})
+			if out.size() >= top_n:
+				break
+	return out
+
+
+static func select_diverse_beam(nodes: Array, beam_width: int) -> Array:
+	var ranked: Array = nodes.duplicate()
+	ranked.sort_custom(func(a, b): return float(a.get("score", 0.0)) > float(b.get("score", 0.0)))
+	if ranked.size() <= beam_width:
+		return ranked
+	var quota := beam_width
+	var picked: Array = []
+	var taken: Dictionary = {}
+	var seen_clusters: Dictionary = {}
+	for i in range(ranked.size()):
+		if picked.size() >= quota:
+			break
+		var key := cluster_key_from_steps(ranked[i].get("steps", []), 0)
+		if seen_clusters.has(key):
+			continue
+		seen_clusters[key] = true
+		taken[i] = true
+		picked.append(ranked[i])
+	for i in range(ranked.size()):
+		if picked.size() >= beam_width:
+			break
+		if taken.has(i):
+			continue
+		picked.append(ranked[i])
+	return picked
 
 
 func _stats(nodes: int, branches: int, hits: int, depth: int, beam_width: int, elapsed: int, reason: String) -> Dictionary:

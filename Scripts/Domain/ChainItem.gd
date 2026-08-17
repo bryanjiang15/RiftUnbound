@@ -53,9 +53,14 @@ func describe() -> String:
 
 # Deep-copy this chain item through the shared identity map (Phase 2.5).
 # CardInstance references (source_card, targets, valid_targets) resolve through
-# `map`; dictionaries are deep-duplicated.
+# `map`. The ChainItem itself is also interned so pending_prompt.chain_item and
+# gs.chain[i] stay the same object after clone — otherwise a mid-prompt clone
+# (Falling Star's second target, etc.) would retarget a card from the old state.
 func clone(map: Dictionary) -> ChainItem:
+	if map.has(self):
+		return map[self]
 	var item := ChainItem.new()
+	map[self] = item
 	item.item_type = item_type
 	item.source_card = source_card.clone(map) if source_card != null else null
 	item.ability_def = ability_def.duplicate(true)
@@ -77,11 +82,15 @@ func clone(map: Dictionary) -> ChainItem:
 static func _clone_target_array(arr: Array, map: Dictionary) -> Array:
 	var out: Array = []
 	for t in arr:
-		if t is CardInstance:
-			out.append(t.clone(map))
-		elif t is Dictionary:
+		if typeof(t) == TYPE_OBJECT:
+			if not is_instance_valid(t):
+				continue
+			if t is CardInstance:
+				out.append(t.clone(map))
+			continue
+		if typeof(t) == TYPE_DICTIONARY:
 			out.append(t.duplicate(true))
-		elif t is Array:
+		elif typeof(t) == TYPE_ARRAY:
 			out.append(_clone_target_array(t, map))
 		else:
 			out.append(t)

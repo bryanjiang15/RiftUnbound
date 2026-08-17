@@ -2203,6 +2203,30 @@ def _format_brief_state(bs: dict) -> str:
 
     lines.append("")
 
+    legend = bs.get("my_legend")
+    if legend:
+        exhausted = "exhausted" if legend.get("is_exhausted") else "ready"
+        lines.append(
+            f"Legend: {legend.get('instance_id', '')} — {legend.get('name', '')} [{exhausted}]"
+        )
+        effect = legend.get("effect_text", "")
+        if effect:
+            lines.append(f"  Effect: {skill_module.format_effect_text(effect)}")
+        for ab in legend.get("abilities") or []:
+            kind = str(ab.get("ability_type", "") or "ability")
+            timing = []
+            if ab.get("is_reaction"):
+                timing.append("Reaction")
+            if ab.get("is_action"):
+                timing.append("Action")
+            timing_str = f" ({', '.join(timing)})" if timing else ""
+            cost = ab.get("cost") or "free"
+            lines.append(
+                f"  {kind}{timing_str}: {ab.get('effect_type', '') or kind} "
+                f"— cost {cost}; command `use {legend.get('instance_id', '')}`"
+            )
+        lines.append("")
+
     # Hand — costs and keywords for planning; legality comes from legal_moves
     hand = bs.get("my_hand", [])
     lines.append(f"Hand ({len(hand)} cards):")

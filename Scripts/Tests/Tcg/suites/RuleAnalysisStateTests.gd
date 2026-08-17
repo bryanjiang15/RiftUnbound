@@ -3,6 +3,7 @@ extends RefCounted
 
 const TcgTestHarness = preload("res://Scripts/Tests/Tcg/TcgTestHarness.gd")
 const AnalysisStateCodecScript = preload("res://Scripts/AI/AnalysisStateCodec.gd")
+const AnalysisTimelineScript = preload("res://Scripts/UI/AnalysisTimeline.gd")
 const ScoreModelScript = preload("res://Scripts/Game/ScoreModel.gd")
 const TurnSearchScript = preload("res://Scripts/Game/TurnSearch.gd")
 
@@ -13,6 +14,10 @@ static func run(assertions) -> void:
 	_test_unsupported_showdown_rejected(assertions)
 	_test_winning_fixture_round_trip(assertions)
 	_test_preserve_with_progress_search(assertions)
+	_test_timeline_replays_stored_intermediate_pass(assertions)
+	_test_timeline_replays_stored_intermediate_chooses(assertions)
+	_test_timeline_path_replays_stored_intermediate_pass(assertions)
+	_test_timeline_falling_star_repeat_target_deals_six(assertions)
 
 
 static func _hash(gs: GameState, seat: int = 0) -> String:
@@ -145,3 +150,161 @@ static func _test_preserve_with_progress_search(assertions) -> void:
 			found_progress = true
 			break
 	assertions.assert_true(found_progress, "search finds a non-pass line that keeps vi")
+
+
+static func _timeline_illegal_labels(timeline) -> PackedStringArray:
+	var out := PackedStringArray()
+	for step in timeline.steps:
+		var label := str(step.get("label", ""))
+		if label.begins_with("illegal:") or not bool(step.get("legal", true)):
+			out.append(label)
+	return out
+
+
+static func _test_timeline_replays_stored_intermediate_pass(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture("res://Scripts/Tests/Tcg/fixtures/movement_base_to_bf.json")
+	var moves: Array = [
+		"move vi-destructive to battlefield-a",
+		"pass",
+		"end turn",
+	]
+	var timeline = AnalysisTimelineScript.new()
+	var built: Dictionary = timeline.build_from_line(h.gs(), moves, 0, "move-pass")
+	assertions.assert_true(bool(built.get("ok", false)),
+		"timeline builds move+pass+end turn: %s" % str(built.get("error", "")))
+	assertions.assert_eq(int(built.get("applied", 0)), 3, "timeline applied all three commands")
+	var illegal := _timeline_illegal_labels(timeline)
+	assertions.assert_eq(illegal.size(), 0,
+		"no illegal steps on stored pass line: %s" % ", ".join(illegal))
+	assertions.assert_eq(str(timeline.steps[timeline.steps.size() - 1].get("move", "")), "end turn",
+		"timeline ends on end turn, not a duplicate pass")
+
+
+static func _test_timeline_replays_stored_intermediate_chooses(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{
+				"pool": {"energy": 10, "power": {"fury": 1}},
+				"hand": ["jinx-demolitionist", "fury-rune", "fury-rune", "void-seeker"],
+				"deck_size": 10, "rune_deck_size": 12,
+			},
+			{"deck_size": 10, "rune_deck_size": 12},
+		],
+	})
+	var searcher = TurnSearchScript.new()
+	var scout: Dictionary = searcher.search(h.gs(), 0, {
+		"seed_moves": ["play jinx-demolitionist"],
+		"node_budget": 80,
+		"time_budget_ms": 1000,
+		"beam_width": 8,
+		"max_depth": 8,
+		"top_n": 8,
+	})
+	var line_moves: Array = []
+	for line in scout.get("candidate_lines", []):
+		var moves: Array = line.get("moves", [])
+		if moves.is_empty() or str(moves[0]) != "play jinx-demolitionist":
+			continue
+		var chooses := 0
+		for m in moves:
+			if str(m).begins_with("choose "):
+				chooses += 1
+		if chooses >= 2:
+			line_moves = moves
+			break
+	assertions.assert_true(line_moves.size() >= 3,
+		"search produced a jinx line with play + intermediate chooses")
+	if line_moves.size() < 3:
+		return
+	var timeline = AnalysisTimelineScript.new()
+	var built: Dictionary = timeline.build_from_line(h.gs(), line_moves, 0, "jinx")
+	assertions.assert_true(bool(built.get("ok", false)),
+		"timeline builds jinx line: %s" % str(built.get("error", "")))
+	assertions.assert_eq(int(built.get("applied", 0)), line_moves.size(),
+		"timeline applied every stored command including chooses")
+	var illegal := _timeline_illegal_labels(timeline)
+	assertions.assert_eq(illegal.size(), 0,
+		"no illegal choose/pass steps: %s" % ", ".join(illegal))
+	var last_move := str(timeline.steps[timeline.steps.size() - 1].get("move", ""))
+	assertions.assert_eq(last_move, str(line_moves[line_moves.size() - 1]),
+		"timeline last step matches the stored line")
+
+
+static func _test_timeline_path_replays_stored_intermediate_pass(assertions) -> void:
+	# Rollout paths stop at an opponent window, so `end turn` is not in the same
+	# segment as the move+pass. The stored pass must still apply instead of
+	# being auto-played and then marked illegal.
+	var h = TcgTestHarness.new()
+	h.load_fixture("res://Scripts/Tests/Tcg/fixtures/movement_base_to_bf.json")
+	var path := {
+		"line_id": "path-move-pass",
+		"path_segments": [
+			{
+				"seat": 0,
+				"kind": "root",
+				"moves": [
+					"move vi-destructive to battlefield-a",
+					"pass",
+				],
+				"depth_player_turns": 0,
+			},
+			{
+				"seat": 1,
+				"kind": "reactive",
+				"moves": ["pass"],
+				"depth_player_turns": 0,
+			},
+			{
+				"seat": 0,
+				"kind": "main",
+				"moves": ["end turn"],
+				"depth_player_turns": 1,
+			},
+		],
+	}
+	var timeline = AnalysisTimelineScript.new()
+	var built: Dictionary = timeline.build_from_path(h.gs(), path, 0)
+	assertions.assert_true(bool(built.get("ok", false)),
+		"path timeline builds move+pass then opp pass then end turn: %s" % str(built.get("error", "")))
+	assertions.assert_eq(int(built.get("applied", 0)), 4, "path timeline applied four commands")
+	var illegal := _timeline_illegal_labels(timeline)
+	assertions.assert_eq(illegal.size(), 0,
+		"no illegal steps on multi-seat pass path: %s" % ", ".join(illegal))
+	assertions.assert_eq(str(timeline.steps[timeline.steps.size() - 1].get("move", "")), "end turn",
+		"path timeline reaches end turn after opponent pass")
+
+
+static func _test_timeline_falling_star_repeat_target_deals_six(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 2, "power": {"fury": 2}}, "hand": ["falling-star"], "deck_size": 5, "rune_deck_size": 12},
+			{"base": [{"id": "magma-wurm"}], "deck_size": 5, "rune_deck_size": 12},
+		],
+	})
+	var moves: Array = [
+		"play falling-star target magma-wurm",
+		"choose magma-wurm",
+		"pass",
+	]
+	var timeline = AnalysisTimelineScript.new()
+	var built: Dictionary = timeline.build_from_line(h.gs(), moves, 0, "falling-star")
+	assertions.assert_true(bool(built.get("ok", false)),
+		"timeline builds falling-star double-tap: %s" % str(built.get("error", "")))
+	var illegal := _timeline_illegal_labels(timeline)
+	assertions.assert_eq(illegal.size(), 0,
+		"no illegal steps on falling-star line: %s" % ", ".join(illegal))
+	var leaf: GameState = timeline.steps[timeline.steps.size() - 1].get("gs") as GameState
+	assertions.assert_true(leaf != null, "timeline has a leaf state")
+	if leaf == null:
+		return
+	var wurm: CardInstance = leaf.find_instance_anywhere("magma-wurm")
+	assertions.assert_true(wurm != null, "magma-wurm still on the timeline board")
+	if wurm != null:
+		assertions.assert_eq(wurm.damage, 6, "timeline falling star double-tap deals 6")

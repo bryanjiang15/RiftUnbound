@@ -68,6 +68,23 @@ class FacedownCard(BaseModel):
     play_from_hidden_cost: str = "0E"
 
 
+class LegendAbility(BaseModel):
+    ability_id: str = ""
+    ability_type: str = ""
+    effect_type: str = ""
+    is_action: bool = False
+    is_reaction: bool = False
+    cost: str = "free"
+
+
+class LegendInfo(BaseModel):
+    instance_id: str
+    name: str
+    is_exhausted: bool = False
+    effect_text: str = ""
+    abilities: list[LegendAbility] = Field(default_factory=list)
+
+
 class BattlefieldInfo(BaseModel):
     battlefield_id: str
     display_name: str
@@ -244,6 +261,7 @@ class BriefState(BaseModel):
     # My board
     my_base_units: list[UnitSummary]
     my_champion: Optional[UnitSummary] = None  # champion zone, if not yet played
+    my_legend: Optional[LegendInfo] = None
 
     # Opponent public info only
     opponent_score: int
@@ -599,6 +617,9 @@ class CandidateLine(BaseModel):
     search_mode: str = "main"
     original_line_id: Optional[str] = None
     source_lineage: list[str] = Field(default_factory=list)
+    cluster_key: str = ""
+    cluster_size: int = 1
+    cluster_prefix_steps: int = 1
 
 
 class SearchStats(BaseModel):

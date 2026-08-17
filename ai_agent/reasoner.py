@@ -411,7 +411,10 @@ def _render_scout_lines(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "prefix_steps_options": list(
                     range(1, min(4, max(1, len(moves))))
                 ),
+                "cluster_prefix_steps": int(line.get("cluster_prefix_steps") or 1),
             },
+            "cluster_key": line.get("cluster_key", ""),
+            "cluster_size": int(line.get("cluster_size") or 1),
             "score_band": _score_band_label(line.get("score", 0.0), band=band),
             "top_score_terms": dict(drivers),
             "resolved_state": _render_resolved_state(line.get("resolved_state")),

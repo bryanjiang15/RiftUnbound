@@ -11,6 +11,8 @@ const BriefStateSerializerScript = preload("res://Scripts/AI/BriefStateSerialize
 
 static func run(assertions) -> void:
 	_test_clone_is_independent(assertions)
+	_test_clone_remaps_pending_chain_item(assertions)
+	_test_clone_strips_freed_controller_from_prompt(assertions)
 	_test_simulate_does_not_mutate_live(assertions)
 	_test_simulate_unopposed_move_conquers(assertions)
 	_test_simulate_illegal_move_is_flagged(assertions)
@@ -68,6 +70,73 @@ static func _test_clone_is_independent(assertions) -> void:
 		live.players[0].base_permanents[0] != clone_unit,
 		"clone holds distinct CardInstance objects"
 	)
+
+
+static func _test_clone_remaps_pending_chain_item(assertions) -> void:
+	# Falling Star locks the first target then prompts for the second. The
+	# pending_prompt holds the ChainItem. Clone must remap that item (and its
+	# first target) onto the cloned board, or the second choose damages a
+	# different object and the visible unit only takes 3.
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 2, "power": {"fury": 2}}, "hand": ["falling-star"], "deck_size": 5, "rune_deck_size": 12},
+			{"base": [{"id": "magma-wurm"}], "deck_size": 5, "rune_deck_size": 12},
+		],
+	})
+	h.controller.submit_command(0, "play falling-star target magma-wurm")
+	var live: GameState = h.gs()
+	assertions.assert_true(not live.pending_prompt.is_empty(),
+		"second Falling Star target is pending")
+	var live_item: ChainItem = live.pending_prompt.get("chain_item")
+	assertions.assert_true(live_item != null, "pending prompt holds a chain item")
+	var live_wurm: CardInstance = live.find_instance_anywhere("magma-wurm")
+	assertions.assert_true(live_item.targets.size() >= 1 and live_item.targets[0] == live_wurm,
+		"first target is the live magma-wurm")
+
+	var cloned: GameState = live.clone()
+	var clone_item: ChainItem = cloned.pending_prompt.get("chain_item")
+	var clone_wurm: CardInstance = cloned.find_instance_anywhere("magma-wurm")
+	assertions.assert_true(clone_item != null, "cloned prompt still holds a chain item")
+	assertions.assert_true(clone_item != live_item, "cloned chain item is not aliased")
+	assertions.assert_true(clone_wurm != live_wurm, "cloned magma-wurm is not aliased")
+	assertions.assert_true(clone_item.targets.size() >= 1 and clone_item.targets[0] == clone_wurm,
+		"first target remaps onto the cloned magma-wurm")
+
+
+static func _test_clone_strips_freed_controller_from_prompt(assertions) -> void:
+	# Optional-ability prompts stash ctx.controller (a Node). Search/rollout
+	# frees that controller, then until-turn-N clones the frontier state again.
+	# `x is CardInstance` on the freed Node must not throw.
+	var h = TcgTestHarness.new()
+	_load(h)
+	var live: GameState = h.gs()
+	live.pending_prompt = {
+		"player_index": 0,
+		"type": "choose_optional",
+		"valid_choices": ["yes", "no"],
+		"source": live.players[0].base_permanents[0],
+		"ctx": {
+			"controller": h.controller,
+			"player_index": 0,
+			"target": live.players[0].base_permanents[0],
+		},
+		"prompt": "[PROMPT] test",
+	}
+	var cloned: GameState = live.clone()
+	assertions.assert_true(cloned.pending_prompt.get("ctx", {}).get("controller") == null,
+		"clone drops GameController from pending prompt ctx")
+	var clone_src: CardInstance = cloned.pending_prompt.get("source")
+	assertions.assert_true(clone_src != null and clone_src != live.players[0].base_permanents[0],
+		"prompt source remaps onto the cloned card")
+	h.controller.free()
+	h.controller = null
+	var cloned2: GameState = cloned.clone()
+	assertions.assert_true(cloned2 != null, "second clone after controller free succeeds")
+	assertions.assert_eq(str(cloned2.pending_prompt.get("type", "")), "choose_optional",
+		"prompt type survives a clone after the original controller was freed")
 
 
 static func _test_simulate_does_not_mutate_live(assertions) -> void:

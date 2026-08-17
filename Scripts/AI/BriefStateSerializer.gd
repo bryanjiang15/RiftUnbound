@@ -62,6 +62,7 @@ static func serialize(gs: GameState, player_index: int, include_sims: bool = tru
 		# My board
 		"my_base_units": _serialize_units(ps.get_units_at_base()),
 		"my_champion": _serialize_champion(ps.champion_zone),
+		"my_legend": _serialize_legend(ps.legend),
 
 		# Opponent — public info only
 		"opponent_score": opp.score,
@@ -73,7 +74,7 @@ static func serialize(gs: GameState, player_index: int, include_sims: bool = tru
 
 		# Legal moves enumerated by LegalMoveEnumerator
 		"legal_moves": legal_moves,
-		"legal_action_categories": _legal_categories(gs, player_index),
+		"legal_action_categories": _legal_categories(gs, player_index, legal_moves),
 
 		# Engine-truth pre-simulations (Phase 2.5, option C)
 		"move_simulations": sims,
@@ -275,6 +276,31 @@ static func _serialize_champion(champion: CardInstance) -> Variant:
 	return _serialize_unit(champion)
 
 
+static func _serialize_legend(legend: CardInstance) -> Variant:
+	if legend == null:
+		return null
+	var abilities: Array = []
+	for ab in legend.definition.abilities:
+		var cost: Dictionary = ab.get("cost", {})
+		if cost == null:
+			cost = {}
+		abilities.append({
+			"ability_id": str(ab.get("ability_id", "")),
+			"ability_type": str(ab.get("ability_type", "")),
+			"effect_type": str(ab.get("effect_type", "")),
+			"is_action": bool(ab.get("is_action", false)),
+			"is_reaction": bool(ab.get("is_reaction", false)),
+			"cost": CostCalculator.cost_to_string(cost) if not cost.is_empty() else "free",
+		})
+	return {
+		"instance_id": legend.instance_id,
+		"name": legend.definition.name,
+		"is_exhausted": legend.is_exhausted,
+		"effect_text": legend.definition.effect_text,
+		"abilities": abilities,
+	}
+
+
 # ── Battlefields ──────────────────────────────────────────────────────────────
 
 static func _serialize_battlefields(gs: GameState, player_index: int) -> Array:
@@ -314,7 +340,7 @@ static func _serialize_my_facedown(bf, player_index: int) -> Variant:
 
 # ── Legal action categories ───────────────────────────────────────────────────
 
-static func _legal_categories(gs: GameState, player_index: int) -> Array:
+static func _legal_categories(gs: GameState, player_index: int, legal_moves: Array = []) -> Array:
 	var cats: Array = []
 	if gs.mulligan_phase and not gs.mulligan_done[player_index]:
 		cats.append("mulligan")
@@ -366,6 +392,10 @@ static func _legal_categories(gs: GameState, player_index: int) -> Array:
 				break
 	if has_hide:
 		cats.append("hide_card")
+	for cmd in legal_moves:
+		if str(cmd).begins_with("use "):
+			cats.append("use_ability")
+			break
 	cats.append("end_turn")
 	return cats
 

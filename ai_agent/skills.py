@@ -524,6 +524,9 @@ def _search_corpus_for_filter(top_n: int = 8) -> tuple[list[dict], str]:
                 "terminal_reason": str(line.get("terminal_reason", "")),
                 "search_mode": str(line.get("search_mode", "main")),
                 "opponent_windows": list(line.get("opponent_windows", []) or []),
+                "cluster_key": str(line.get("cluster_key", "")),
+                "cluster_size": int(line.get("cluster_size") or 1),
+                "cluster_prefix_steps": int(line.get("cluster_prefix_steps") or 1),
             }
             for line in lines
             if isinstance(line, dict)

@@ -129,6 +129,14 @@ def test_format_line_header_colored_score():
     assert RESET in format_line_header("line-1", 2.6)
 
 
+def test_format_line_header_includes_cluster_when_collapsed():
+    plain = _strip_ansi(
+        format_line_header("line-1", 3.9, cluster_key="play falling-star-3", cluster_size=3)
+    )
+    assert "cluster=play falling-star-3" in plain
+    assert "×3" in plain
+
+
 def test_format_candidate_line_includes_moves_breakdown_and_delta():
     plain = "\n".join(
         _strip_ansi(line)
