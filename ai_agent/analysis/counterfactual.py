@@ -12,6 +12,7 @@ from ..eval.godot_host import GodotHost, find_godot
 from ..memory import Memory
 from ..search_metrics import evaluate_clause
 from . import predicate_packs as packs
+from .persist_compact import compact_result_for_storage
 from .rollout_contracts import (
     HORIZON_ONE_PLAYER_TURN,
     INFORMATION_PUBLIC,
@@ -525,7 +526,19 @@ def analyze_same_turn_decision(
     }
 
     def _persist(status_val: str, result: dict) -> dict:
+        result = {
+            **result,
+            "status": status_val,
+            "game_id": game_id,
+            "turn": turn,
+            "decision_index": decision_index,
+            "assumptions": assumptions,
+            "predicate_pack_version": packs.PREDICATE_PACK_VERSION,
+            "run_kind": "same_turn",
+            "result_schema_version": "1",
+        }
         if persist:
+            result = compact_result_for_storage(result) or result
             memory.record_counterfactual_run(
                 game_id=game_id,
                 turn=turn,
@@ -543,17 +556,6 @@ def analyze_same_turn_decision(
                 future_player_turns=0,
                 opponent_policy=OPPONENT_POLICY_NONE,
             )
-        result = {
-            **result,
-            "status": status_val,
-            "game_id": game_id,
-            "turn": turn,
-            "decision_index": decision_index,
-            "assumptions": assumptions,
-            "predicate_pack_version": packs.PREDICATE_PACK_VERSION,
-            "run_kind": "same_turn",
-            "result_schema_version": "1",
-        }
         return result
 
     if status != STATUS_OK:

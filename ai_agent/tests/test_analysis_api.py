@@ -266,7 +266,20 @@ def test_counterfactual_run_list_omits_result_until_fetched(tmp_path, monkeypatc
     fat_result = {
         "ok": True,
         "run_kind": "outcome_rollout",
+        "horizon": "multi_turn",
         "candidate_lines": [{"line_id": "p", "moves": ["end turn"], "search_state": {"x": "y" * 100}}],
+        "outcome_tiers": {
+            "by_root": [{
+                "root_line_id": "p",
+                "representative_paths": {
+                    "policy_pv": {
+                        "line_id": "p",
+                        "moves": ["end turn"],
+                        "path_segments": [{"kind": "main", "seat": 0, "moves": ["end turn"]}],
+                    }
+                },
+            }]
+        },
     }
     run_id = mem.record_counterfactual_run(
         game_id="g1",
@@ -297,8 +310,11 @@ def test_counterfactual_run_list_omits_result_until_fetched(tmp_path, monkeypatc
 
     one = client.get(f"/analysis/counterfactual-runs/{run_id}")
     assert one.status_code == 200
-    assert one.json()["result"]["run_kind"] == "outcome_rollout"
-    assert one.json()["result"]["candidate_lines"][0]["line_id"] == "p"
+    stored = one.json()["result"]
+    assert stored["run_kind"] == "outcome_rollout"
+    assert stored["storage"] == "compact_v1"
+    assert "candidate_lines" not in stored
+    assert stored["outcome_tiers"]["by_root"][0]["root_line_id"] == "p"
 
 
 def test_analysis_http_accepts_rollout_body(tmp_path, monkeypatch):

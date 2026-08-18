@@ -824,7 +824,14 @@ class Memory:
         now = datetime.now(timezone.utc).isoformat()
         # Infer metadata from result/assumptions when callers omit explicit fields.
         assumptions = assumptions or {}
-        result = result or {}
+        result = dict(result or {})
+        if run_kind:
+            result.setdefault("run_kind", run_kind)
+        if not result.get("horizon") and assumptions.get("horizon"):
+            result["horizon"] = assumptions["horizon"]
+        from .analysis.persist_compact import compact_result_for_storage
+
+        result = compact_result_for_storage(result) or {}
         run_kind = run_kind or result.get("run_kind") or (
             "outcome_rollout" if assumptions.get("horizon") == "multi_turn" else "same_turn"
         )
@@ -868,6 +875,45 @@ class Memory:
                 ),
             )
             return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def compact_counterfactual_run_payloads(self) -> dict:
+        """Rewrite existing result_json blobs with the compact storage shape."""
+        from .analysis.persist_compact import compact_result_for_storage
+
+        updated = 0
+        bytes_saved = 0
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, result_json FROM counterfactual_runs"
+            ).fetchall()
+            for row in rows:
+                raw = row["result_json"]
+                if not raw:
+                    continue
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                compact = compact_result_for_storage(payload)
+                written = json.dumps(compact, default=str)
+                if written == raw:
+                    continue
+                conn.execute(
+                    "UPDATE counterfactual_runs SET result_json=? WHERE id=?",
+                    (written, int(row["id"])),
+                )
+                updated += 1
+                bytes_saved += max(0, len(raw) - len(written))
+        return {"updated": updated, "bytes_saved": bytes_saved}
+
+    def vacuum(self) -> None:
+        """Reclaim unused SQLite pages. Must run outside a write transaction."""
+        conn = sqlite3.connect(str(self._db_path))
+        try:
+            conn.isolation_level = None
+            conn.execute("VACUUM")
+        finally:
+            conn.close()
 
     def list_counterfactual_runs(
         self,
@@ -1646,108 +1692,29 @@ class Memory:
     def card_stats_report(self, *, min_plays: int = 20) -> dict:
         """Per-card aggregate statistics (storage doc §3 derived view).
 
-        Aggregation key is the base ``card_def_id``. WPA is intentionally
-        omitted here — ``turn_snapshots`` are now captured, but this report does
-        not yet compute Δ win-probability from them. Cards below ``min_plays``
-        are returned in ``low_sample`` rather than ``cards`` so the sample-size
-        caveat is explicit, not silently mixed in.
+        Delegates to ``card_report.gather`` so CLI and API share seat-relative
+        win rates (``games.winner_index`` vs ``card_events.my_player_index``).
         """
+        from .card_report import gather
+
         with self._connect() as conn:
-            games_total = conn.execute(
-                "SELECT COUNT(*) AS n FROM games"
-            ).fetchone()["n"] or 0
-            base_win_rate = None
-            if games_total:
-                wins = conn.execute(
-                    "SELECT COUNT(*) AS n FROM games WHERE outcome='win'"
-                ).fetchone()["n"] or 0
-                base_win_rate = round(wins / games_total, 3)
-
-            rows = conn.execute(
-                """
-                SELECT
-                    card_def_id,
-                    COUNT(DISTINCT CASE WHEN event IN ('drawn','in_opening_hand')
-                          THEN game_id END)                                  AS games_seen,
-                    COUNT(DISTINCT CASE WHEN event='played' THEN game_id END) AS games_played,
-                    SUM(CASE WHEN event='drawn' THEN 1 ELSE 0 END)           AS drawn,
-                    SUM(CASE WHEN event='in_opening_hand' THEN 1 ELSE 0 END) AS opening_hand,
-                    SUM(CASE WHEN event='played' THEN 1 ELSE 0 END)          AS played,
-                    SUM(CASE WHEN event='discarded' THEN 1 ELSE 0 END)       AS discarded,
-                    SUM(CASE WHEN event='mulliganed' THEN 1 ELSE 0 END)      AS mulliganed,
-                    SUM(CASE WHEN event='scored' THEN 1 ELSE 0 END)          AS scored,
-                    SUM(CASE WHEN event='died' THEN 1 ELSE 0 END)            AS died,
-                    SUM(CASE WHEN event='left_in_hand_at_end' THEN 1 ELSE 0 END) AS stuck,
-                    AVG(CASE WHEN event='played' THEN turn END)             AS avg_turn_played,
-                    AVG(CASE WHEN event='played' THEN energy_spent END)    AS avg_energy_spent
-                FROM card_events
-                GROUP BY card_def_id
-                """
-            ).fetchall()
-
-            # Win-rate-when-played: distinct (card, game) played, joined to outcome.
-            wr_rows = conn.execute(
-                """
-                SELECT ce.card_def_id AS card_def_id,
-                       COUNT(*) AS played_games,
-                       SUM(CASE WHEN g.outcome='win' THEN 1 ELSE 0 END) AS played_wins
-                FROM (
-                    SELECT DISTINCT card_def_id, game_id
-                    FROM card_events WHERE event='played'
-                ) ce
-                JOIN games g ON g.game_id = ce.game_id
-                WHERE g.outcome IS NOT NULL
-                GROUP BY ce.card_def_id
-                """
-            ).fetchall()
-            wr_by_card = {
-                r["card_def_id"]: (r["played_games"], r["played_wins"])
-                for r in wr_rows
-            }
-
-        cards: list[dict] = []
-        low_sample: list[dict] = []
-        for r in rows:
-            drawn = r["drawn"] or 0
-            played = r["played"] or 0
-            played_games, played_wins = wr_by_card.get(r["card_def_id"], (0, 0))
-            win_rate_when_played = (
-                round(played_wins / played_games, 3) if played_games else None
-            )
-            stat = {
-                "card_def_id": r["card_def_id"],
-                "games_seen": r["games_seen"] or 0,
-                "games_played": r["games_played"] or 0,
-                # frequency / tempo
-                "draw_rate": round((r["games_seen"] or 0) / games_total, 3) if games_total else None,
-                "play_rate": round((r["games_played"] or 0) / games_total, 3) if games_total else None,
-                "play_when_drawn_rate": round(played / drawn, 3) if drawn else None,
-                "mulligan_rate": round((r["mulliganed"] or 0) / drawn, 3) if drawn else None,
-                "stuck_in_hand_rate": round((r["stuck"] or 0) / drawn, 3) if drawn else None,
-                "avg_turn_played": round(r["avg_turn_played"], 2) if r["avg_turn_played"] is not None else None,
-                "avg_energy_spent": round(r["avg_energy_spent"], 2) if r["avg_energy_spent"] is not None else None,
-                # raw counts
-                "drawn": drawn,
-                "played": played,
-                "discarded": r["discarded"] or 0,
-                "scored": r["scored"] or 0,
-                "deaths": r["died"] or 0,
-                # impact (survivorship-biased — see caveat)
-                "win_rate_when_played": win_rate_when_played,
-            }
-            (cards if played >= min_plays else low_sample).append(stat)
-
+            data = gather(conn, filters={"min_plays": min_plays})
+        all_cards = data.get("cards") or []
+        cards = [c for c in all_cards if c["played"] >= min_plays]
+        low_sample = [c for c in all_cards if c["played"] < min_plays]
         cards.sort(key=lambda c: c["played"], reverse=True)
         low_sample.sort(key=lambda c: c["played"], reverse=True)
+        base = data.get("base_win_rate")
         return {
-            "games_total": games_total,
-            "base_win_rate": base_win_rate,
+            "games_total": data.get("games_total") or 0,
+            "base_win_rate": round(base, 3) if base is not None else None,
             "min_plays": min_plays,
             "cards": cards,
             "low_sample": low_sample,
+            "wpa_available": bool(data.get("wpa_available")),
             "note": (
-                "WPA not computed yet (turn_snapshots are captured; this report "
-                "does not derive ΔWP). win_rate_when_played is survivorship-biased."
+                "win_rate_when_played uses games.winner_index vs the reporting "
+                "seat (not games.outcome). WPA is associative when available."
             ),
         }
 

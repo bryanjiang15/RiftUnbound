@@ -9,6 +9,7 @@ from .. import engine_client
 from ..memory import Memory
 from . import counterfactual as cf
 from . import outcome_tiers
+from .persist_compact import compact_result_for_storage
 from . import predicate_packs as packs
 from .context import diversify_roots, json_load, normalize_engine_lines, write_temp_json
 from .rollout_contracts import (
@@ -151,6 +152,7 @@ def analyze_outcome_rollout(
             "future_player_turns": turns,
         }
         if persist:
+            result = compact_result_for_storage(result) or result
             memory.record_counterfactual_run(
                 game_id=game_id,
                 turn=turn,

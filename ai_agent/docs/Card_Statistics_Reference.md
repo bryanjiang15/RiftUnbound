@@ -84,7 +84,7 @@ Cards below `--min-plays` (default 20) are bucketed into a low-sample section.
 ### Impact
 | Stat | Field | Formula | Caveat |
 |---|---|---|---|
-| Win-rate-when-played | `win_rate_when_played` | (won games where it was played) ÷ (finished games where it was played) | **survivorship/selection biased** — the AI plays good cards in winning spots, so this overstates causation. Compare against `base_win_rate`, shown green/red in the report. |
+| Win-rate-when-played | `win_rate_when_played` | games where the **reporting seat** played the card and `games.winner_index == that seat`, ÷ those played games | **survivorship/selection biased**. Do **not** use `games.outcome` (last-writer, wrong for two-seat self-play). |
 | Deaths | `deaths` | count of `died` events | raw, not yet a rate |
 
 > **WPA (win-probability added)** is now computed from `turn_snapshots` +

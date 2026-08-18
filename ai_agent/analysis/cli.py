@@ -4,6 +4,7 @@
   python -m ai_agent.analysis failure-report --db ... --game-id ... --turn ... --decision-index ...
   python -m ai_agent.analysis wpa --db ... [--origin self_play]
   python -m ai_agent.analysis validate-db --db ...
+  python -m ai_agent.analysis compact-runs --db ... [--vacuum]
 """
 from __future__ import annotations
 
@@ -101,6 +102,24 @@ def cmd_wpa(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_compact_runs(args: argparse.Namespace) -> int:
+    memory = _memory(args.db)
+    stats = memory.compact_counterfactual_run_payloads()
+    if args.vacuum:
+        memory.vacuum()
+    if args.format == "json":
+        print(json.dumps(stats, indent=2))
+    else:
+        saved_mb = stats["bytes_saved"] / (1024 * 1024)
+        print(
+            f"Compacted {stats['updated']} Analysis runs "
+            f"({saved_mb:.1f} MB of result_json text)."
+        )
+        if args.vacuum:
+            print("VACUUM complete.")
+    return 0
+
+
 def cmd_validate_db(args: argparse.Namespace) -> int:
     memory = _memory(args.db)
     with memory._connect() as conn:
@@ -176,6 +195,19 @@ def main(argv: list[str] | None = None) -> int:
     p_val.add_argument("--db", type=Path)
     p_val.add_argument("--format", choices=("markdown", "json"), default="markdown")
     p_val.set_defaults(func=cmd_validate_db)
+
+    p_cp = sub.add_parser(
+        "compact-runs",
+        help="Rewrite stored Analysis result_json (drop rollout_tree / search_state)",
+    )
+    p_cp.add_argument("--db", type=Path)
+    p_cp.add_argument("--format", choices=("markdown", "json"), default="markdown")
+    p_cp.add_argument(
+        "--vacuum",
+        action="store_true",
+        help="VACUUM the DB after rewriting so file size shrinks",
+    )
+    p_cp.set_defaults(func=cmd_compact_runs)
 
     args = parser.parse_args(argv)
     return int(args.func(args))
