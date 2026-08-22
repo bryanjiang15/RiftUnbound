@@ -23,6 +23,7 @@ from .investigation_metrics import (
 from .prompts import load_prompt
 from .reasoner_context import current_context
 from .schemas import GoalSet, ReasonerEmit
+from .search_log_fmt import summarize_risk_payload
 from .strategist import _chat_kwargs, _extract_json_object, _strip_fences
 from .system_prompt import build_system_prompt_from_modules
 from .tool_budget import current_budget
@@ -38,6 +39,7 @@ REASONER_TOOL_NAMES = frozenset({
     "simulate_move",
     "simulate_line",
     "deepen",
+    "expand_risk",
     "get_card_detail",
     "lookup_rule",
     "get_keyword",
@@ -426,6 +428,9 @@ def _render_scout_lines(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
         }
         if not hide_scores:
             entry["score"] = line.get("score", 0.0)
+        risk_summary = summarize_risk_payload(line.get("risk"))
+        if risk_summary:
+            entry["risk"] = risk_summary
         rendered.append(entry)
     return rendered
 

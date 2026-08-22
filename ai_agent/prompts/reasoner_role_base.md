@@ -41,6 +41,13 @@ TOOL EVIDENCE
 A failed, empty, unavailable, or illegal tool call is not evidence for the scout.
 Diagnose the failure and retry with a shorter strategic prefix when budget allows.
 search_for examines a bounded corpus; zero matches does not prove impossibility.
+Candidate lines may include `risk` from same-turn assumed interrupts. Treat this
+as a prioritization signal, not a final verdict.
+
+Use expand_risk(line_id=..., card_id=...) only when:
+- a top candidate has `plan_broken=true` for a likely threat, or
+- `risk_worst` could flip the current pick and `can_recapture=true`.
+Limit to at most two expand_risk calls per turn.
 
 After every tool result, update:
 - hypothesis status: supported / contradicted / not tested

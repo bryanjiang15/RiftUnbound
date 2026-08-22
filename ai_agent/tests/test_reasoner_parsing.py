@@ -1,4 +1,4 @@
-from ai_agent.reasoner import _parse_reasoner_emit
+from ai_agent.reasoner import _parse_reasoner_emit, _render_scout_lines
 
 
 def test_parse_direct_line_requires_registry_reference():
@@ -42,3 +42,31 @@ def test_parse_empty_goals_is_invalid():
         '{"kind":"goals","goal_set":{"goals":[]},"rationale":"noop"}',
         turn=2,
     ) is None
+
+
+def test_render_scout_lines_includes_risk_summary():
+    rendered = _render_scout_lines(
+        [
+            {
+                "line_id": "scout-line-1",
+                "moves": ["move unit to battlefield-a", "end turn"],
+                "score": 2.0,
+                "opponent_windows": [{"after_move": "move unit to battlefield-a"}],
+                "risk": {
+                    "risk_worst": 1.2,
+                    "risk_expected": 0.4,
+                    "threats": [
+                        {
+                            "card_id": "defy",
+                            "p_in_hand": 0.3,
+                            "window_delta": 1.2,
+                            "plan_broken": True,
+                        }
+                    ],
+                },
+            }
+        ]
+    )
+    assert rendered[0]["risk"]["risk_worst"] == 1.2
+    assert rendered[0]["risk"]["threats"][0]["card_id"] == "defy"
+    assert rendered[0]["risk"]["threats"][0]["plan_broken"] is True

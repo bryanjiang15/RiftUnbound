@@ -291,7 +291,7 @@ static func _test_ravenbloom_student_spell_trigger(assertions) -> void:
 		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
 		"battlefields": ["zaun-warrens", "targons-peak"],
 		"players": [
-			{"pool": {"energy": 1, "power": {}}, "hand": ["hextech-ray"],
+			{"pool": {"energy": 1, "power": {"fury": 1}}, "hand": ["hextech-ray"],
 			 "base": [{"id": "ravenbloom-student"}], "deck_size": 5, "rune_deck_size": 12},
 			{"battlefield-a": [{"id": "chemtech-enforcer", "owner": 1}], "deck_size": 5, "rune_deck_size": 12}
 		]
@@ -378,7 +378,7 @@ static func _test_noxus_hopeful_legion_cost(assertions) -> void:
 		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
 		"battlefields": ["zaun-warrens", "targons-peak"],
 		"players": [
-			{"pool": {"energy": 4, "power": {}}, "hand": ["noxus-hopeful", "lecturing-yordle"],
+			{"pool": {"energy": 7, "power": {}}, "hand": ["noxus-hopeful", "lecturing-yordle"],
 			 "deck_size": 5, "rune_deck_size": 12},
 			{"deck_size": 5, "rune_deck_size": 12}
 		]

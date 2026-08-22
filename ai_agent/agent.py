@@ -582,6 +582,47 @@ TOOLS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "expand_risk",
+            "description": (
+                "Assume a specific opponent interrupt on a candidate line, then "
+                "re-search a short recapture from that disrupted state to estimate "
+                "how much of the risk is fixable. Use only on top risky lines."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "line_id": {
+                        "type": "string",
+                        "description": "Candidate line id from search_for/search_turn/deepen.",
+                    },
+                    "card_id": {
+                        "type": "string",
+                        "description": "Optional assumed opponent card id; default uses the worst threat.",
+                    },
+                    "budget_ms": {
+                        "type": "integer",
+                        "description": "Recapture expansion budget in ms (default 300).",
+                    },
+                    "moves": {
+                        "type": "array",
+                        "description": "Optional explicit line moves when line_id is unavailable.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "action": {"type": "string"},
+                                "parameters": {"type": "object"},
+                            },
+                            "required": ["action"],
+                        },
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 
@@ -624,6 +665,13 @@ def _dispatch_tool(name: str, arguments: dict) -> Any:
             extra_depth=arguments.get("extra_depth", 4),
             moves=arguments.get("moves"),
             prefix_steps=arguments.get("prefix_steps"),
+        )
+    if name == "expand_risk":
+        return skill_module.expand_risk(
+            line_id=arguments.get("line_id"),
+            card_id=arguments.get("card_id"),
+            moves=arguments.get("moves"),
+            budget_ms=arguments.get("budget_ms", 300),
         )
     return f"Unknown skill: {name}"
 
@@ -1246,6 +1294,7 @@ def _build_search_corpus(lines: Optional[list[CandidateLine]]) -> list[dict]:
             "complete": line.complete,
             "terminal_reason": line.terminal_reason,
             "search_mode": line.search_mode,
+            "risk": dict(line.risk or {}),
         })
     return out
 

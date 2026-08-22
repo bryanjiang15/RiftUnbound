@@ -91,6 +91,23 @@ def summarize_tool_result(name: str, result: Any) -> str:
             parts.append(f"error={_short(result['error'], 100)}")
         return " ".join(str(p) for p in parts)
 
+    if name == "expand_risk":
+        if result.get("ok") is False:
+            return f"error={_short(result.get('error', 'failed'), 120)}"
+        risk = (result.get("risk") or {}) if isinstance(result, dict) else {}
+        parts = [f"ok={result.get('ok', True)}"]
+        if result.get("assumed_card"):
+            parts.append(f"card={result['assumed_card']}")
+        if isinstance(risk, dict):
+            worst = risk.get("risk_worst")
+            if worst is not None:
+                parts.append(f"worst={worst}")
+            if risk.get("needs_recapture"):
+                parts.append("plan_broken")
+            if risk.get("can_recapture"):
+                parts.append("can_recapture")
+        return " ".join(str(p) for p in parts)
+
     if name == "search_turn":
         lines = result.get("lines") or []
         parts = [f"lines={len(lines)}"]

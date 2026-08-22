@@ -5,6 +5,7 @@ Godot's EngineServer (default 127.0.0.1:8766) exposes:
   GET  /engine/health
   POST /engine/simulate  {moves: [...], seat?: int}
   POST /engine/search    {budget?, top_n?, mode?, seed_moves?, ...}
+  POST /engine/expand_risk {line, card_id?, ...}
 
 Skills prefer these live endpoints and fall back to Phase-1 pre-computed
 lookups when the engine is unreachable (§6 fail-safe).
@@ -110,3 +111,8 @@ def rollout(payload: dict[str, Any], timeout: Optional[float] = None) -> dict[st
     serialize, so callers should pass an explicit timeout. Default is 3 minutes.
     """
     return _request("POST", "/engine/rollout", payload, timeout=timeout if timeout is not None else 180.0)
+
+
+def expand_risk(payload: dict[str, Any]) -> dict[str, Any]:
+    """POST /engine/expand_risk — recapture search after an assumed interrupt."""
+    return _request("POST", "/engine/expand_risk", payload)

@@ -25,6 +25,7 @@ const HTTP_TIMEOUT := 60.0     # seconds before falling back to heuristic
 							   # calls per decision; 8s was far too short)
 const MAX_RETRIES := 3         # max rejection retry attempts
 const TurnSearchScript = preload("res://Scripts/Game/TurnSearch.gd")
+const LineRiskProbeScript = preload("res://Scripts/Game/LineRiskProbe.gd")
 const ScoringProfileScript = preload("res://Scripts/Game/ScoringProfile.gd")
 const MulliganHeuristicScript = preload("res://Scripts/AI/MulliganHeuristic.gd")
 const EngineServerScript = preload("res://Scripts/AI/EngineServer.gd")
@@ -86,6 +87,8 @@ var _last_rejection_reason: String = ""
 var _waiting_for_http: bool = false
 var _candidate_lines: Array = []
 var _search_stats: Dictionary = {}
+var _line_risk_enabled: bool = true
+var _line_risk_priors: Dictionary = {}
 var _committed_line: Dictionary = {}
 var _committed_line_index: int = 0
 
@@ -123,7 +126,9 @@ func setup(gc: GameController, pi: int, scoring_profile_path: String = "") -> vo
 	_scoring_profile_path = scoring_profile_path
 	# Pre-handshake default from the engine's own env (usually unset); the agent
 	# service's /health response is authoritative and overrides this below.
-	_search_mode = _env_flag("RIFTBOUND_SEARCH")
+	_search_mode = _env_flag("RIFTBOUND_SEARCH", true)
+	_reasoner_mode = _env_flag("RIFTBOUND_REASONER", true)
+	_goals_mode = _env_flag("RIFTBOUND_GOALS", false)
 	# Scout search defaults ON; disable only with an explicit falsey value so the
 	# grounded strategist is the default whenever goals are enabled.
 	var scout_env := OS.get_environment("RIFTBOUND_GOALS_SCOUT").strip_edges().to_lower()
@@ -133,6 +138,8 @@ func setup(gc: GameController, pi: int, scoring_profile_path: String = "") -> vo
 	# is skipped.
 	var capture_path := OS.get_environment("RIFTBOUND_SELFPLAY_CAPTURE").strip_edges()
 	_capture_mode = capture_path != ""
+	_line_risk_enabled = _env_flag("RIFTBOUND_LINE_RISK", true)
+	_line_risk_priors = _load_line_risk_priors()
 	if _capture_mode:
 		_search_mode = true
 		if capture_path == "1" or capture_path.to_lower() == "on" or capture_path.to_lower() == "true":
@@ -229,8 +236,33 @@ func _on_config_completed(result: int, response_code: int, _headers: PackedStrin
 
 # Mirror the Python agent's truthy-env parsing so both sides agree on whether
 # search mode is enabled.
-func _env_flag(name: String) -> bool:
-	return OS.get_environment(name).strip_edges().to_lower() in ["1", "true", "yes", "on"]
+func _env_flag(name: String, default_value: bool = false) -> bool:
+	var raw := OS.get_environment(name).strip_edges().to_lower()
+	if raw == "":
+		return default_value
+	return raw in ["1", "true", "yes", "on"]
+
+
+func _load_line_risk_priors() -> Dictionary:
+	var path := "res://Data/AI/reaction_priors.json"
+	if not FileAccess.file_exists(path):
+		return {}
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return {}
+	var parsed = JSON.parse_string(file.get_as_text())
+	return parsed if parsed is Dictionary else {}
+
+
+func _annotate_line_risk(gs: GameState, lines: Array, budget_ms: int = 350) -> Array:
+	if not _line_risk_enabled or lines.is_empty():
+		return lines
+	var probe = LineRiskProbeScript.new()
+	return probe.annotate_lines(gs, player_index, lines, {
+		"profile_path": _scoring_profile_path,
+		"reaction_priors": _line_risk_priors,
+		"budget_ms": budget_ms,
+	})
 
 
 func _agent_base_url() -> String:
@@ -339,6 +371,7 @@ func _request_decision(gs: GameState) -> void:
 					return
 				scout_lines = scout_result.get("candidate_lines", [])
 				scout_stats = scout_result.get("search_stats", {})
+				scout_lines = _annotate_line_risk(gs, scout_lines, 250)
 			if _reasoner_mode:
 				var reasoner_emit := await _fetch_reasoner_emit(scout_lines, scout_stats)
 				if gs.game_over:
@@ -366,6 +399,7 @@ func _request_decision(gs: GameState) -> void:
 			"mode": "main", "max_depth": 12, "node_budget": 300, "time_budget_ms": 800
 		})
 		_candidate_lines = result.get("candidate_lines", [])
+		_candidate_lines = _annotate_line_risk(gs, _candidate_lines, 350)
 		_search_stats = result.get("search_stats", {})
 	elif _search_mode and _should_run_reactive_search(gs):
 		var reactive: TurnSearch = TurnSearchScript.new(_scoring_profile_path)

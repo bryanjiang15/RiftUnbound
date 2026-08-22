@@ -620,6 +620,8 @@ class CandidateLine(BaseModel):
     cluster_key: str = ""
     cluster_size: int = 1
     cluster_prefix_steps: int = 1
+    # Live same-turn reaction-risk summary (belief-mode assumed interruptions).
+    risk: dict[str, Any] = Field(default_factory=dict)
 
 
 class SearchStats(BaseModel):

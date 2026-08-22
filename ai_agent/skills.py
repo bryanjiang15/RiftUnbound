@@ -524,6 +524,7 @@ def _search_corpus_for_filter(top_n: int = 8) -> tuple[list[dict], str]:
                 "terminal_reason": str(line.get("terminal_reason", "")),
                 "search_mode": str(line.get("search_mode", "main")),
                 "opponent_windows": list(line.get("opponent_windows", []) or []),
+                "risk": dict(line.get("risk", {}) or {}),
                 "cluster_key": str(line.get("cluster_key", "")),
                 "cluster_size": int(line.get("cluster_size") or 1),
                 "cluster_prefix_steps": int(line.get("cluster_prefix_steps") or 1),
@@ -658,6 +659,81 @@ def deepen(
         )
     out["result_status"] = classify_search_result("deepen", out, scout_leader)
     return out
+
+
+def expand_risk(
+    line_id: str | None = None,
+    card_id: str | None = None,
+    moves: list | None = None,
+    budget_ms: int = 300,
+) -> dict[str, Any]:
+    """Expand one risky line by searching recapture after an assumed interrupt."""
+    line = _resolve_line_entry(line_id=line_id, moves=moves)
+    if line is None:
+        return {
+            "ok": False,
+            "error": "expand_risk needs a known line_id or explicit moves.",
+            "source": "unavailable",
+            "result_status": "unavailable",
+        }
+    picked_card_id = str(card_id or "")
+    if not picked_card_id:
+        threats = list((line.get("risk", {}) or {}).get("threats", []) or [])
+        if threats:
+            threats.sort(key=lambda t: float((t or {}).get("window_delta", 0.0) or 0.0), reverse=True)
+            picked_card_id = str((threats[0] or {}).get("card_id", ""))
+    payload: dict[str, Any] = {
+        "line": line,
+        "budget_ms": max(50, int(budget_ms or 300)),
+    }
+    if picked_card_id:
+        payload["card_id"] = picked_card_id
+    try:
+        from . import engine_client
+
+        out = engine_client.expand_risk(payload)
+        out = dict(out)
+        out["source"] = out.get("source") or "live_engine"
+        out["line_id"] = out.get("line_id") or line.get("line_id", "")
+        if picked_card_id:
+            out["assumed_card"] = out.get("assumed_card") or picked_card_id
+        return out
+    except Exception:
+        return {
+            "ok": False,
+            "error": "Live engine unavailable; expand_risk requires /engine/expand_risk.",
+            "source": "unavailable",
+            "result_status": "unavailable",
+        }
+
+
+def _resolve_line_entry(
+    line_id: str | None = None,
+    moves: list | None = None,
+) -> dict[str, Any] | None:
+    if line_id:
+        target = str(line_id)
+        context = _reasoner_context()
+        if context is not None:
+            reg = context.registry.get(target)
+            if reg is not None:
+                return dict(reg)
+        for entry in _search_corpus():
+            if str(entry.get("line_id", "")) == target:
+                return dict(entry)
+        for entry in _scout_lines():
+            if str(entry.get("line_id", "")) == target:
+                return dict(entry)
+    if moves:
+        cmds = [_move_to_command(m) for m in moves]
+        return {
+            "line_id": "ad_hoc",
+            "moves": cmds,
+            "opponent_windows": [],
+            "resolved_state": {},
+            "cluster_key": "",
+        }
+    return None
 
 
 def _resolve_deepen_seed(

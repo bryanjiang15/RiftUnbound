@@ -166,6 +166,12 @@ def _current_git_sha() -> str | None:
         return None
 
 
+def _env_on(name: str, default: str = "off") -> bool:
+    """Truthy env flag; ``default`` is used when the variable is unset."""
+    raw = os.environ.get(name, default).strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     global _memory, _decision_logger, _pipeline_mode, _search_enabled
@@ -187,34 +193,11 @@ async def _lifespan(app: FastAPI):
         if requested_pipeline in (PIPELINE_LEGACY, PIPELINE_STAGED)
         else PIPELINE_LEGACY
     )
-    _search_enabled = os.environ.get("RIFTBOUND_SEARCH", "off").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-    _argmax_enabled = os.environ.get("RIFTBOUND_SEARCH_ARGMAX", "off").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-    # Goal-oriented strategist: when on (and search is on, argmax off), an LLM sets
-    # 1–4 per-turn goals that are compiled into a transient scoring overlay biasing
-    # line selection. Off by default so the proven base-profile search stays the
-    # floor and argmax self-play remains LLM-free.
-    _goals_enabled = os.environ.get("RIFTBOUND_GOALS", "off").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-    reasoner_requested = os.environ.get("RIFTBOUND_REASONER", "off").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    _search_enabled = _env_on("RIFTBOUND_SEARCH", "on")
+    _argmax_enabled = _env_on("RIFTBOUND_SEARCH_ARGMAX", "off")
+    # Goal-oriented strategist: off by default; superseded when the Reasoner is on.
+    _goals_enabled = _env_on("RIFTBOUND_GOALS", "off")
+    reasoner_requested = _env_on("RIFTBOUND_REASONER", "on")
     _reasoner_enabled = reasoner_requested and _search_enabled and not _argmax_enabled
     if reasoner_requested and not _reasoner_enabled:
         logger.warning(

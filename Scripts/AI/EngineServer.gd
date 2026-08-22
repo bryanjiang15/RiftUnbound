@@ -13,10 +13,12 @@ extends Node
 #   POST /engine/simulate  {moves: [...], seat?: int}
 #   POST /engine/search    {budget?, top_n?, mode?, seed_moves?, ...}
 #   POST /engine/rollout   {roots?, future_player_turns?, budget?, ...}
+#   POST /engine/expand_risk {line, card_id?, ...}
 
 const MoveSimulatorScript = preload("res://Scripts/Game/MoveSimulator.gd")
 const TurnSearchScript = preload("res://Scripts/Game/TurnSearch.gd")
 const OutcomeRolloutScript = preload("res://Scripts/Game/OutcomeRollout.gd")
+const LineRiskProbeScript = preload("res://Scripts/Game/LineRiskProbe.gd")
 
 const DEFAULT_PORT := 8766
 const MAX_QUEUE := 8
@@ -36,12 +38,16 @@ var _busy: bool = false
 var _worker: Thread = null
 var _worker_peer: StreamPeerTCP = null
 var _worker_result: Dictionary = {}
+var _reaction_priors: Dictionary = {}
+var _line_risk_enabled: bool = true
 
 
 func start(port: int = -1, profile_path: String = "") -> Error:
 	if _server != null:
 		return OK
 	_profile_path = profile_path
+	_line_risk_enabled = _env_flag("RIFTBOUND_LINE_RISK", true)
+	_reaction_priors = _load_reaction_priors()
 	# port < 0 → default 8766; port == 0 → OS-assigned ephemeral.
 	if port < 0:
 		_port = DEFAULT_PORT
@@ -185,7 +191,7 @@ func _dispatch(peer: StreamPeerTCP, method: String, path: String, body: Variant)
 		})
 		peer.disconnect_from_host()
 		return
-	if method == "POST" and path_only in ["/engine/simulate", "/engine/search", "/engine/rollout"]:
+	if method == "POST" and path_only in ["/engine/simulate", "/engine/search", "/engine/rollout", "/engine/expand_risk"]:
 		if _pinned == null:
 			_write_json(peer, 409, {"error": "no game state pinned for this decision"})
 			peer.disconnect_from_host()
@@ -228,6 +234,8 @@ func _kick_queue() -> void:
 		kind = "search"
 	elif path.ends_with("/rollout"):
 		kind = "rollout"
+	elif path.ends_with("/expand_risk"):
+		kind = "expand_risk"
 	var start_err := _worker.start(_worker_entry.bind(kind, body, work_gs, seat, _profile_path))
 	if start_err != OK:
 		_busy = false
@@ -281,6 +289,13 @@ func _worker_entry(kind: String, body: Dictionary, gs: GameState, seat: int, pro
 		var roller = OutcomeRolloutScript.new()
 		_worker_result = roller.search_rollout(gs, seat, rollout_opts)
 		return
+	if kind == "expand_risk":
+		var req: Dictionary = body.duplicate(true)
+		if not req.has("reaction_priors") or (req.get("reaction_priors", {}) as Dictionary).is_empty():
+			req["reaction_priors"] = _reaction_priors
+		var probe = LineRiskProbeScript.new()
+		_worker_result = probe.expand_risk(gs, seat, req, profile_path)
+		return
 	# search
 	var options := {
 		"mode": str(body.get("mode", "main")),
@@ -313,6 +328,47 @@ func _worker_entry(kind: String, body: Dictionary, gs: GameState, seat: int, pro
 		search_profile = str(body["profile_path"])
 	var searcher = TurnSearchScript.new(search_profile, overlay)
 	_worker_result = searcher.search(gs, seat, options)
+	_worker_result = _annotate_search_risk(gs, seat, _worker_result, search_profile, 250)
+
+
+func _env_flag(name: String, default_value: bool = false) -> bool:
+	var raw := OS.get_environment(name).strip_edges().to_lower()
+	if raw == "":
+		return default_value
+	return raw in ["1", "true", "yes", "on"]
+
+
+func _load_reaction_priors() -> Dictionary:
+	var path := "res://Data/AI/reaction_priors.json"
+	if not FileAccess.file_exists(path):
+		return {}
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return {}
+	var parsed = JSON.parse_string(file.get_as_text())
+	return parsed if parsed is Dictionary else {}
+
+
+func _annotate_search_risk(
+	gs: GameState,
+	seat: int,
+	result: Dictionary,
+	profile_path: String,
+	budget_ms: int = 250,
+) -> Dictionary:
+	if not _line_risk_enabled:
+		return result
+	var lines: Array = result.get("candidate_lines", [])
+	if lines.is_empty():
+		return result
+	var probe = LineRiskProbeScript.new()
+	var out := result.duplicate(true)
+	out["candidate_lines"] = probe.annotate_lines(gs, seat, lines, {
+		"profile_path": profile_path,
+		"reaction_priors": _reaction_priors,
+		"budget_ms": budget_ms,
+	})
+	return out
 
 
 func _poll_worker() -> void:

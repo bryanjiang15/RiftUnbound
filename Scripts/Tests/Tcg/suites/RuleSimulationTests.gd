@@ -8,6 +8,7 @@ extends RefCounted
 const TcgTestHarness = preload("res://Scripts/Tests/Tcg/TcgTestHarness.gd")
 const MoveSimulatorScript = preload("res://Scripts/Game/MoveSimulator.gd")
 const BriefStateSerializerScript = preload("res://Scripts/AI/BriefStateSerializer.gd")
+const LineRiskProbeScript = preload("res://Scripts/Game/LineRiskProbe.gd")
 
 static func run(assertions) -> void:
 	_test_clone_is_independent(assertions)
@@ -19,6 +20,7 @@ static func run(assertions) -> void:
 	_test_presim_inlined_into_brief_state(assertions)
 	_test_resolved_state_controllers_after_and_unit_presence(assertions)
 	_test_resolved_state_play_to_base_lists_unit_in_base(assertions)
+	_test_line_risk_probe_smoke(assertions)
 
 
 # A structural signature of the decision-relevant state. Two states with the same
@@ -253,4 +255,21 @@ static func _test_resolved_state_play_to_base_lists_unit_in_base(assertions) -> 
 	assertions.assert_true(found, "played unit instance appears in my_units_in_base")
 	assertions.assert_false(resolved.has("my_units_on_battlefields"),
 		"unit played to base is not listed on battlefields")
+
+
+static func _test_line_risk_probe_smoke(assertions) -> void:
+	var h = TcgTestHarness.new()
+	_load(h)
+	var searcher = preload("res://Scripts/Game/TurnSearch.gd").new()
+	var result: Dictionary = searcher.search(h.gs(), 0, {
+		"mode": "main", "top_n": 2, "node_budget": 60, "time_budget_ms": 200, "max_depth": 6
+	})
+	var lines: Array = result.get("candidate_lines", [])
+	assertions.assert_true(not lines.is_empty(), "turn search produced candidate lines")
+	var probe = LineRiskProbeScript.new()
+	var annotated: Array = probe.annotate_lines(h.gs(), 0, lines, {"budget_ms": 120})
+	assertions.assert_eq(annotated.size(), lines.size(), "risk probe preserves line count")
+	if not annotated.is_empty():
+		var line0: Dictionary = annotated[0]
+		assertions.assert_true(line0.has("risk"), "annotated line carries risk payload")
 

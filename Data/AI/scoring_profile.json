@@ -21,13 +21,13 @@
     "card_played": 0.2,
     "unit_moved": 0.1,
     "card_discarded": -0.3,
-    "enemy_unit_killed": 1.5,
-    "own_unit_lost": -3,
-    "battlefield_conquered": 1.0,
-    "point_scored": 1.0,
+    "enemy_unit_killed": 0.4,
+    "own_unit_lost": -0.3,
+    "battlefield_conquered": 0.2,
+    "point_scored": 0.3,
     "card_drawn": 0.4,
     "power_used": -0.05,
-    "rune_recycled": -0.5
+    "rune_recycled": -0.75
   },
   "keyword_weights": {
     "assault": 0.4,

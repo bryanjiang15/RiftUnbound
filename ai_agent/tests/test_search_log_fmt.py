@@ -8,8 +8,11 @@ from ai_agent.search_log_fmt import (
     format_candidate_line,
     format_delta_line,
     format_line_header,
+    format_risk_block,
+    format_risk_line,
     format_stats_line,
     nonzero_items,
+    summarize_risk_payload,
 )
 
 
@@ -175,3 +178,187 @@ def test_format_candidate_corpus_prepends_stats_and_heading():
     assert "mode=main" in plain
     assert "scout-line-2 | score=+1.000" in plain
     assert "pass" in plain
+
+
+def test_format_risk_line_shows_summary_and_flags():
+    plain = _strip_ansi(
+        format_risk_line(
+            {
+                "risk_worst": 2.5,
+                "risk_expected": 1.1,
+                "can_recapture": True,
+                "needs_recapture": True,
+                "information_mode": "belief_hidden_state",
+                "threats": [{"card_id": "defy"}],
+            }
+        )
+    )
+    assert "worst=+2.5" in plain
+    assert "expected=+1.1" in plain
+    assert "plan_broken" in plain
+    assert "can_recapture" in plain
+    assert "belief_hidden_state" in plain
+    assert "(1 probed)" in plain
+
+
+def test_format_risk_block_sorts_threats_by_delta():
+    plain = "\n".join(_strip_ansi(line) for line in format_risk_block(
+        {
+            "risk_worst": 2.5,
+            "risk_expected": 1.1,
+            "needs_recapture": True,
+            "threats": [
+                {
+                    "card_id": "gust",
+                    "p_in_hand": 0.18,
+                    "window_delta": 0.8,
+                    "window_after_move": "pass",
+                },
+                {
+                    "card_id": "defy",
+                    "p_in_hand": 0.42,
+                    "window_delta": 2.5,
+                    "window_after_move": "play unit-x",
+                    "plan_broken": True,
+                    "broken_claims": ["conquer"],
+                    "can_recapture": True,
+                    "score_after_recapture": -0.5,
+                },
+            ],
+        }
+    ))
+    defy_pos = plain.find("defy")
+    gust_pos = plain.find("gust")
+    assert defy_pos >= 0 and gust_pos >= 0
+    assert defy_pos < gust_pos
+    assert "p=42%" in plain
+    assert "Δ=+2.5" in plain
+    assert "@play unit-x" in plain
+    assert "broken=[conquer]" in plain
+    assert "after_recapture=-0.5" in plain
+
+
+def test_format_candidate_line_includes_risk_block_and_header_hint():
+    plain = "\n".join(
+        _strip_ansi(line)
+        for line in format_candidate_line(
+            {
+                "line_id": "line-3",
+                "score": 3.0,
+                "moves": ["play unit", "end turn"],
+                "score_breakdown": {"total": 3.0},
+                "resolved_state": {"next_decision": "opponent's turn"},
+                "risk": {
+                    "risk_worst": 1.2,
+                    "risk_expected": 0.4,
+                    "threats": [
+                        {
+                            "card_id": "defy",
+                            "p_in_hand": 0.3,
+                            "window_delta": 1.2,
+                            "note": "threat_not_legal_in_any_window",
+                        }
+                    ],
+                },
+            }
+        )
+    )
+    assert "line-3 | score=+3.000 | risk_worst=+1.2" in plain
+    assert "Risk:" in plain
+    assert "worst=+1.2" in plain
+    assert "defy" in plain
+    assert "threat_not_legal_in_any_window" in plain
+
+
+def test_format_candidate_line_omits_risk_when_absent():
+    plain = "\n".join(
+        _strip_ansi(line)
+        for line in format_candidate_line(
+            {"line_id": "line-4", "score": 1.0, "moves": ["pass"]}
+        )
+    )
+    assert "Risk:" not in plain
+    assert "risk_worst" not in plain
+
+
+def test_format_candidate_line_shows_clear_risk_when_probed_but_zero():
+    plain = "\n".join(
+        _strip_ansi(line)
+        for line in format_candidate_line(
+            {
+                "line_id": "line-5",
+                "score": 1.0,
+                "moves": ["pass"],
+                "risk": {
+                    "risk_worst": 0.0,
+                    "risk_expected": 0.0,
+                    "threats": [],
+                    "can_recapture": False,
+                    "needs_recapture": False,
+                },
+            }
+        )
+    )
+    assert "Risk:" in plain
+    assert "clear" in plain
+
+
+def test_format_risk_line_explains_skipped_illegal_threats():
+    plain = _strip_ansi(
+        format_risk_line(
+            {
+                "risk_worst": 0.0,
+                "risk_expected": 0.0,
+                "threats": [],
+                "skipped": [
+                    {"card_id": "defy", "reason": "no_legal_command"},
+                    {"card_id": "discipline", "reason": "no_legal_command"},
+                ],
+            }
+        )
+    )
+    assert "no legal assumed interrupt" in plain
+    assert "defy/no_legal_command" in plain
+    assert "discipline/no_legal_command" in plain
+
+
+def test_format_candidate_line_marks_unprobed_contested_lines():
+    plain = "\n".join(
+        _strip_ansi(line)
+        for line in format_candidate_line(
+            {
+                "line_id": "line-6",
+                "score": 1.0,
+                "moves": ["move unit to battlefield-a"],
+                "opponent_windows": [{"after_move": "move unit to battlefield-a"}],
+            }
+        )
+    )
+    assert "Risk:" in plain
+    assert "not probed" in plain
+
+
+def test_summarize_risk_payload_for_reasoner_prompt():
+    summary = summarize_risk_payload(
+        {
+            "risk_worst": 2.5,
+            "risk_expected": 1.1,
+            "needs_recapture": True,
+            "can_recapture": True,
+            "information_mode": "belief_hidden_state",
+            "threats": [
+                {
+                    "card_id": "defy",
+                    "p_in_hand": 0.42,
+                    "window_delta": 2.5,
+                    "window_after_move": "move unit to battlefield-a",
+                    "plan_broken": True,
+                    "broken_claims": ["conquer"],
+                }
+            ],
+        }
+    )
+    assert summary["risk_worst"] == 2.5
+    assert summary["needs_recapture"] is True
+    assert summary["threats"][0]["card_id"] == "defy"
+    assert summary["threats"][0]["broken_claims"] == ["conquer"]
