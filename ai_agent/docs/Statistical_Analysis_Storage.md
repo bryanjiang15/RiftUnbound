@@ -341,8 +341,8 @@ attribution.
 2. `search_decisions` + `candidate_lines` + `decision_snapshots` (`selector_source`,
    `origin`, `went_first`, `chosen_features_json`).
 3. `/game_over` backfill (`game_outcome`, `final_score_diff`, `first_player_index`).
-4. `card_events` + `card_report.py` / `card_stats` aggregates (WPA still needs
-   `turn_snapshots`).
+4. `card_events` + `card_report.py` / `card_stats` aggregates (WPA derivation is
+   still open; it now has `turn_snapshots` as the source pulse).
 5. Argmax short-circuit + headless self-play (`SelfPlaySim`) + offline JSONL
    capture / `import_selfplay_logs.py`.
 6. Texel proposer (`texel_tune.py`) + `feature_report.py`.

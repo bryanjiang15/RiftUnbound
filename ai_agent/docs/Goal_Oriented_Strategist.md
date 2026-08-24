@@ -1,8 +1,8 @@
 # Goal-Oriented LLM Strategist — Design & Implementation
 
 Status: v0 implemented + tested: server-side re-rank, engine-side overlay
-primitive, live engine handshake, and search-grounded scout flow. Goal telemetry
-and the SPRT gate are scoped follow-ups.
+primitive, live engine handshake, search-grounded scout flow, and GoalSet /
+overlay SQL telemetry. The SPRT gate is still a scoped follow-up.
 
 Companion docs:
 - `Score_Tuning_And_Evolution.md` §5 (cross-turn planner hook) — the seam this
