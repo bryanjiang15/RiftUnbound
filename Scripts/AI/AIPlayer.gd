@@ -364,14 +364,18 @@ func _request_decision(gs: GameState) -> void:
 			if _goals_scout:
 				var scout: TurnSearch = TurnSearchScript.new(_scoring_profile_path)
 				var scout_result: Dictionary = scout.search(gs, player_index, {
-					"mode": "main", "max_depth": 8, "node_budget": 150, "time_budget_ms": 400
+					"mode": "main",
+					"max_depth": 10,
+					"beam_width": 12,
+					"node_budget": 300,
+					"time_budget_ms": 800,
 				})
 				if gs.game_over:
 					_clear_engine_pin()
 					return
 				scout_lines = scout_result.get("candidate_lines", [])
 				scout_stats = scout_result.get("search_stats", {})
-				scout_lines = _annotate_line_risk(gs, scout_lines, 250)
+				scout_lines = _annotate_line_risk(gs, scout_lines, 400)
 			if _reasoner_mode:
 				var reasoner_emit := await _fetch_reasoner_emit(scout_lines, scout_stats)
 				if gs.game_over:
