@@ -26,6 +26,7 @@ const HTTP_TIMEOUT := 60.0     # seconds before falling back to heuristic
 const MAX_RETRIES := 3         # max rejection retry attempts
 const TurnSearchScript = preload("res://Scripts/Game/TurnSearch.gd")
 const LineRiskProbeScript = preload("res://Scripts/Game/LineRiskProbe.gd")
+const RiskScoreScript = preload("res://Scripts/Game/RiskScore.gd")
 const ScoringProfileScript = preload("res://Scripts/Game/ScoringProfile.gd")
 const MulliganHeuristicScript = preload("res://Scripts/AI/MulliganHeuristic.gd")
 const EngineServerScript = preload("res://Scripts/AI/EngineServer.gd")
@@ -258,11 +259,12 @@ func _annotate_line_risk(gs: GameState, lines: Array, budget_ms: int = 350) -> A
 	if not _line_risk_enabled or lines.is_empty():
 		return lines
 	var probe = LineRiskProbeScript.new()
-	return probe.annotate_lines(gs, player_index, lines, {
+	var annotated: Array = probe.annotate_lines(gs, player_index, lines, {
 		"profile_path": _scoring_profile_path,
 		"reaction_priors": _line_risk_priors,
 		"budget_ms": budget_ms,
 	})
+	return RiskScoreScript.annotate_lines(annotated)
 
 
 func _agent_base_url() -> String:
@@ -362,6 +364,7 @@ func _request_decision(gs: GameState) -> void:
 			var scout_lines: Array = []
 			var scout_stats: Dictionary = {}
 			if _goals_scout:
+				var scout_t0 := Time.get_ticks_msec()
 				var scout: TurnSearch = TurnSearchScript.new(_scoring_profile_path)
 				var scout_result: Dictionary = scout.search(gs, player_index, {
 					"mode": "main",
@@ -370,12 +373,27 @@ func _request_decision(gs: GameState) -> void:
 					"node_budget": 300,
 					"time_budget_ms": 800,
 				})
+				var scout_ms := int(Time.get_ticks_msec() - scout_t0)
 				if gs.game_over:
 					_clear_engine_pin()
 					return
 				scout_lines = scout_result.get("candidate_lines", [])
 				scout_stats = scout_result.get("search_stats", {})
+				if not (scout_stats is Dictionary):
+					scout_stats = {}
+				else:
+					scout_stats = scout_stats.duplicate(true)
+				var risk_t0 := Time.get_ticks_msec()
 				scout_lines = _annotate_line_risk(gs, scout_lines, 400)
+				var cheap_risk_ms := int(Time.get_ticks_msec() - risk_t0)
+				scout_stats["scout_ms"] = scout_ms
+				scout_stats["cheap_risk_ms"] = cheap_risk_ms
+				scout_stats["scout_line_count"] = scout_lines.size()
+				scout_stats["pre_llm_godot_ms"] = scout_ms + cheap_risk_ms
+				print(
+					"AIPlayer Pre-LLM: scout=%dms lines=%d | cheap_risk=%dms | total=%dms"
+					% [scout_ms, scout_lines.size(), cheap_risk_ms, scout_ms + cheap_risk_ms]
+				)
 			if _reasoner_mode:
 				var reasoner_emit := await _fetch_reasoner_emit(scout_lines, scout_stats)
 				if gs.game_over:
@@ -640,19 +658,26 @@ func _decide_offline(gs: GameState) -> void:
 		_report_outcome(true)
 
 
-# Engine-side equivalent of the server's _argmax_line: among candidate lines
-# (already score-descending from TurnSearch), return the first with a non-empty
-# first command. Empty-move lines are unplayable, so the caller falls back to
-# pass — exactly as _PASS_DECISION does server-side. Returns {} when none qualify.
+# Engine-side equivalent of the server's _argmax_line: among candidate lines,
+# return the playable line with the highest risk_adjusted_score (fallback: score).
+# Empty-move lines are unplayable, so the caller falls back to pass — exactly as
+# _PASS_DECISION does server-side. Returns {} when none qualify.
 func _argmax_local(lines: Array) -> Dictionary:
+	var best: Dictionary = {}
+	var best_score := -INF
 	for line in lines:
+		if not (line is Dictionary):
+			continue
 		var moves: Array = line.get("moves", [])
 		if moves.is_empty():
 			continue
 		if str(moves[0]).strip_edges() == "":
 			continue
-		return line
-	return {}
+		var s := RiskScoreScript.rank_score(line)
+		if s > best_score:
+			best_score = s
+			best = line
+	return best
 
 
 func _on_request_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:

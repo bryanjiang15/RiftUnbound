@@ -283,7 +283,13 @@ def test_score_only_rationale_rejected_when_comparison_required():
     )
 
 
-def test_scout_render_includes_resolved_state_and_score_band():
+def test_scout_render_includes_resolved_state_and_score_band(monkeypatch):
+    # With risk ranking off, raw unanswered scores stay hidden by default
+    # (RIFTBOUND_REASONER_HIDE_RAW_SCORE=1). Risk ranking on intentionally
+    # exposes score as unanswered_leaf so risk_adjusted = score + penalty is
+    # interpretable — covered by test_render_scout_lines_includes_risk.
+    monkeypatch.setenv("RIFTBOUND_LINE_RISK", "0")
+    monkeypatch.setenv("RIFTBOUND_RISK_RANK", "0")
     rendered = reasoner._render_scout_lines(
         [
             {
@@ -305,7 +311,7 @@ def test_scout_render_includes_resolved_state_and_score_band():
     )
     assert rendered[0]["resolved_state"]["runes_recycled"] == 1
     assert "score_band" in rendered[0]
-    assert "score" not in rendered[0]  # hidden by default
+    assert "score" not in rendered[0]  # hidden by default when risk rank off
     assert rendered[0]["strategic_prefix_moves"] == ["play a"]
     assert rendered[0]["cluster_size"] == 1
     assert rendered[0]["deepen_hint"]["cluster_prefix_steps"] == 1

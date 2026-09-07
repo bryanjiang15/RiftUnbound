@@ -666,10 +666,13 @@ def expand_risk(
     card_id: str | None = None,
     moves: list | None = None,
     budget_ms: int = 300,
+    line: dict | None = None,
 ) -> dict[str, Any]:
     """Expand one risky line by searching recapture after an assumed interrupt."""
-    line = _resolve_line_entry(line_id=line_id, moves=moves)
-    if line is None:
+    resolved = line if isinstance(line, dict) and line else None
+    if resolved is None:
+        resolved = _resolve_line_entry(line_id=line_id, moves=moves)
+    if resolved is None:
         return {
             "ok": False,
             "error": "expand_risk needs a known line_id or explicit moves.",
@@ -678,12 +681,12 @@ def expand_risk(
         }
     picked_card_id = str(card_id or "")
     if not picked_card_id:
-        threats = list((line.get("risk", {}) or {}).get("threats", []) or [])
+        threats = list((resolved.get("risk", {}) or {}).get("threats", []) or [])
         if threats:
-            threats.sort(key=lambda t: float((t or {}).get("window_delta", 0.0) or 0.0), reverse=True)
+            threats.sort(key=lambda t: float((t or {}).get("window_delta", 0.0) or 0.0))
             picked_card_id = str((threats[0] or {}).get("card_id", ""))
     payload: dict[str, Any] = {
-        "line": line,
+        "line": resolved,
         "budget_ms": max(50, int(budget_ms or 300)),
     }
     if picked_card_id:
@@ -694,7 +697,7 @@ def expand_risk(
         out = engine_client.expand_risk(payload)
         out = dict(out)
         out["source"] = out.get("source") or "live_engine"
-        out["line_id"] = out.get("line_id") or line.get("line_id", "")
+        out["line_id"] = out.get("line_id") or resolved.get("line_id", "")
         if picked_card_id:
             out["assumed_card"] = out.get("assumed_card") or picked_card_id
         return out

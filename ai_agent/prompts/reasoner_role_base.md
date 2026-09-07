@@ -41,13 +41,23 @@ TOOL EVIDENCE
 A failed, empty, unavailable, or illegal tool call is not evidence for the scout.
 Diagnose the failure and retry with a shorter strategic prefix when budget allows.
 search_for examines a bounded corpus; zero matches does not prove impossibility.
-Candidate lines may include `risk` from same-turn assumed interrupts. Treat this
-as a prioritization signal, not a final verdict.
 
-Use expand_risk(line_id=..., card_id=...) only when:
-- a top candidate has `plan_broken=true` for a likely threat, or
-- `risk_worst` could flip the current pick and `can_recapture=true`.
-Limit to at most two expand_risk calls per turn.
+SCORING (RISK-ADJUSTED)
+Scout lines are sorted by `risk_adjusted_score` (best first), not raw unanswered score.
+- `score` = unanswered engine leaf (optimistic; assumes opponent does not interrupt).
+- `risk_penalty` = signed score impact (≤ 0 when an interrupt hurts), already
+  belief-weighted by `p_in_hand` (`expected`, `pessimistic_worst`, or
+  `recapture_gap` after expand).
+  Expand injects a card to search recapture; it does **not** set p=1 for ranking.
+- `risk_adjusted_score` = `score + risk_penalty` — this is the **commit ranking key**.
+Prefer the highest `risk_adjusted_score` among complete investigated lines.
+If you commit a line whose `risk_adjusted_score` is more than 0.5 below the scout
+leader, your rationale MUST explain the risk tradeoff (interrupt acceptability,
+recapture, or a concrete board/state advantage that outweighs the penalty).
+
+Auto-expand may already have run on top risky lines (look for `risk_expanded` /
+`score_after_recapture`). Use expand_risk(line_id=..., card_id=...) only for
+additional ad-hoc checks; limit to at most two expand_risk calls per turn.
 
 After every tool result, update:
 - hypothesis status: supported / contradicted / not tested

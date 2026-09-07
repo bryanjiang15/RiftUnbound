@@ -622,6 +622,11 @@ class CandidateLine(BaseModel):
     cluster_prefix_steps: int = 1
     # Live same-turn reaction-risk summary (belief-mode assumed interruptions).
     risk: dict[str, Any] = Field(default_factory=dict)
+    # Ranking fields from ai_agent.risk_score (optional; absent → rank by score).
+    risk_penalty: Optional[float] = None
+    risk_adjusted_score: Optional[float] = None
+    risk_adjustment_method: Optional[str] = None
+    risk_expanded: bool = False
 
 
 class SearchStats(BaseModel):
@@ -633,6 +638,11 @@ class SearchStats(BaseModel):
     beam_width: int = 0
     elapsed_ms: int = 0
     stopped_reason: str = ""
+    # Pre-LLM handoff timings (Godot scout + cheap risk), optional.
+    scout_ms: Optional[int] = None
+    cheap_risk_ms: Optional[int] = None
+    scout_line_count: Optional[int] = None
+    pre_llm_godot_ms: Optional[int] = None
 
 
 # ── Decision ──────────────────────────────────────────────────────────────────

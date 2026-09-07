@@ -1,0 +1,35 @@
+---
+description: Explain project work in plain language; define code/domain terms on first use
+alwaysApply: true
+---
+
+# Accessible Explanations
+
+When explaining bugs, designs, diffs, or review findings in this project, write for engineers who may not know Riftbound, the Godot engine layout, or the AI agent stack.
+
+## Audience
+
+- Prefer plain language and short sentences.
+- Lead with the idea (what broke / what changed / why it matters), then the code detail.
+- Do not assume familiarity with internal names, flags, or scoring jargon.
+
+## Define terms on first use
+
+When you use a project-specific or code term, briefly define it the first time it appears in that reply (unless the user just defined it).
+
+Examples of terms that usually need a gloss:
+
+- **Scout / TurnSearch** — engine beam search that proposes candidate move sequences for this turn
+- **Line** — one candidate sequence of commands with a score
+- **Risk / LineRiskProbe** — cheap check of “what if the opponent interrupts this line?”
+- **Recapture** — search for a recovery line after an assumed interrupt
+- **Reasoner** — LLM investigation loop that can commit a line or emit goals
+- **BriefState / analysis_state** — compact vs full board snapshots sent to the agent / analysis tools
+
+Pattern: `` `term` (short plain-English gloss) ``, then use the term freely afterward.
+
+## Keep jargon proportional
+
+- Code identifiers, file paths, and env vars are fine once glossed.
+- Avoid stacking undefined acronyms; expand once (e.g. WPA → win-probability added).
+- Match the user’s depth: if they already used the term correctly, do not re-define it every time.

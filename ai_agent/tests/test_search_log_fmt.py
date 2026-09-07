@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from ai_agent.search_log_fmt import (
+    RED,
     RESET,
     format_breakdown_line,
     format_candidate_corpus,
@@ -132,6 +133,23 @@ def test_format_line_header_colored_score():
     assert RESET in format_line_header("line-1", 2.6)
 
 
+def test_format_line_header_shows_penalty_as_negative():
+    colored = format_line_header(
+        "line-1",
+        6.5,
+        risk_adjusted_score=6.4,
+        risk_penalty=-0.102,
+        risk_worst=-0.76,
+    )
+    plain = _strip_ansi(colored)
+    assert "penalty=-0.102" in plain
+    assert "penalty=+0.102" not in plain
+    assert "risk_adj=+6.4" in plain
+    assert "risk_worst=-0.76" in plain
+    assert "risk_worst=+0.76" not in plain
+    assert RED in colored
+
+
 def test_format_line_header_includes_cluster_when_collapsed():
     plain = _strip_ansi(
         format_line_header("line-1", 3.9, cluster_key="play falling-star-3", cluster_size=3)
@@ -184,8 +202,8 @@ def test_format_risk_line_shows_summary_and_flags():
     plain = _strip_ansi(
         format_risk_line(
             {
-                "risk_worst": 2.5,
-                "risk_expected": 1.1,
+                "risk_worst": -2.5,
+                "risk_expected": -1.1,
                 "can_recapture": True,
                 "needs_recapture": True,
                 "information_mode": "belief_hidden_state",
@@ -193,8 +211,10 @@ def test_format_risk_line_shows_summary_and_flags():
             }
         )
     )
-    assert "worst=+2.5" in plain
-    assert "expected=+1.1" in plain
+    assert "worst=-2.5" in plain
+    assert "expected=-1.1" in plain
+    assert "worst=+2.5" not in plain
+    assert "expected=+1.1" not in plain
     assert "plan_broken" in plain
     assert "can_recapture" in plain
     assert "belief_hidden_state" in plain
@@ -204,20 +224,20 @@ def test_format_risk_line_shows_summary_and_flags():
 def test_format_risk_block_sorts_threats_by_delta():
     plain = "\n".join(_strip_ansi(line) for line in format_risk_block(
         {
-            "risk_worst": 2.5,
-            "risk_expected": 1.1,
+            "risk_worst": -2.5,
+            "risk_expected": -1.1,
             "needs_recapture": True,
             "threats": [
                 {
                     "card_id": "gust",
                     "p_in_hand": 0.18,
-                    "window_delta": 0.8,
+                    "window_delta": -0.8,
                     "window_after_move": "pass",
                 },
                 {
                     "card_id": "defy",
                     "p_in_hand": 0.42,
-                    "window_delta": 2.5,
+                    "window_delta": -2.5,
                     "window_after_move": "play unit-x",
                     "plan_broken": True,
                     "broken_claims": ["conquer"],
@@ -232,7 +252,9 @@ def test_format_risk_block_sorts_threats_by_delta():
     assert defy_pos >= 0 and gust_pos >= 0
     assert defy_pos < gust_pos
     assert "p=42%" in plain
-    assert "Δ=+2.5" in plain
+    assert "Δ=-2.5" in plain
+    assert "Δ=-0.8" in plain
+    assert "Δ=+2.5" not in plain
     assert "@play unit-x" in plain
     assert "broken=[conquer]" in plain
     assert "after_recapture=-0.5" in plain
@@ -245,17 +267,19 @@ def test_format_candidate_line_includes_risk_block_and_header_hint():
             {
                 "line_id": "line-3",
                 "score": 3.0,
+                "risk_adjusted_score": 1.8,
+                "risk_penalty": -1.2,
                 "moves": ["play unit", "end turn"],
                 "score_breakdown": {"total": 3.0},
                 "resolved_state": {"next_decision": "opponent's turn"},
                 "risk": {
-                    "risk_worst": 1.2,
-                    "risk_expected": 0.4,
+                    "risk_worst": -1.2,
+                    "risk_expected": -0.4,
                     "threats": [
                         {
                             "card_id": "defy",
                             "p_in_hand": 0.3,
-                            "window_delta": 1.2,
+                            "window_delta": -1.2,
                             "note": "threat_not_legal_in_any_window",
                         }
                     ],
@@ -263,9 +287,9 @@ def test_format_candidate_line_includes_risk_block_and_header_hint():
             }
         )
     )
-    assert "line-3 | score=+3.000 | risk_worst=+1.2" in plain
+    assert "line-3 | score=+3.000 | risk_adj=+1.8 | penalty=-1.2 | risk_worst=-1.2" in plain
     assert "Risk:" in plain
-    assert "worst=+1.2" in plain
+    assert "worst=-1.2" in plain
     assert "defy" in plain
     assert "threat_not_legal_in_any_window" in plain
 
@@ -341,8 +365,8 @@ def test_format_candidate_line_marks_unprobed_contested_lines():
 def test_summarize_risk_payload_for_reasoner_prompt():
     summary = summarize_risk_payload(
         {
-            "risk_worst": 2.5,
-            "risk_expected": 1.1,
+            "risk_worst": -2.5,
+            "risk_expected": -1.1,
             "needs_recapture": True,
             "can_recapture": True,
             "information_mode": "belief_hidden_state",
@@ -350,7 +374,7 @@ def test_summarize_risk_payload_for_reasoner_prompt():
                 {
                     "card_id": "defy",
                     "p_in_hand": 0.42,
-                    "window_delta": 2.5,
+                    "window_delta": -2.5,
                     "window_after_move": "move unit to battlefield-a",
                     "plan_broken": True,
                     "broken_claims": ["conquer"],
@@ -358,7 +382,7 @@ def test_summarize_risk_payload_for_reasoner_prompt():
             ],
         }
     )
-    assert summary["risk_worst"] == 2.5
+    assert summary["risk_worst"] == -2.5
     assert summary["needs_recapture"] is True
     assert summary["threats"][0]["card_id"] == "defy"
     assert summary["threats"][0]["broken_claims"] == ["conquer"]

@@ -60,6 +60,11 @@ class VerifiedLineRegistry:
                     "terminal_reason",
                     "search_mode",
                     "root_state_hash",
+                    "risk",
+                    "risk_penalty",
+                    "risk_adjusted_score",
+                    "risk_adjustment_method",
+                    "risk_expanded",
                 ):
                     if key in line:
                         existing[key] = line[key]

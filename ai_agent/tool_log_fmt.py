@@ -106,6 +106,22 @@ def summarize_tool_result(name: str, result: Any) -> str:
                 parts.append("plan_broken")
             if risk.get("can_recapture"):
                 parts.append("can_recapture")
+            try:
+                from .risk_score import compute_risk_adjustment
+
+                score = float(result.get("score", 0.0) or 0.0)
+                adj = compute_risk_adjustment({"score": score, "risk": risk})
+                pre = result.get("risk_adjusted_score_before")
+                post = adj.get("risk_adjusted_score")
+                if pre is not None and post is not None:
+                    parts.append(f"risk_adj={pre}→{post}")
+                elif post is not None:
+                    parts.append(f"risk_adj={post}")
+                method = adj.get("risk_adjustment_method")
+                if method:
+                    parts.append(f"method={method}")
+            except Exception:
+                pass
         return " ".join(str(p) for p in parts)
 
     if name == "search_turn":

@@ -58,7 +58,7 @@ from .agent import (
 from .goal_compiler import compile_goals
 from .memory import DecisionLogger, Memory
 from .reasoner import empty_reasoner_emit
-from .schemas import Decision, DecisionRequest, GoalsRequest, Move, ReasonRequest
+from .schemas import CandidateLine, Decision, DecisionRequest, GoalsRequest, Move, ReasonRequest
 from .search_log_fmt import (
     BOLD,
     CYAN,
@@ -467,11 +467,23 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
                 overlay = None
                 goal_set = None
                 goals_source = "none"
+        from .risk_score import enrich_lines_with_risk
+
+        raw_lines = [line.model_dump() for line in request.candidate_lines]
+        enriched_raw, risk_telem = enrich_lines_with_risk(
+            raw_lines,
+            auto_expand=True,
+            expand_fn=skill_module.expand_risk,
+        )
+        eval_metrics["risk_enrich"] = risk_telem
+        candidate_lines = [
+            CandidateLine.model_validate(ln) for ln in enriched_raw
+        ]
         decision = await choose_line(
             brief_state=brief_state,
             game_id=game_id,
             memory=_memory,
-            candidate_lines=request.candidate_lines,
+            candidate_lines=candidate_lines,
             search_stats=request.search_stats,
             eval_metrics=eval_metrics,
             argmax_only=_argmax_enabled,

@@ -21,6 +21,7 @@ static func run(assertions) -> void:
 	_test_resolved_state_controllers_after_and_unit_presence(assertions)
 	_test_resolved_state_play_to_base_lists_unit_in_base(assertions)
 	_test_line_risk_probe_smoke(assertions)
+	_test_risk_score_mirrors_python(assertions)
 
 
 # A structural signature of the decision-relevant state. Two states with the same
@@ -273,3 +274,65 @@ static func _test_line_risk_probe_smoke(assertions) -> void:
 		var line0: Dictionary = annotated[0]
 		assertions.assert_true(line0.has("risk"), "annotated line carries risk payload")
 
+
+static func _test_risk_score_mirrors_python(assertions) -> void:
+	var RiskScoreScript = preload("res://Scripts/Game/RiskScore.gd")
+	var expected_line := {
+		"score": 10.0,
+		"risk": {
+			"risk_worst": -5.0,
+			"risk_expected": -2.0,
+			"threats": [{"window_delta": -2.0}],
+		},
+	}
+	var expected_adj: Dictionary = RiskScoreScript.compute_adjustment(expected_line)
+	assertions.assert_eq(str(expected_adj.get("risk_adjustment_method", "")), "expected",
+		"expected method when no plan_broken")
+	assertions.assert_true(abs(float(expected_adj.get("risk_penalty", 1.0)) + 2.0) < 0.001,
+		"expected penalty uses signed risk_expected")
+	assertions.assert_true(abs(float(expected_adj.get("risk_adjusted_score", -1)) - 8.0) < 0.001,
+		"risk_adjusted = score + expected")
+
+	var broken_line := {
+		"score": 10.0,
+		"risk": {
+			"risk_worst": -7.5,
+			"risk_expected": -1.0,
+			"needs_recapture": true,
+			"threats": [{"window_delta": -7.5, "plan_broken": true}],
+		},
+	}
+	var broken_adj: Dictionary = RiskScoreScript.compute_adjustment(broken_line)
+	assertions.assert_eq(str(broken_adj.get("risk_adjustment_method", "")), "pessimistic_worst",
+		"plan_broken uses pessimistic_worst")
+	assertions.assert_true(abs(float(broken_adj.get("risk_adjusted_score", -1)) - 2.5) < 0.001,
+		"pessimistic adds signed risk_worst when p is absent")
+
+	var weighted_line := {
+		"score": 10.0,
+		"risk": {
+			"risk_worst": -8.0,
+			"risk_expected": -2.0,
+			"needs_recapture": true,
+			"threats": [{
+				"window_delta": -8.0,
+				"plan_broken": true,
+				"p_in_hand": 0.25,
+				"score_after_recapture": 6.0,
+			}],
+		},
+	}
+	var weighted_adj: Dictionary = RiskScoreScript.compute_adjustment(weighted_line)
+	assertions.assert_eq(str(weighted_adj.get("risk_adjustment_method", "")), "recapture_gap",
+		"recapture uses recapture_gap")
+	assertions.assert_true(abs(float(weighted_adj.get("risk_penalty", 1.0)) + 1.0) < 0.001,
+		"recapture_gap is p-weighted: 0.25 * (6-10)")
+	assertions.assert_true(abs(float(weighted_adj.get("risk_adjusted_score", -1)) - 9.0) < 0.001,
+		"p-weighted recapture_gap ranking")
+
+	var ranked: Array = RiskScoreScript.annotate_lines([broken_line, expected_line])
+	assertions.assert_eq(ranked.size(), 2, "annotate_lines preserves count")
+	assertions.assert_true(
+		float(ranked[0].get("risk_adjusted_score", 0.0)) >= float(ranked[1].get("risk_adjusted_score", 0.0)),
+		"annotate_lines sorts by risk_adjusted_score desc"
+	)

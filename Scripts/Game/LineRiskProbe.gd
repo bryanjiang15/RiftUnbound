@@ -105,7 +105,13 @@ func _risk_for_line(
 	var moves: Array = line.get("moves", [])
 	var threats: Array = []
 	if forced_card_id != "":
-		threats = [{"card_id": forced_card_id, "timing": "action_or_reaction", "p_in_hand": 1.0}]
+		# Inject the card so recapture search is well-defined; keep the cheap
+		# belief p when present. p=1.0 only if we have no prior for this card.
+		threats = [{
+			"card_id": forced_card_id,
+			"timing": "action_or_reaction",
+			"p_in_hand": _belief_p_for_card(line, forced_card_id),
+		}]
 	else:
 		threats = _build_threat_catalog(live_gs, seat, windows, prior_data)
 	if threats.is_empty():
@@ -133,7 +139,7 @@ func _risk_for_line(
 			continue
 		tested.append(evald)
 		var d := float(evald.get("window_delta", 0.0))
-		risk_worst = maxf(risk_worst, d)
+		risk_worst = minf(risk_worst, d)
 		risk_expected += d * float(evald.get("p_in_hand", 0.0))
 		can_recapture = can_recapture or bool(evald.get("can_recapture", false))
 		needs_recapture = needs_recapture or bool(evald.get("plan_broken", false))
@@ -147,6 +153,17 @@ func _risk_for_line(
 		"catalog_note": "belief_hidden_state_assumed_one_card",
 		"information_mode": "belief_hidden_state",
 	}
+
+
+func _belief_p_for_card(line: Dictionary, card_id: String) -> float:
+	var risk: Dictionary = line.get("risk", {}) if line.get("risk", null) is Dictionary else {}
+	for t in risk.get("threats", []):
+		if not (t is Dictionary):
+			continue
+		var cid := str(t.get("card_id", t.get("assumed_card", "")))
+		if cid == card_id:
+			return clampf(float(t.get("p_in_hand", 1.0)), 0.0, 1.0)
+	return 1.0
 
 
 func _is_skipped_threat(evald: Dictionary) -> bool:
@@ -166,7 +183,7 @@ func _evaluate_threat(
 	with_recapture: bool,
 ) -> Dictionary:
 	var best: Dictionary = {}
-	var best_delta := -INF
+	var best_delta := INF
 	var last_skip := "no_matching_window"
 	for wi in range(windows.size()):
 		var window: Dictionary = windows[wi]
@@ -178,7 +195,7 @@ func _evaluate_threat(
 			last_skip = str(probe.get("skip_reason", "probe_failed"))
 			continue
 		var d := float(probe.get("window_delta", 0.0))
-		if d > best_delta:
+		if d < best_delta:
 			best_delta = d
 			best = probe
 	if best.is_empty():
@@ -225,6 +242,9 @@ func _probe_at_window(
 
 	var pre_snap := ScoreModelScript.snapshot(boundary_gs, seat)
 	var remaining: Array = replay.get("remaining", [])
+	# Decision-time root: same baseline TurnSearch used for line.score. Recapture
+	# must be scored against this, not against the post-threat search root.
+	var decision_root_snap := ScoreModelScript.snapshot(live_gs, seat)
 
 	var pass_data := _resolve_opponent_pass(boundary_gs, seat)
 	if pass_data.get("gs", null) == null:
@@ -251,7 +271,7 @@ func _probe_at_window(
 	var score_after_recapture = null
 	var gs_after_threat: GameState = threat_final.get("gs")
 	if with_recapture and gs_after_threat != null:
-		var rec = _search_recapture(gs_after_threat, seat)
+		var rec = _search_recapture(gs_after_threat, seat, decision_root_snap, scorer)
 		if not rec.is_empty():
 			score_after_recapture = rec.get("score_after_recapture")
 
@@ -259,7 +279,8 @@ func _probe_at_window(
 		"card_id": str(threat.get("card_id", "")),
 		"assumed_card": str(threat.get("card_id", "")),
 		"window_after_move": str(window.get("after_move", "")),
-		"window_delta": pass_score - threat_score,
+		# Signed score impact: negative when the interrupt is worse than a pass.
+		"window_delta": threat_score - pass_score,
 		"broken_claims": broken,
 		"script_legal": script_legal,
 		"plan_broken": plan_broken,
@@ -268,7 +289,17 @@ func _probe_at_window(
 	}
 
 
-func _search_recapture(gs: GameState, seat: int) -> Dictionary:
+func _search_recapture(
+	gs: GameState,
+	seat: int,
+	decision_root_snap: Dictionary,
+	scorer: RefCounted,
+) -> Dictionary:
+	# Search finds the best recovery moves from the post-threat state, but its
+	# internal line.score is rooted at that post-threat GS — not comparable to
+	# the original scout line.score (rooted at decision time). Replay the best
+	# recovery and re-score the leaf against the decision root so recapture_gap
+	# = score_after_recapture - line.score is apples-to-apples.
 	var mode := "reactive" if gs.is_closed_chain_state() or gs.current_state == TurnStateMachine.State.SHOWDOWN_OPEN else "main"
 	var searcher = TurnSearchScript.new()
 	var result: Dictionary = searcher.search(gs, seat, {
@@ -281,9 +312,17 @@ func _search_recapture(gs: GameState, seat: int) -> Dictionary:
 	var lines: Array = result.get("candidate_lines", [])
 	if lines.is_empty():
 		return {}
+	var best: Dictionary = lines[0]
+	var moves: Array = best.get("moves", [])
+	var leaf_gs: GameState = gs
+	if not moves.is_empty():
+		var replay = LineReplayerScript.new().replay_line(gs, moves, seat, {"stop_at_opponent": false})
+		if bool(replay.get("ok", false)) and replay.get("gs", null) != null:
+			leaf_gs = replay.get("gs")
+	var leaf_snap := ScoreModelScript.snapshot(leaf_gs, seat)
 	return {
-		"score_after_recapture": float((lines[0] as Dictionary).get("score", 0.0)),
-		"moves": (lines[0] as Dictionary).get("moves", []),
+		"score_after_recapture": _score_snapshot(decision_root_snap, leaf_snap, scorer, seat),
+		"moves": moves,
 	}
 
 

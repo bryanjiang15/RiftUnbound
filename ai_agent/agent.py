@@ -1349,6 +1349,25 @@ def _adjusted_line_score(line: CandidateLine, overlay: ProfileOverlay) -> float:
     )
 
 
+def _line_rank_score(
+    line: CandidateLine,
+    overlay: Optional[ProfileOverlay] = None,
+) -> float:
+    """Ranking key: risk_adjusted_score (or raw score) plus optional goal overlay."""
+    if line.risk_adjusted_score is not None:
+        base = float(line.risk_adjusted_score)
+    else:
+        base = float(line.score)
+    if overlay is not None and not overlay.is_empty():
+        return base + overlay_delta(
+            overlay,
+            features=line.features or {},
+            score_breakdown=line.score_breakdown or {},
+            moves=_line_move_strings(line),
+        )
+    return base
+
+
 def _goal_selector_context(overlay: Optional[ProfileOverlay]) -> str:
     """One-line goal briefing injected into the line-selector system prompt."""
     if overlay is None or overlay.is_empty():
@@ -1456,8 +1475,48 @@ async def run_reasoner(
         budget=budget,
     )
     raw_scout = [line.model_dump() for line in (candidate_lines or [])]
-    context.scout_lines = context.registry.register_many(raw_scout, source="scout")
+    from .risk_score import enrich_lines_with_risk, format_pre_llm_banner, risk_rank_enabled
+
+    enriched_scout, risk_telem = enrich_lines_with_risk(
+        raw_scout,
+        auto_expand=True,
+        expand_fn=skill_module.expand_risk,
+    )
+    context.scout_lines = context.registry.register_many(enriched_scout, source="scout")
     context.search_corpus = list(context.scout_lines)
+    scout_stats_dict = search_stats.model_dump() if search_stats else {}
+    scout_ms = int(scout_stats_dict.get("scout_ms") or 0)
+    cheap_risk_ms = int(scout_stats_dict.get("cheap_risk_ms") or 0)
+    expand_ms = int(risk_telem.get("auto_expand_ms") or 0)
+    expand_count = int(risk_telem.get("auto_expand_count") or 0)
+    pre_llm_total = scout_ms + cheap_risk_ms + expand_ms
+    banner = format_pre_llm_banner(
+        scout_ms=scout_ms or None,
+        scout_lines=scout_stats_dict.get("scout_line_count") or len(enriched_scout),
+        cheap_risk_ms=cheap_risk_ms or None,
+        expand_ms=expand_ms,
+        expand_count=expand_count,
+        total_ms=pre_llm_total,
+    )
+    context.telemetry.update({
+        "risk_rank_enabled": risk_rank_enabled(),
+        "auto_expand_count": expand_count,
+        "auto_expand_ms": expand_ms,
+        "auto_expand_cards": list(risk_telem.get("auto_expand_cards") or []),
+        "scout_leader_risk_adjusted": risk_telem.get("scout_leader_risk_adjusted"),
+        "risk_adjusted_leader_id": risk_telem.get("risk_adjusted_leader_id"),
+        "pre_llm_enrich_ms": risk_telem.get("pre_llm_enrich_ms", 0),
+        "scout_ms": scout_ms,
+        "cheap_risk_ms": cheap_risk_ms,
+        "pre_llm_total_ms": pre_llm_total,
+        "pre_llm_banner": banner,
+    })
+    if _LOG_INPUTS:
+        try:
+            with _SEARCH_LOG_PATH.open("a", encoding="utf-8") as f:
+                f.write(banner + "\n")
+        except OSError:
+            pass
     context_token = install_context(context)
     budget_token = install_budget(budget)
     try:
@@ -1634,10 +1693,24 @@ async def choose_line(
             "resolved_state": line.resolved_state,
             "opponent_windows": [w.model_dump() for w in line.opponent_windows],
         }
+        if line.risk_adjusted_score is not None:
+            entry["risk_adjusted_score"] = line.risk_adjusted_score
+            entry["risk_penalty"] = line.risk_penalty
+            entry["risk_adjustment_method"] = line.risk_adjustment_method
+        if line.risk:
+            entry["risk"] = line.risk
         if overlay is not None and not overlay.is_empty():
-            entry["goal_adjusted_score"] = _adjusted_line_score(line, overlay)
+            entry["goal_adjusted_score"] = _line_rank_score(line, overlay)
         lines_payload.append(entry)
     goal_context = _goal_selector_context(overlay)
+    risk_context = (
+        "Ranking uses risk_adjusted_score (= unanswered score + risk_penalty, "
+        "where risk_penalty is ≤ 0 when an interrupt hurts). "
+        "Prefer the highest risk_adjusted_score unless an opponent window or "
+        "concrete board state clearly outweighs it. "
+        if any(ln.risk_adjusted_score is not None for ln in candidate_lines)
+        else ""
+    )
     messages: list[ChatCompletionMessageParam] = [
         {
             "role": "system",
@@ -1647,8 +1720,9 @@ async def choose_line(
                 "'scripted' (a deliberate play) or 'intermediate' (a forced "
                 "sub-decision the engine auto-resolves mid-line, e.g. passing "
                 "showdown focus or choosing an ability target — its 'context' "
-                "explains it). The engine score is mechanical; use "
-                "opponent-history judgement for contested opponent_windows. "
+                "explains it). The unanswered engine score is mechanical; "
+                f"{risk_context}"
+                "use opponent-history judgement for contested opponent_windows. "
                 f"{goal_context}"
                 "You may call get_opponent_history. "
                 "Respond with raw JSON only: {\"chosen_line_id\":\"line-1\","
@@ -1791,30 +1865,36 @@ def _argmax_line(
     """Return the highest-scoring playable line as a Decision (engine argmax).
 
     Shared by the LLM-selector fallback (``source='fallback'``) and the no-LLM
-    argmax data-generation path (``source='argmax'``). When a goal ``overlay`` is
-    supplied, ranking uses the goal-adjusted score instead of the raw engine
-    score.
+    argmax data-generation path (``source='argmax'``). Ranking uses
+    ``risk_adjusted_score`` when present, then optional goal overlay bias.
     """
     playable = _playable_lines(candidate_lines)
     if not playable:
         return _PASS_DECISION
+    best, best_move = max(
+        playable,
+        key=lambda pair: _line_rank_score(pair[0], overlay),
+    )
     use_overlay = overlay is not None and not overlay.is_empty()
-    if use_overlay:
-        best, best_move = max(playable, key=lambda pair: _adjusted_line_score(pair[0], overlay))
-    else:
-        best, best_move = max(playable, key=lambda pair: pair[0].score)
+    use_risk = best.risk_adjusted_score is not None
     if source == "argmax":
-        reasoning = (
-            "Goal-argmax: selected the highest goal-adjusted searched line."
-            if use_overlay
-            else "Argmax: selected the highest-scoring searched line."
-        )
+        if use_overlay and use_risk:
+            reasoning = "Risk+goal-argmax: selected the best risk- and goal-adjusted searched line."
+        elif use_risk:
+            reasoning = "Risk-argmax: selected the highest risk_adjusted_score searched line."
+        elif use_overlay:
+            reasoning = "Goal-argmax: selected the highest goal-adjusted searched line."
+        else:
+            reasoning = "Argmax: selected the highest-scoring searched line."
     else:
-        reasoning = (
-            "Goal-fallback: selected the highest goal-adjusted searched line."
-            if use_overlay
-            else "Fallback: selected the highest-scoring searched line."
-        )
+        if use_overlay and use_risk:
+            reasoning = "Risk+goal-fallback: selected the best risk- and goal-adjusted searched line."
+        elif use_risk:
+            reasoning = "Risk-fallback: selected the highest risk_adjusted_score searched line."
+        elif use_overlay:
+            reasoning = "Goal-fallback: selected the highest goal-adjusted searched line."
+        else:
+            reasoning = "Fallback: selected the highest-scoring searched line."
     return Decision(
         reasoning=reasoning,
         move=best_move,

@@ -8,13 +8,13 @@
     "battlefield_control": 1.0,
     "battlefield_might_margin": 0.2,
     "control_fragility": 2,
-    "unit_might_on_board": 0.3,
+    "unit_might_on_board": 0.4,
     "ready_unit_might": 0.1,
     "idle_base_might": 0.3,
     "damage_fragility": 1.0,
     "cards_in_hand": 0.2,
     "rune_development": 0.4,
-    "reactive_potential": 0.3,
+    "reactive_potential": 0.25,
     "unusable_runes": -0.15
   },
   "action_weights": {

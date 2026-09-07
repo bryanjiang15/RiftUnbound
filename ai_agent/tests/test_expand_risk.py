@@ -10,13 +10,13 @@ def test_candidate_line_accepts_risk_payload():
             "moves": ["pass"],
             "score": 1.0,
             "risk": {
-                "risk_worst": 2.5,
-                "risk_expected": 1.1,
-                "threats": [{"card_id": "defy", "window_delta": 2.5}],
+                "risk_worst": -2.5,
+                "risk_expected": -1.1,
+                "threats": [{"card_id": "defy", "window_delta": -2.5}],
             },
         }
     )
-    assert line.risk["risk_worst"] == 2.5
+    assert line.risk["risk_worst"] == -2.5
 
 
 def test_expand_risk_requires_line_id_or_moves():

@@ -184,6 +184,9 @@ def format_risk_line(risk: Mapping[str, Any] | None) -> str:
         parts.append(paint("plan_broken", BOLD + RED))
     if risk.get("can_recapture") is True:
         parts.append(paint("can_recapture", GREEN))
+    method = str(risk.get("risk_adjustment_method") or "").strip()
+    if method and method != "none":
+        parts.append(paint(f"method={method}", DIM))
     if not threats and skipped:
         parts.append(paint("no legal assumed interrupt", YELLOW))
     elif not threats:
@@ -246,7 +249,6 @@ def format_risk_block(risk: Mapping[str, Any] | None) -> list[str]:
     ordered = sorted(
         (t for t in threats if isinstance(t, Mapping)),
         key=lambda t: float(t.get("window_delta", 0.0) or 0.0),
-        reverse=True,
     )
     for threat in ordered:
         out.append(format_risk_threat(threat))
@@ -260,11 +262,14 @@ def summarize_risk_payload(risk: Mapping[str, Any] | None) -> dict[str, Any]:
     if "risk_worst" not in risk and "threats" not in risk:
         return {}
     out: dict[str, Any] = {}
-    for key in ("risk_worst", "risk_expected"):
+    for key in ("risk_worst", "risk_expected", "risk_penalty", "risk_adjusted_score"):
         val = risk.get(key)
         if isinstance(val, (int, float)):
             out[key] = round(float(val), 3)
-    for key in ("can_recapture", "needs_recapture"):
+    method = str(risk.get("risk_adjustment_method") or "").strip()
+    if method:
+        out["risk_adjustment_method"] = method
+    for key in ("can_recapture", "needs_recapture", "risk_expanded"):
         if risk.get(key) is True:
             out[key] = True
     info = str(risk.get("information_mode") or "").strip()
@@ -274,7 +279,6 @@ def summarize_risk_payload(risk: Mapping[str, Any] | None) -> dict[str, Any]:
     threats = sorted(
         (t for t in (risk.get("threats") or []) if isinstance(t, Mapping)),
         key=lambda t: float(t.get("window_delta", 0.0) or 0.0),
-        reverse=True,
     )
     for threat in threats[:3]:
         card_id = str(threat.get("card_id") or threat.get("assumed_card") or "")
@@ -328,12 +332,18 @@ def format_line_header(
     cluster_size: int = 0,
     *,
     risk_worst: float | None = None,
+    risk_adjusted_score: float | None = None,
+    risk_penalty: float | None = None,
 ) -> str:
     colored_score = paint(
         f"{score:+.3f}",
         GREEN if score > 0 else RED if score < 0 else DIM,
     )
     header = f"{paint(line_id, BOLD + CYAN)} | score={colored_score}"
+    if risk_adjusted_score is not None:
+        header += f" | risk_adj={_signed_num(float(risk_adjusted_score))}"
+    if risk_penalty is not None and abs(float(risk_penalty)) >= 1e-9:
+        header += f" | penalty={_signed_num(float(risk_penalty))}"
     if risk_worst is not None and abs(float(risk_worst)) >= 1e-9:
         header += f" | risk_worst={_signed_num(float(risk_worst))}"
     if cluster_key and int(cluster_size or 0) > 1:
@@ -372,12 +382,16 @@ def format_candidate_line(line: Any) -> list[str]:
         raw_worst = risk.get("risk_worst")
         if isinstance(raw_worst, (int, float)):
             risk_worst = float(raw_worst)
+    risk_adj = data.get("risk_adjusted_score")
+    risk_pen = data.get("risk_penalty")
     out = [format_line_header(
         line_id,
         score,
         cluster_key=str(data.get("cluster_key") or ""),
         cluster_size=int(data.get("cluster_size") or 0),
         risk_worst=risk_worst,
+        risk_adjusted_score=float(risk_adj) if isinstance(risk_adj, (int, float)) else None,
+        risk_penalty=float(risk_pen) if isinstance(risk_pen, (int, float)) else None,
     )]
     moves = list(data.get("moves") or [])
     contexts = list(data.get("move_contexts") or [])
