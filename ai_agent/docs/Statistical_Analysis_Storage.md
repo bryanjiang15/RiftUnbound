@@ -18,11 +18,12 @@ Post-game analyst plan: `LLM_Data_Analysis_Loop.md`. Weight-tuning algorithms:
   `score_breakdown` (exact additive attribution; no SHAP needed). Optional
   transient GoalSet overlay (`RIFTBOUND_GOALS`).
 - **Line selection** — `choose_line` (LLM), argmax (`RIFTBOUND_SEARCH_ARGMAX`),
-  or single-line short-circuit. Strategist may bias generation/selection; a
-  future Reasoner may commit lines directly
-  (`Deliberative_Reasoning_Toolkit.md`).
+  single-line short-circuit, or a Phase-3 Reasoner direct line commit.
+  Strategist/Reasoner GoalSets may bias generation/selection
+  (`Goal_Oriented_Strategist.md`, `Deliberative_Reasoning_Toolkit.md`).
 - Live investigation tools: `search_for` / `simulate` / `deepen` via
-  `EngineServer` (Phases 0–2 done).
+  `EngineServer`, with compact `/reason` telemetry persisted to
+  `reasoner_decisions`.
 
 ## Goal of the data layer
 

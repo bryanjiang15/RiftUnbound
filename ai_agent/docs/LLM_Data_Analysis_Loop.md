@@ -190,8 +190,8 @@ causes useless tuning.
 | **Horizon / setup miss** | Same-turn eval fine; counterfactual shows better later goal under mild assumptions | Delayed-value **features** or sharper goals — not deeper live search by default |
 
 Classic triad (selection / search / eval) still applies to argmax and
-selector-only games. Goals-on and future Reasoner **add** rows above; they do
-not retire the triad.
+selector-only games. Goals-on and Reasoner modes **add** rows above; they do not
+retire the triad.
 
 ---
 

@@ -1,8 +1,8 @@
 # Goal-Oriented LLM Strategist — Design & Implementation
 
 Status: v0 implemented + tested: server-side re-rank, engine-side overlay
-primitive, live engine handshake, and search-grounded scout flow. Goal telemetry
-and the SPRT gate are scoped follow-ups.
+primitive, live engine handshake, search-grounded scout flow, and GoalSet /
+overlay telemetry. The SPRT gate is still a scoped follow-up.
 
 Companion docs:
 - `Score_Tuning_And_Evolution.md` §5 (cross-turn planner hook) — the seam this
@@ -129,7 +129,24 @@ it the LLM invents metric names that compile to no-ops. Net prompt size ≈ neut
 | `RIFTBOUND_GOALS_SCOUT` | `on` | Engine-side toggle (`Scripts/AI/AIPlayer.gd`). When goals are on, run a cheap base-profile scout search before `/goals` and send its top lines for `search_turn` grounding. Falsey values (`0`, `false`, `no`, `off`) disable the scout. |
 | `RIFTBOUND_LOG_INPUTS` | `0` | When combined with `RIFTBOUND_SEARCH=on`, writes `ai_agent/agent_search.log` with searched candidate lines, search stats, goal overlays, and per-line overlay deltas. |
 
-## 8. What is implemented vs. follow-up
+## 8. Telemetry and operational contracts
+
+- `/goals` receives the current `BriefState` and optional scout lines, runs the
+  Strategist once per turn, and returns the compiled `ProfileOverlay`. Failures
+  or disabled flags return `{}` so the engine searches under the base profile.
+- `/decision` reuses the cached GoalSet from `/goals` for server-side re-ranking
+  and persists `goals_source='strategist'`, `goal_set_json`, `overlay_json`,
+  `chosen_overlay_delta`, and `chosen_goal_achieved_json` on
+  `search_decisions` when search capture is active.
+- If the Phase-3 Reasoner emits goals, the same columns are persisted with
+  `goals_source='reasoner'`. If the Reasoner commits a direct line, join
+  `reasoner_decisions` on `(game_id, turn)` (and `decision_index` when present)
+  instead; there may be no overlay row for that final `/decision`.
+- `agent_search.log` mirrors candidate lines, overlays, and per-line deltas only
+  when `RIFTBOUND_LOG_INPUTS=1` and `RIFTBOUND_SEARCH=on`. SQLite telemetry does
+  not depend on that log flag.
+
+## 9. What is implemented vs. follow-up
 
 **Implemented + tested**
 - `Goal` / `GoalSet` schemas (`schemas.py`).
@@ -153,6 +170,9 @@ it the LLM invents metric names that compile to no-ops. Net prompt size ≈ neut
   five lines to `GoalsRequest`, and skips `/goals` when the scout finds at most
   one line. `skills.search_turn` serves those summaries to the Strategist, which
   forces `search_turn` as its first tool when scout lines are present.
+- **Goal telemetry:** `capture.py` persists GoalSet + overlay + chosen-line
+  achievement fields on `search_decisions`; `Statistical_Analysis_Storage.md`
+  documents the SQL columns and join caveats.
 
 **Runtime path (live):** with `RIFTBOUND_SEARCH=on RIFTBOUND_GOALS=on` and
 `OPENAI_API_KEY` set, the system runs end-to-end. Generic (weight_bias) goals bias
@@ -171,10 +191,7 @@ per-line deltas that changed selection.
 - `sprt-gate`: strategist seat vs base seat in `SelfPlaySim.gd`; commit the
   mechanism only on a significant win-rate lift.
 
-**Shipped telemetry:** `goal_set` + overlay + per-goal achieved-at-leaf persist on
-`search_decisions` (see `Statistical_Analysis_Storage.md`).
-
-## 9. Prior art
+## 10. Prior art
 
 Hierarchical RL / manager–worker goal-conditioning (Feudal RL; FeUdal Networks);
 potential-based reward shaping (Ng, Harada & Russell 1999); LLM-proposer +

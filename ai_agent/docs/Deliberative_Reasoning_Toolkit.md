@@ -272,8 +272,8 @@ risk and needs hard caps:
 
 Near-term work is the **AI-only** tools plus the Reasoner. Opponent modeling
 (4.3–4.5) is **deferred** by decision — the AI-only loop must prove out first.
-All Reasoner work lands on a **separate branch** behind `RIFTBOUND_REASONER`
-(§5), so `main`'s strategist+actor path is untouched and A/B-able.
+Reasoner work remains behind `RIFTBOUND_REASONER` (§5), so the default
+strategist+actor path stays untouched and A/B-able.
 
 | Phase | Deliverable | Ships value | Depends on |
 |---|---|---|---|
@@ -281,7 +281,7 @@ All Reasoner work lands on a **separate branch** behind `RIFTBOUND_REASONER`
 | **1** | ✅ **DONE** — `search_for` over pre-computed lines with per-line `search_state` (Python `SEARCH_METRICS` filter; fuller than the original “per common predicate” sketch). | Conditional search, no Godot server | — |
 | **2** | ✅ **DONE** — Godot `EngineServer` (`POST /engine/simulate`, `/engine/search`); live `simulate` / `deepen` / `search_for` with Phase-1 fail-safe fallback. | Live "what if X?" | Phase 0 |
 | **3** | ✅ **DONE (deterministic contracts)** — Reasoner stage (§5a) now uses request-scoped engine-line registries, native `commit_line` / `emit_goals` terminals, strict non-empty goals, complete root/hash-matched replay, and a successful `search_for` / `deepen` gate. Deterministic Python/Godot regressions pass; the live behavioral sample remains — see `Reasoner_Investigation_Improvements.md`. | **The deep-planning payoff** | Phase 2 |
-| **4** | SPRT self-play gate — Reasoner seat vs. current strategist+actor seat; commit only on a significant win-rate lift (`Goal_Oriented_Strategist.md §8`). Run only after the corrective plan’s acceptance criteria pass. | Evidence it helped | Phase 3 + corrective plan |
+| **4** | SPRT self-play gate — Reasoner seat vs. current strategist+actor seat; commit only on a significant win-rate lift (`Goal_Oriented_Strategist.md §9`). Run only after the corrective plan’s acceptance criteria pass. | Evidence it helped | Phase 3 + corrective plan |
 | **5+** *(deferred)* | Opponent modeling: `simulate_opponent` (4.3, assumption-driven) → `branch` (4.5) → `rollout` (4.4), each behind the same gate. | Adversarial + multi-turn reasoning | Phase 3 |
 
 ## 8. Open questions

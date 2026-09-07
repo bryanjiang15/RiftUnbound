@@ -39,7 +39,7 @@ uvicorn ai_agent.main:app --port 8765 --reload
 | `RIFTBOUND_TRANSIENT_BACKOFF_S` | `1.0` | No | Base seconds for exponential backoff between in-process transient retries (used when the error carries no `Retry-After` header). |
 | `RIFTBOUND_SEARCH` | `off` | No | Enables engine search mode. When on, Godot runs `TurnSearch` and posts candidate lines; the server selects a line (via `choose_line`) and captures the tuning dataset (`search_decisions` / `candidate_lines` / `decision_snapshots`). |
 | `RIFTBOUND_SEARCH_ARGMAX` | `off` | No | When on (with search enabled), skips the LLM line-selector round-trip and returns the top-scored line directly. Decisions are tagged `selector_source='argmax'`. Use for bulk data generation / weight tuning. |
-| `RIFTBOUND_GOALS` | `off` | No | Enables the goal-oriented strategist: once per turn an LLM emits a structured GoalSet that is compiled into a transient scoring-profile overlay biasing line selection (`ai_agent/docs/Goal_Oriented_Strategist.md`). Requires `RIFTBOUND_SEARCH=on`; ignored under `RIFTBOUND_SEARCH_ARGMAX`. Off keeps the proven base-profile search as the floor. |
+| `RIFTBOUND_GOALS` | `off` | No | Enables the goal-oriented strategist: once per turn an LLM emits a structured GoalSet compiled into a transient scoring-profile overlay. Generic `weight_bias` goals bias engine line generation and all goal kinds bias server-side selection (`ai_agent/docs/Goal_Oriented_Strategist.md`). Requires `RIFTBOUND_SEARCH=on`; ignored under `RIFTBOUND_SEARCH_ARGMAX`. Off keeps the proven base-profile search as the floor. |
 | `RIFTBOUND_REASONER` | `off` | No | Enables the Phase-3 Reasoner pre-search handshake (`POST /reason`). Requires `RIFTBOUND_SEARCH=on` and `RIFTBOUND_SEARCH_ARGMAX=off`. The Reasoner can either commit a complete engine-registered line directly or emit a non-empty GoalSet overlay for the final search. |
 | `RIFTBOUND_REASONER_MODEL` | (falls back to `RIFTBOUND_STRATEGIST_MODEL`, then `RIFTBOUND_AI_MODEL`) | No | Model used by the Reasoner think/terminal loop. Use this to try a stronger model for live investigation without changing the Actor/Planner defaults. |
 | `RIFTBOUND_REASONER_NODE_BUDGET` | `1500` | No | Per-turn live-tool node budget shared by `search_for` and `deepen`. Exhaustion forces the Reasoner to terminate or fall back to base search. |
@@ -102,15 +102,52 @@ uvicorn ai_agent.main:app --port 8765 --reload
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/decision` | POST | Main entry — receives BriefState, returns Decision |
-| `/goals` | POST | Pre-search handshake — receives BriefState, returns this turn's compiled goal overlay (empty unless `RIFTBOUND_GOALS=on`) |
-| `/reason` | POST | Phase-3 pre-search handshake — receives BriefState, scout lines, and `root_state_hash`; returns `base_search_fallback`, a compiled overlay, or a committed verified line |
-| `/health` | GET | Liveness check |
-| `/legal_moves` | GET | Current enumerated legal moves (debug) |
-| `/state` | GET | Full board state text (debug) |
-| `/card/{id}` | GET | Card definition lookup |
-| `/rule?q=...` | GET | Rules passage search |
-| `/position` | GET | Heuristic position evaluation |
+| `/decision` | POST | Main entry: receives `DecisionRequest` (`BriefState`, optional search candidates/profile), returns a validated `Decision`, and records episodic/search telemetry. |
+| `/goals` | POST | Pre-search strategist handshake: receives `BriefState` plus optional scout lines, returns this turn's compiled overlay (`{}` when goals are disabled or fail safe). |
+| `/reason` | POST | Phase-3 Reasoner handshake: receives `BriefState`, scout lines, and `root_state_hash`; returns `base_search_fallback`, a compiled overlay, or a committed verified line plus telemetry. |
+| `/outcome` | POST | Engine acceptance callback for the most recent decision (`accepted`, optional `rejection_reason`). |
+| `/game_over` | POST | Finished-game callback; records outcome/score/turns/seed and backfills searched rows with outcome labels and first-player attribution. |
+| `/decision_metrics` | POST | Engine-observed reliability metrics for one decision: latency, rejection retries, heuristic fallback, and final acceptance. |
+| `/card_event` | POST | Per-card lifecycle event (`drawn`, `played`, `discarded`, `died`, `mulliganed`, `scored`, `left_in_hand_at_end`, `in_opening_hand`). Requires base `card_def_id`; never derive it from `instance_id`. |
+| `/turn_snapshot` | POST | End-of-turn board pulse for `turn_snapshots`, emitted after cleanup/stun clear and before pools empty / `turn_number++`. |
+| `/opponent_action` | POST | Public opponent action history for same-game context injection. |
+| `/game_state_event` | POST | Debug timeline event for `agent_game_state.log`; returns `disabled` unless `RIFTBOUND_LOG_INPUTS` is truthy. |
+| `/human_feedback` | POST | Human rubric feedback from the Godot feedback panel. |
+| `/move_feedback` | POST | Per-move sentiment (`like`, `neutral`, `dislike`) from live review UI. |
+| `/eval_report` | GET | Aggregate reliability + human-feedback scorecard from SQLite. |
+| `/card_stats?min_plays=20` | GET | Per-card aggregate statistics report. |
+| `/health` | GET | Liveness and mode flags (`search_enabled`, `goals_enabled`, `reasoner_enabled`, `pipeline`). |
+| `/legal_moves` | GET | Current enumerated legal moves (debug/read-skill proxy). |
+| `/state` | GET | Full board state text (debug/read-skill proxy). |
+| `/card/{id}` | GET | Card definition lookup. |
+| `/rule?q=...` | GET | Rules passage search. |
+| `/position` | GET | Heuristic position evaluation. |
+
+### Telemetry capture contracts
+
+- SQL capture is best-effort for engine callbacks: most telemetry endpoints
+  return `{"status":"no-op"}` when SQLite is unavailable so live play can
+  continue. Feedback endpoints return errors because they are explicit user
+  submissions.
+- `/decision` always writes episodic decision rows when memory is available.
+  Search/tuning rows (`search_decisions`, `candidate_lines`,
+  `decision_snapshots`) are written only when `RIFTBOUND_SEARCH=on`, candidate
+  lines are present, and `RIFTBOUND_CAPTURE_SEAT` (if set) matches the deciding
+  seat.
+- `/outcome` updates the latest unresolved decision for a game. `/game_over`
+  writes the final game row and backfills searched decisions with
+  `game_outcome`, `final_score_diff`, and `went_first`; include
+  `first_player_index` for self-play so initiative stays queryable.
+- `/card_event` must carry the engine-stamped base `card_def_id` as the
+  aggregation key. Instance ids such as `garen-2` are copy ids, not safe
+  definition ids.
+- `/turn_snapshot` is one row per completed turn per AI seat, not per decision.
+  Its resource scalars intentionally reflect the just-finished turn because
+  Godot emits it before rune pools empty.
+- Offline self-play capture writes JSONL records with the same logical kinds
+  (`decision`, `outcome`, `decision_metrics`, `card_event`, `opponent_action`,
+  `turn_snapshot`, `game_over`) and `import_selfplay_logs.py` replays them
+  through the same `capture.py` helpers.
 
 ## Architecture
 
@@ -303,10 +340,22 @@ analyst design (counterfactual missed wins / later goals, hypothesis loop):
 - `search_decisions` — one row per searched decision: chosen/best score, regret,
   score margin, the chosen line's raw feature vector (`chosen_features_json`) and
   `score_breakdown`, search stats, `selector_source` (`llm` | `fallback` |
-  `argmax`), `origin`, and the deciding seat (`my_player_index`).
+  `argmax`), `origin`, the deciding seat (`my_player_index`), and GoalSet
+  telemetry (`goals_source`, `goal_set_json`, `overlay_json`,
+  `chosen_overlay_delta`, `chosen_goal_achieved_json`) when goals or the
+  Reasoner emit an overlay.
 - `candidate_lines` — every candidate per decision (rank, score, moves, features,
   breakdown) for search-vs-eval-vs-selection error analysis.
 - `decision_snapshots` — full `BriefState` + extracted scalar columns.
+- `reasoner_decisions` — one compact row per `/reason` call: terminal kind,
+  committed line id, root-hash/cache status, investigation flags, tool mix,
+  budget, latency, token use, and short rationale.
+- `card_events` — card lifecycle events keyed by base `card_def_id`.
+- `turn_snapshots` — end-of-turn board/resource pulses for WPA and swing-turn
+  analysis.
+- `client_decision_metrics` / `decision_eval_metrics` — engine- and
+  server-observed reliability metrics; `game_eval_summary` rolls them up on
+  `/game_over`.
 - Backfilled on `/game_over`: `game_outcome`, `final_score_diff`, and
   `went_first` (seat-aware, so two-seat self-play under one `game_id` is not
   cross-contaminated). `games` also stores `first_player_index` and `seed`.
@@ -430,7 +479,6 @@ Engine-side env vars consumed by `Scripts/AI/AIPlayer.gd`:
 | `RIFTBOUND_SELFPLAY_CAPTURE` | (unset) | When set (a log path, or `1`/`on` for the default `res://out/selfplay_capture.jsonl`), run fully offline: compute argmax locally, skip the server, and append every server-bound payload to the JSONL log for `import_selfplay_logs.py`. Forces search mode on. |
 | `RIFTBOUND_ENGINE_SERVER` | `on` | Starts the local Godot `EngineServer` for Python live tools unless set to `0`, `false`, `no`, or `off`. Offline capture mode never starts it. |
 | `RIFTBOUND_ENGINE_PORT` | `8766` | Port used by Godot's `EngineServer`; must match Python's `RIFTBOUND_ENGINE_PORT`. |
-| `RIFTBOUND_SELFPLAY_CAPTURE` | (unset) | When set (a log path, or `1`/`on` for the default `res://out/selfplay_capture.jsonl`), run fully offline: compute argmax locally, skip the server, and append every server-bound payload to the JSONL log for `import_selfplay_logs.py`. Forces search mode on. |
 
 ## AI Evaluation
 

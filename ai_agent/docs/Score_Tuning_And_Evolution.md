@@ -215,7 +215,7 @@ applies to argmax / selector-only games:
 - **eval error** — best line generated but mis-scored (**this** is the tuning
   target).
 
-With goals / future Reasoner, also triage **goal error**, **investigation /
+With goals / Reasoner enabled, also triage **goal error**, **investigation /
 commit error**, and **horizon/setup miss** (counterfactual better later goal).
 Full taxonomy: `LLM_Data_Analysis_Loop.md` §4. Routing correctly prevents tuning
 weights to fix a search, goal, or tool-use problem.
