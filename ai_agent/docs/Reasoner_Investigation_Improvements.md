@@ -47,7 +47,12 @@ lines by reference — or emits a non-empty GoalSet when tactics remain open.
 
 
 
-## 2. Evidence (bounded playtest sample)
+## 2. Historical evidence (bounded pre-fix playtest sample)
+
+This section records the playtest failures that motivated the redesign. It is
+not a list of current expected behavior; §5 and
+`Reasoner_Investigation_Acceptance.md` describe the shipped mitigations and
+remaining operator-run acceptance work.
 
 Source: `ai_agent/agent_search.log` Reasoner turns 2, 4, 6, 8.
 

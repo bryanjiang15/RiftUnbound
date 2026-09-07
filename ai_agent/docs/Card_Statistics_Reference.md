@@ -87,10 +87,11 @@ Cards below `--min-plays` (default 20) are bucketed into a low-sample section.
 | Win-rate-when-played | `win_rate_when_played` | (won games where it was played) ÷ (finished games where it was played) | **survivorship/selection biased** — the AI plays good cards in winning spots, so this overstates causation. Compare against `base_win_rate`, shown green/red in the report. |
 | Deaths | `deaths` | count of `died` events | raw, not yet a rate |
 
-> **WPA (win-probability added) is intentionally omitted.** The honest impact
-> metric needs per-turn win-probability from a `turn_snapshots` table, which is
-> not implemented yet. Until then, `win_rate_when_played` is the only
-> outcome-linked signal and must be read with the bias caveat.
+> **WPA (win-probability added) is intentionally omitted from the report.**
+> End-of-turn board/resource pulses are captured in `turn_snapshots`, but
+> `card_report.py` does not yet derive per-turn win probability or ΔWP from
+> those snapshots. Until then, `win_rate_when_played` is the only outcome-linked
+> signal and must be read with the bias caveat.
 
 ### Caveats baked into the report
 1. **Survivorship bias** — `win_rate_when_played` is confounded by the AI

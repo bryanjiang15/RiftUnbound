@@ -137,7 +137,10 @@ it the LLM invents metric names that compile to no-ops. Net prompt size ≈ neut
 - `/decision` reuses the cached GoalSet from `/goals` for server-side re-ranking
   and persists `goals_source='strategist'`, `goal_set_json`, `overlay_json`,
   `chosen_overlay_delta`, and `chosen_goal_achieved_json` on
-  `search_decisions` when search capture is active.
+  `search_decisions` when search capture is active. Goal achievement is evaluated
+  from the GoalSet fields and chosen-line features even when some goals compile
+  to a partial or empty overlay, so dropped overlay terms do not erase
+  achieved-at-leaf diagnostics.
 - If the Phase-3 Reasoner emits goals, the same columns are persisted with
   `goals_source='reasoner'`. If the Reasoner commits a direct line, join
   `reasoner_decisions` on `(game_id, turn)` (and `decision_index` when present)

@@ -98,6 +98,8 @@ self-play import). Details in §2.
 - `search_stats_json` — nodes/branches/beam/elapsed/stopped_reason
 - `selector_source` (`llm`|`fallback`|`argmax`|`single`), `selector_reasoning`
 - `origin` (`self_play`|`vs_human`|`vs_heuristic`)
+- GoalSet / overlay telemetry: `goals_source`, `goal_set_json`, `overlay_json`,
+  `chosen_overlay_delta`, `chosen_goal_achieved_json`
 - backfilled at game end: `game_outcome`, `final_score_diff`, `went_first`
 - `weight_version_id` FK → `weight_versions`
 - `timestamp`
@@ -135,10 +137,38 @@ control for it:
 ### E. Supporting tables
 - **`turn_snapshots`** — per turn: score, board might, card/rune counts, bf
   control → win-probability curves, swing-turn detection, WPA basis for cards.
+- **`reasoner_decisions`** — per `/reason`: terminal/fallback outcome, chosen
+  line, root/cache state, investigation flags, tool mix, selected-source
+  lineage, budget, latency, token use, and short rationale.
 - **`weight_versions`** — `id`, `profile_hash`, `profile_json`, `git_sha`,
   `created_at`. Every result attributable to a profile version (essential for A/B).
 - **`tuning_runs`** — proposed weight delta, validation match results (win-rate,
   SPRT verdict), accepted/rejected, parent/child `weight_version_id`.
+
+### F. `reasoner_decisions` — compact `/reason` telemetry
+- Identity: `game_id`, `turn`, `decision_index`, `root_state_hash`
+- Terminal result: `terminal_kind`, `committed`, `chosen_line_id`,
+  `chosen_line_complete`, `fallback_reason`, `cache_hit`
+- Investigation quality flags: `investigation_satisfied`,
+  `investigation_exemption`, `novel_investigation`, `local_fork_attempted`,
+  `novel_suffix_found`, `comparison_required`, `scout_agreement`,
+  `score_primary_rationale`
+- Search/tool health: `failed_search_calls`, `recovered_failed_searches`,
+  `unique_sequence_count`, `max_complete_line_length`, `tool_mix_json`,
+  `selected_source_lineage_json`, `budget_json`
+- Cost/latency: `reasoner_latency_ms`, `engine_latency_ms`, `model_calls`,
+  `prompt_tokens`, `completion_tokens`
+- `rationale_short`, `timestamp`
+
+### G. `turn_snapshots` — end-of-turn board pulse
+- Identity: `game_id`, `turn`, `my_player_index`, `turn_player_index`
+- Scalars: `my_score`, `opp_score`, `my_energy`, `board_might_diff`,
+  `cards_in_hand`, `cards_in_hand_opp`, `bf_control_net`, `my_rune_count`,
+  `my_ready_rune_count`
+- `brief_state_json` stores the compact normalized `BriefState` for later
+  counterfactual review / WPA derivation.
+- Emitted once per completed turn per AI seat after cleanup/stun clear and
+  before rune pools empty or `turn_number` increments.
 
 ---
 
@@ -343,7 +373,7 @@ attribution.
    `origin`, `went_first`, `chosen_features_json`).
 3. `/game_over` backfill (`game_outcome`, `final_score_diff`, `first_player_index`).
 4. `card_events` + `card_report.py` / `card_stats` aggregates (WPA still needs
-   `turn_snapshots`).
+   ΔWP derivation from captured `turn_snapshots`).
 5. Argmax short-circuit + headless self-play (`SelfPlaySim`) + offline JSONL
    capture / `import_selfplay_logs.py`.
 6. Texel proposer (`texel_tune.py`) + `feature_report.py`.

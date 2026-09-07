@@ -187,7 +187,7 @@ design and partial implementation:
 | Piece | Status |
 |---|---|
 | Search tuning dataset (`search_decisions`, etc.) | **Shipped** — see `Statistical_Analysis_Storage.md` / README |
-| Card event stats (`card_events`, `card_report.py`) | **Shipped** (WPA needs `turn_snapshots`) |
+| Card event stats (`card_events`, `card_report.py`) | **Shipped** (WPA still needs ΔWP derivation from captured `turn_snapshots`) |
 | Texel weight proposer | **Shipped** (`texel_tune.py`) |
 | Post-game LLM analyst + counterfactual line search | **Design** — `LLM_Data_Analysis_Loop.md` |
 | Persistent strategic lessons in the live prompt | Not started (`Memory_Roadmap.md`) |
@@ -206,7 +206,7 @@ lessons; weight/profile updates from the analysis loop are the intended bridge.
 | `get_full_state` | Read | Full board description text from Godot |
 | `get_zone(zone_id)` | Read | Focused description of one zone (hand, base, battlefield, runes) |
 | `get_card_detail(card_id)` | Read | Full card definition JSON from Data/Cards/ |
-| `get_opponent_history` | Read | Opponent public info — score, hand size, base units (no history) |
+| `get_opponent_history` | Read | Same-game visible opponent action history from `opponent_actions` |
 | `lookup_rule(query)` | Read | Keyword search over implementation rules doc |
 | `simulate_move(move)` | Helper | Engine-truth result of one move (Phase 2.5): structured facts from Godot's rules engine run on a clone, not a heuristic guess |
 | `simulate_line(moves[])` | Helper | Engine-truth result of a scripted multi-step line of the AI's own moves (e.g. enter combat then play a trick) |

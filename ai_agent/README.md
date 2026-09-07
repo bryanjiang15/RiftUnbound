@@ -217,6 +217,10 @@ Operational constraints:
   can mirror the server's actual mode.
 - `RIFTBOUND_ENGINE_PORT` is shared by Python (`engine_client.py`) and Godot
   (`AIPlayer.gd` / `EngineServer.gd`). Change both environments together.
+- Godot's `AIPlayer.gd` request timeout is 60 seconds for `/health`, `/goals`,
+  `/reason`, and `/decision`. Keep live retry/backoff settings within that
+  window; batch eval profiles can use longer provider backoff because they are
+  not waiting on a live Godot turn.
 - Set engine-side `RIFTBOUND_ENGINE_SERVER=0` only when intentionally testing the
   Phase-1 fallback path. Live `search_for` / `deepen` calls need the server.
 - `EngineServer` operates only on a cloned, pinned decision state and runs heavy
