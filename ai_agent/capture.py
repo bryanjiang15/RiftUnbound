@@ -170,6 +170,13 @@ def _goal_telemetry(
     }
 
 
+def _selection_score(line: CandidateLine) -> float:
+    """Ranking key used by live choose_line / argmax (risk-adjusted when present)."""
+    if line.risk_adjusted_score is not None:
+        return float(line.risk_adjusted_score)
+    return float(line.score)
+
+
 def capture_search_decision(
     *,
     memory: Memory,
@@ -183,20 +190,27 @@ def capture_search_decision(
     goals_source: Optional[str] = None,
     goal_set: Optional[GoalSet] = None,
     overlay: Optional[ProfileOverlay] = None,
+    candidate_lines: Optional[list[CandidateLine]] = None,
 ) -> None:
-    """Persist the search_decisions / candidate_lines / decision_snapshots rows."""
-    candidates = list(request.candidate_lines or [])
+    """Persist the search_decisions / candidate_lines / decision_snapshots rows.
+
+    Pass ``candidate_lines`` when live selection used an enriched list (e.g. after
+    ``enrich_lines_with_risk``); otherwise ``request.candidate_lines`` is stored.
+    """
+    candidates = list(
+        candidate_lines if candidate_lines is not None else (request.candidate_lines or [])
+    )
     if not candidates:
         return
-    ranked = sorted(candidates, key=lambda c: c.score, reverse=True)
-    best_score = ranked[0].score
-    second_score = ranked[1].score if len(ranked) > 1 else None
+    ranked = sorted(candidates, key=_selection_score, reverse=True)
+    best_score = _selection_score(ranked[0])
+    second_score = _selection_score(ranked[1]) if len(ranked) > 1 else None
     score_margin = (best_score - second_score) if second_score is not None else None
 
     chosen = None
     if decision.chosen_line_id:
         chosen = next((c for c in candidates if c.line_id == decision.chosen_line_id), None)
-    chosen_score = chosen.score if chosen is not None else None
+    chosen_score = _selection_score(chosen) if chosen is not None else None
     regret = (best_score - chosen_score) if chosen_score is not None else None
 
     cand_rows = []
@@ -212,6 +226,11 @@ def capture_search_decision(
                 "features": c.features,
                 "resolved_state": c.resolved_state,
                 "search_state": c.search_state,
+                "risk": c.risk or None,
+                "risk_penalty": c.risk_penalty,
+                "risk_adjusted_score": c.risk_adjusted_score,
+                "risk_adjustment_method": c.risk_adjustment_method,
+                "risk_expanded": bool(c.risk_expanded),
             }
         )
 
@@ -287,12 +306,14 @@ def capture_decision(
     goals_source: Optional[str] = None,
     goal_set: Optional[GoalSet] = None,
     overlay: Optional[ProfileOverlay] = None,
+    candidate_lines: Optional[list[CandidateLine]] = None,
 ) -> None:
     """Persist all rows for one produced decision (episodic + eval + tuning).
 
     Mirrors the side effects of the ``/decision`` endpoint so the live HTTP path
     and the offline importer write identical data. ``decision`` must already be
-    computed (argmax / selector) by the caller.
+    computed (argmax / selector) by the caller. Pass ``candidate_lines`` when the
+    selector saw a risk-enriched list rather than the raw request payload.
     """
     game_id = request.game_id
 
@@ -324,8 +345,11 @@ def capture_decision(
 
     # Capture the tuning dataset row when this decision came from the engine
     # search. When a capture-seat filter is active, store only that seat's rows.
+    lines_for_capture = (
+        candidate_lines if candidate_lines is not None else request.candidate_lines
+    )
     capture_ok = capture_seat is None or brief_state.get("my_player_index") == capture_seat
-    if search_enabled and request.candidate_lines and capture_ok:
+    if search_enabled and lines_for_capture and capture_ok:
         try:
             decision_index = memory._decision_counters.get(game_id, 0) - 1
             capture_search_decision(
@@ -340,6 +364,7 @@ def capture_decision(
                 goals_source=goals_source,
                 goal_set=goal_set,
                 overlay=overlay,
+                candidate_lines=list(lines_for_capture),
             )
         except Exception as exc:
             logger.warning("Search decision capture failed: %s", exc)

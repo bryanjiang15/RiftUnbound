@@ -442,6 +442,8 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
     overlay = None
     goal_set = None
     goals_source = "none"
+    # Risk-enriched candidates used for selection; also what we persist for audit.
+    candidate_lines: list[CandidateLine] | None = None
     if _search_enabled and request.candidate_lines:
         # With fewer than two candidate lines there is nothing to bias/select, so
         # skip the strategist overlay (choose_line will short-circuit to the single
@@ -516,6 +518,7 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
         goals_source=goals_source,
         goal_set=goal_set,
         overlay=overlay,
+        candidate_lines=candidate_lines,
     )
 
     # Write human-readable decision log

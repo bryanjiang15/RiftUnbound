@@ -216,7 +216,12 @@ CREATE TABLE IF NOT EXISTS candidate_lines (
     breakdown_json      TEXT,
     features_json       TEXT,
     resolved_state_json TEXT,
-    search_state_json   TEXT
+    search_state_json   TEXT,
+    risk_json           TEXT,
+    risk_penalty        REAL,
+    risk_adjusted_score REAL,
+    risk_adjustment_method TEXT,
+    risk_expanded       INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_cand_lines_dec ON candidate_lines (search_decision_id);
 
@@ -413,6 +418,11 @@ class Memory:
             ],
             "candidate_lines": [
                 "search_state_json TEXT",
+                "risk_json TEXT",
+                "risk_penalty REAL",
+                "risk_adjusted_score REAL",
+                "risk_adjustment_method TEXT",
+                "risk_expanded INTEGER NOT NULL DEFAULT 0",
             ],
             "decision_snapshots": [
                 "analysis_state_json TEXT",
@@ -729,13 +739,15 @@ class Memory:
             )
             decision_id = int(cur.lastrowid)  # type: ignore[arg-type]
             for cand in candidates or []:
+                risk = cand.get("risk")
                 conn.execute(
                     """
                     INSERT INTO candidate_lines
                       (search_decision_id, line_id, rank, score, chosen,
                        moves_json, breakdown_json, features_json, resolved_state_json,
-                       search_state_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       search_state_json, risk_json, risk_penalty, risk_adjusted_score,
+                       risk_adjustment_method, risk_expanded)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         decision_id,
@@ -748,6 +760,11 @@ class Memory:
                         json.dumps(cand.get("features")) if cand.get("features") is not None else None,
                         json.dumps(cand.get("resolved_state")) if cand.get("resolved_state") is not None else None,
                         json.dumps(cand.get("search_state")) if cand.get("search_state") is not None else None,
+                        json.dumps(risk) if risk is not None else None,
+                        cand.get("risk_penalty"),
+                        cand.get("risk_adjusted_score"),
+                        cand.get("risk_adjustment_method"),
+                        1 if cand.get("risk_expanded") else 0,
                     ),
                 )
             return decision_id

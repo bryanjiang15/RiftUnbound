@@ -22,6 +22,7 @@ static func run(assertions) -> void:
 	_test_resolved_state_play_to_base_lists_unit_in_base(assertions)
 	_test_line_risk_probe_smoke(assertions)
 	_test_risk_score_mirrors_python(assertions)
+	_test_risk_adjusted_argmax_prefers_safer_line(assertions)
 
 
 # A structural signature of the decision-relevant state. Two states with the same
@@ -336,3 +337,57 @@ static func _test_risk_score_mirrors_python(assertions) -> void:
 		float(ranked[0].get("risk_adjusted_score", 0.0)) >= float(ranked[1].get("risk_adjusted_score", 0.0)),
 		"annotate_lines sorts by risk_adjusted_score desc"
 	)
+
+
+# Synthetic interrupt risk: high unanswered score loses to a safer lower-raw line
+# when ranking uses risk_adjusted_score (same key as offline AIPlayer argmax).
+static func _test_risk_adjusted_argmax_prefers_safer_line(assertions) -> void:
+	var RiskScoreScript = preload("res://Scripts/Game/RiskScore.gd")
+	var risky := {
+		"line_id": "risky-high-raw",
+		"score": 10.0,
+		"moves": ["play unit-a", "end turn"],
+		"risk": {
+			"risk_worst": -9.0,
+			"risk_expected": -9.0,
+			"threats": [{"window_delta": -9.0}],
+		},
+	}
+	var safer := {
+		"line_id": "safer-lower-raw",
+		"score": 6.0,
+		"moves": ["play unit-b", "end turn"],
+		"risk": {
+			"risk_worst": 0.0,
+			"risk_expected": 0.0,
+			"threats": [],
+		},
+	}
+	# Raw score order would prefer risky; risk-adjusted must flip to safer.
+	assertions.assert_true(float(risky["score"]) > float(safer["score"]),
+		"fixture: risky has higher unanswered score")
+	var ranked: Array = RiskScoreScript.annotate_lines([risky, safer])
+	assertions.assert_eq(ranked.size(), 2, "two lines annotated")
+	assertions.assert_eq(str(ranked[0].get("line_id", "")), "safer-lower-raw",
+		"safer line ranks first by risk_adjusted_score")
+	assertions.assert_true(
+		abs(float(ranked[0].get("risk_adjusted_score", -1)) - 6.0) < 0.001,
+		"safer risk_adjusted stays at unanswered score")
+	assertions.assert_true(
+		abs(float(ranked[1].get("risk_adjusted_score", -1)) - 1.0) < 0.001,
+		"risky risk_adjusted is score + expected penalty")
+
+	var best: Dictionary = {}
+	var best_score := -INF
+	for line in ranked:
+		if not (line is Dictionary):
+			continue
+		var moves: Array = line.get("moves", [])
+		if moves.is_empty():
+			continue
+		var s := RiskScoreScript.rank_score(line)
+		if s > best_score:
+			best_score = s
+			best = line
+	assertions.assert_eq(str(best.get("line_id", "")), "safer-lower-raw",
+		"argmax by rank_score selects the safer line")

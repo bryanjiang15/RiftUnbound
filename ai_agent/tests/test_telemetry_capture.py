@@ -267,6 +267,75 @@ def test_capture_search_decision_persists_goal_fields(mem: Memory, monkeypatch):
     assert achieved["runes"]["met"] is True
 
 
+def test_capture_search_decision_persists_risk_adjusted_rank(mem: Memory):
+    """Live selection ranks by risk_adjusted_score; capture must audit that order."""
+    risky = CandidateLine(
+        line_id="risky-high-raw",
+        score=10.0,
+        moves=["play unit-a", "end turn"],
+        risk={"risk_worst": -9.0, "risk_expected": -9.0, "threats": [{"window_delta": -9.0}]},
+        risk_penalty=-9.0,
+        risk_adjusted_score=1.0,
+        risk_adjustment_method="expected",
+        risk_expanded=False,
+    )
+    safer = CandidateLine(
+        line_id="safer-lower-raw",
+        score=6.0,
+        moves=["play unit-b", "end turn"],
+        risk={"risk_worst": 0.0, "risk_expected": 0.0, "threats": []},
+        risk_penalty=0.0,
+        risk_adjusted_score=6.0,
+        risk_adjustment_method="expected",
+        risk_expanded=False,
+    )
+    # Request still has raw (pre-enrich) order by unanswered score.
+    request = DecisionRequest(
+        brief_state=BriefState.model_validate(_brief()),
+        game_id="g1",
+        candidate_lines=[risky, safer],
+    )
+    decision = Decision(
+        reasoning="Risk-argmax: selected the highest risk_adjusted_score searched line.",
+        move=Move(action="play_card", card_id="unit-b"),
+        chosen_line_id="safer-lower-raw",
+        selector_source="argmax",
+    )
+    capture_mod.capture_search_decision(
+        memory=mem,
+        game_id="g1",
+        decision_index=0,
+        brief_state=_brief(),
+        request=request,
+        decision=decision,
+        origin="self_play",
+        weight_resolver=lambda _p: None,
+        candidate_lines=[risky, safer],
+    )
+    with mem._connect() as conn:
+        dec = conn.execute("SELECT * FROM search_decisions").fetchone()
+        rows = conn.execute(
+            "SELECT * FROM candidate_lines ORDER BY rank ASC"
+        ).fetchall()
+    assert dec["best_candidate_score"] == pytest.approx(6.0)
+    assert dec["chosen_line_score"] == pytest.approx(6.0)
+    assert dec["regret"] == pytest.approx(0.0)
+    assert len(rows) == 2
+    assert rows[0]["line_id"] == "safer-lower-raw"
+    assert rows[0]["rank"] == 0
+    assert rows[0]["score"] == pytest.approx(6.0)
+    assert rows[0]["risk_adjusted_score"] == pytest.approx(6.0)
+    assert rows[0]["risk_penalty"] == pytest.approx(0.0)
+    assert rows[0]["risk_adjustment_method"] == "expected"
+    assert rows[0]["chosen"] == 1
+    assert rows[1]["line_id"] == "risky-high-raw"
+    assert rows[1]["rank"] == 1
+    assert rows[1]["score"] == pytest.approx(10.0)
+    assert rows[1]["risk_adjusted_score"] == pytest.approx(1.0)
+    risk = json.loads(rows[1]["risk_json"])
+    assert risk["risk_worst"] == pytest.approx(-9.0)
+
+
 def test_search_decisions_goal_columns_migrate(tmp_path: Path):
     db = tmp_path / "old.db"
     with sqlite3.connect(str(db)) as conn:

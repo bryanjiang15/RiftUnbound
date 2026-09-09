@@ -634,4 +634,3 @@ static func _test_diverse_beam_reserves_unique_openers(assertions) -> void:
 		keys.append(TurnSearchScript.cluster_key_from_steps(node.get("steps", [])))
 	assertions.assert_true("play falling-star" in keys, "beam keeps the high-score opener")
 	assertions.assert_true("use legend-p0" in keys, "beam reserves a slot for the distinct setup opener")
-
