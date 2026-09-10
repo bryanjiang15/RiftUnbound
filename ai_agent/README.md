@@ -105,6 +105,14 @@ uvicorn ai_agent.main:app --port 8765 --reload
 | `/decision` | POST | Main entry — receives BriefState, returns Decision |
 | `/goals` | POST | Pre-search handshake — receives BriefState, returns this turn's compiled goal overlay (empty unless `RIFTBOUND_GOALS=on`) |
 | `/reason` | POST | Phase-3 pre-search handshake — receives BriefState, scout lines, and `root_state_hash`; returns `base_search_fallback`, a compiled overlay, or a committed verified line |
+| `/outcome` | POST | Engine acceptance/rejection result for the most recent decision |
+| `/game_over` | POST | Finished-game outcome; also backfills tuning rows with outcome, score diff, and initiative |
+| `/decision_metrics` | POST | Engine-observed latency/retry/fallback metrics for one AI decision |
+| `/opponent_action` | POST | Visible opponent action history for same-game context |
+| `/card_event` | POST | Card lifecycle event for card statistics (`drawn`, `played`, `died`, etc.) |
+| `/turn_snapshot` | POST | End-of-turn BriefState pulse for swing/WPA analysis |
+| `/eval_report` | GET | Aggregate reliability and feedback scorecard |
+| `/card_stats` | GET | Per-card aggregate statistics (`min_plays` query parameter) |
 | `/health` | GET | Liveness check |
 | `/legal_moves` | GET | Current enumerated legal moves (debug) |
 | `/state` | GET | Full board state text (debug) |
@@ -294,22 +302,58 @@ Rows recorded before this feature show zero tokens.
 ## Tuning dataset (search mode)
 
 When `RIFTBOUND_SEARCH` is on, every engine-searched decision is captured for
-later score tuning (see `docs/Statistical_Analysis_Storage.md`). Post-game
-analyst design (counterfactual missed wins / later goals, hypothesis loop):
+later score tuning, card statistics, and post-game review (see
+`docs/Statistical_Analysis_Storage.md`). Post-game analyst design
+(counterfactual missed wins / later goals, hypothesis loop):
 `docs/LLM_Data_Analysis_Loop.md`.
 
 - `weight_versions` — the active `Data/AI/scoring_profile.json`, hashed + tagged
-  with the current git SHA, recorded on server start.
+  with the current git SHA, recorded on server start. Search requests can also
+  carry a per-seat profile JSON; each distinct profile gets its own row.
 - `search_decisions` — one row per searched decision: chosen/best score, regret,
   score margin, the chosen line's raw feature vector (`chosen_features_json`) and
   `score_breakdown`, search stats, `selector_source` (`llm` | `fallback` |
-  `argmax`), `origin`, and the deciding seat (`my_player_index`).
+  `argmax`), `origin`, and the deciding seat (`my_player_index`). When goals or
+  the Reasoner produce an overlay, the row also stores `goals_source`,
+  `goal_set_json`, `overlay_json`, `chosen_overlay_delta`, and
+  `chosen_goal_achieved_json`.
 - `candidate_lines` — every candidate per decision (rank, score, moves, features,
   breakdown) for search-vs-eval-vs-selection error analysis.
 - `decision_snapshots` — full `BriefState` + extracted scalar columns.
+- `reasoner_decisions` — compact `/reason` investigation telemetry:
+  terminal kind, commit/fallback flags, tool mix, budgets, selected lineage, and
+  token/latency summary.
+- `turn_snapshots` — end-of-turn board pulses after Ending Phase cleanup and
+  before `turn_number++`, used for swing-turn and future WPA analysis.
+- `card_events` — card lifecycle events keyed by base `definition_id`; never
+  derive the base id by stripping an instance suffix.
 - Backfilled on `/game_over`: `game_outcome`, `final_score_diff`, and
   `went_first` (seat-aware, so two-seat self-play under one `game_id` is not
   cross-contaminated). `games` also stores `first_player_index` and `seed`.
+
+### Inspecting captured telemetry
+
+Use a dedicated DB for experiments (`RIFTBOUND_DB_PATH=ai_agent/selfplay.db`) so
+live-play history and bulk self-play data stay separate. Useful spot checks:
+
+```bash
+sqlite3 ai_agent/selfplay.db <<'SQL'
+.tables
+SELECT id, substr(profile_hash, 1, 12) AS profile, substr(git_sha, 1, 8) AS git
+  FROM weight_versions ORDER BY id DESC LIMIT 5;
+SELECT game_id, turn, my_player_index, selector_source, goals_source,
+       ROUND(regret, 3) AS regret, ROUND(chosen_overlay_delta, 3) AS overlay_delta
+  FROM search_decisions ORDER BY id DESC LIMIT 10;
+SELECT game_id, turn, terminal_kind, committed, fallback_reason
+  FROM reasoner_decisions ORDER BY id DESC LIMIT 10;
+SELECT game_id, turn, my_player_index, my_score, opp_score, board_might_diff
+  FROM turn_snapshots ORDER BY id DESC LIMIT 10;
+SQL
+```
+
+If `search_decisions.goals_source='none'` on a turn where the Reasoner committed
+a line, check `reasoner_decisions` for the same `(game_id, turn)`: committed
+Reasoner lines clear the overlay cache before the following `/decision` row.
 
 ### Self-play data generation
 
@@ -340,6 +384,8 @@ the argmax decision locally and appends every server-bound payload to a JSONL
 file — **no server needs to be running**. After the run, replay the log into
 SQLite with `ai_agent/import_selfplay_logs.py`, which writes identical rows via
 the same `ai_agent/capture.py` helpers the live `/decision` endpoint uses.
+Offline capture is for base argmax search data; it does not run LLM goals or
+Reasoner live tools.
 
 ```bash
 # 1. Run N games with NO server. RIFTBOUND_SELFPLAY_CAPTURE points at the log
@@ -430,7 +476,6 @@ Engine-side env vars consumed by `Scripts/AI/AIPlayer.gd`:
 | `RIFTBOUND_SELFPLAY_CAPTURE` | (unset) | When set (a log path, or `1`/`on` for the default `res://out/selfplay_capture.jsonl`), run fully offline: compute argmax locally, skip the server, and append every server-bound payload to the JSONL log for `import_selfplay_logs.py`. Forces search mode on. |
 | `RIFTBOUND_ENGINE_SERVER` | `on` | Starts the local Godot `EngineServer` for Python live tools unless set to `0`, `false`, `no`, or `off`. Offline capture mode never starts it. |
 | `RIFTBOUND_ENGINE_PORT` | `8766` | Port used by Godot's `EngineServer`; must match Python's `RIFTBOUND_ENGINE_PORT`. |
-| `RIFTBOUND_SELFPLAY_CAPTURE` | (unset) | When set (a log path, or `1`/`on` for the default `res://out/selfplay_capture.jsonl`), run fully offline: compute argmax locally, skip the server, and append every server-bound payload to the JSONL log for `import_selfplay_logs.py`. Forces search mode on. |
 
 ## AI Evaluation
 
