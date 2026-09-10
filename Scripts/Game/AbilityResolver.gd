@@ -267,12 +267,15 @@ func _move_unit(params: Dictionary, target: CardInstance, gs: GameState, ctx: Di
 		ps.base_permanents.erase(target)
 	gs.board.add_unit_to_battlefield(target, bf_idx)
 	var log_lines: Array[String] = ["> %s moved to %s" % [target.display_name(), destination]]
-	# Same contested rules as a normal Move: the effect controller is the aggressor.
-	var mover_pi = int(ctx.get("player_index", owner))
+	# The unit's owner is the player who moved in (Attacker). Charm can move an
+	# enemy onto a battlefield you already occupy/control — you defend, they attack.
+	# If they already had units here, this is reinforcing, not initiating.
+	var arriving_pi = owner
 	var bf = gs.board.battlefields[bf_idx]
-	if bf.controller_index != mover_pi or not bf.units[1 - mover_pi].is_empty():
+	if bf.controller_index != arriving_pi or not bf.units[1 - arriving_pi].is_empty():
 		bf.is_contested = true
-		gs.attacker_player_index = mover_pi
+		if bf.units[arriving_pi].size() == 1:
+			gs.attacker_player_index = arriving_pi
 		log_lines.append("> %s is now Contested" % bf.display_name)
 	return log_lines
 

@@ -58,18 +58,14 @@ from .agent import (
 from .goal_compiler import compile_goals
 from .memory import DecisionLogger, Memory
 from .reasoner import empty_reasoner_emit
-from .schemas import Decision, DecisionRequest, GoalsRequest, Move, ReasonRequest
+from .schemas import CandidateLine, Decision, DecisionRequest, GoalsRequest, Move, ReasonRequest
 from .search_log_fmt import (
     BOLD,
     CYAN,
     DIM,
     MAGENTA,
-    YELLOW,
     format_banner,
-    format_breakdown_line,
-    format_delta_line,
-    format_line_header,
-    format_stats_line,
+    format_candidate_corpus,
     paint,
 )
 
@@ -170,6 +166,12 @@ def _current_git_sha() -> str | None:
         return None
 
 
+def _env_on(name: str, default: str = "off") -> bool:
+    """Truthy env flag; ``default`` is used when the variable is unset."""
+    raw = os.environ.get(name, default).strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     global _memory, _decision_logger, _pipeline_mode, _search_enabled
@@ -191,34 +193,11 @@ async def _lifespan(app: FastAPI):
         if requested_pipeline in (PIPELINE_LEGACY, PIPELINE_STAGED)
         else PIPELINE_LEGACY
     )
-    _search_enabled = os.environ.get("RIFTBOUND_SEARCH", "off").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-    _argmax_enabled = os.environ.get("RIFTBOUND_SEARCH_ARGMAX", "off").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-    # Goal-oriented strategist: when on (and search is on, argmax off), an LLM sets
-    # 1–4 per-turn goals that are compiled into a transient scoring overlay biasing
-    # line selection. Off by default so the proven base-profile search stays the
-    # floor and argmax self-play remains LLM-free.
-    _goals_enabled = os.environ.get("RIFTBOUND_GOALS", "off").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-    reasoner_requested = os.environ.get("RIFTBOUND_REASONER", "off").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    _search_enabled = _env_on("RIFTBOUND_SEARCH", "on")
+    _argmax_enabled = _env_on("RIFTBOUND_SEARCH_ARGMAX", "off")
+    # Goal-oriented strategist: off by default; superseded when the Reasoner is on.
+    _goals_enabled = _env_on("RIFTBOUND_GOALS", "off")
+    reasoner_requested = _env_on("RIFTBOUND_REASONER", "on")
     _reasoner_enabled = reasoner_requested and _search_enabled and not _argmax_enabled
     if reasoner_requested and not _reasoner_enabled:
         logger.warning(
@@ -343,41 +322,16 @@ def _log_search_payload(game_id: str, request: DecisionRequest) -> None:
             f"type={request.brief_state.decision_type}"
         )
         lines = format_banner(title)
-        if request.search_stats:
-            lines.append(format_stats_line(request.search_stats.model_dump()))
-        lines.append(paint("Candidate lines:", BOLD))
-        for line in request.candidate_lines:
-            lines.append("")
-            lines.append(format_line_header(line.line_id, float(line.score)))
-            commands = [
-                m.to_command() if hasattr(m, "to_command") else str(m)
-                for m in line.moves
-            ]
-            for i, cmd in enumerate(commands):
-                ctx = line.move_contexts[i] if i < len(line.move_contexts) else {}
-                kind = ctx.get("kind", "scripted")
-                context_text = ctx.get("context", "")
-                if kind == "intermediate":
-                    note = context_text or "auto-resolved decision"
-                    lines.append(
-                        f"  - {cmd}    "
-                        f"{paint('← [intermediate]', DIM + YELLOW)} "
-                        f"{paint(note, DIM)}"
-                    )
-                elif context_text:
-                    lines.append(f"  - {cmd}    {paint(f'({context_text})', DIM)}")
-                else:
-                    lines.append(f"  - {cmd}")
-            lines.append("  " + format_breakdown_line(line.score_breakdown or {}))
-            lines.append("  " + format_delta_line(line.resolved_state or {}))
-            if line.opponent_windows:
-                windows = [w.model_dump() for w in line.opponent_windows]
-                lines.append(
-                    "  "
-                    + paint("Opp windows:", DIM)
-                    + " "
-                    + paint(json.dumps(windows, default=str, separators=(",", ":")), DIM)
-                )
+        lines.extend(
+            format_candidate_corpus(
+                request.candidate_lines,
+                stats=(
+                    request.search_stats.model_dump()
+                    if request.search_stats
+                    else None
+                ),
+            )
+        )
         with open(_SEARCH_LOG_PATH, "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
     except Exception as exc:
@@ -488,6 +442,8 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
     overlay = None
     goal_set = None
     goals_source = "none"
+    # Risk-enriched candidates used for selection; also what we persist for audit.
+    candidate_lines: list[CandidateLine] | None = None
     if _search_enabled and request.candidate_lines:
         # With fewer than two candidate lines there is nothing to bias/select, so
         # skip the strategist overlay (choose_line will short-circuit to the single
@@ -513,11 +469,23 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
                 overlay = None
                 goal_set = None
                 goals_source = "none"
+        from .risk_score import enrich_lines_with_risk
+
+        raw_lines = [line.model_dump() for line in request.candidate_lines]
+        enriched_raw, risk_telem = enrich_lines_with_risk(
+            raw_lines,
+            auto_expand=True,
+            expand_fn=skill_module.expand_risk,
+        )
+        eval_metrics["risk_enrich"] = risk_telem
+        candidate_lines = [
+            CandidateLine.model_validate(ln) for ln in enriched_raw
+        ]
         decision = await choose_line(
             brief_state=brief_state,
             game_id=game_id,
             memory=_memory,
-            candidate_lines=request.candidate_lines,
+            candidate_lines=candidate_lines,
             search_stats=request.search_stats,
             eval_metrics=eval_metrics,
             argmax_only=_argmax_enabled,
@@ -550,6 +518,7 @@ async def decision_endpoint(request: DecisionRequest) -> Decision:
         goals_source=goals_source,
         goal_set=goal_set,
         overlay=overlay,
+        candidate_lines=candidate_lines,
     )
 
     # Write human-readable decision log
@@ -731,6 +700,215 @@ class MoveFeedbackRequest(BaseModel):
     reviewer: str | None = None
 
 
+class AnalysisDecisionKey(BaseModel):
+    game_id: str
+    turn: int
+    decision_index: int
+    persist: bool = True
+    mode: str = "outcome_rollout"  # outcome_rollout | same_turn
+    preset: str = "deep"  # fast | deep
+    future_player_turns: int = 4
+    force_same_turn: bool = False
+    target: dict[str, Any] | None = None
+    budget: dict[str, Any] | None = None
+
+
+class FailureReportRequest(AnalysisDecisionKey):
+    with_counterfactual: bool = True
+    # When set, skip re-running CF and classify against this prior CF result.
+    counterfactual_result: dict[str, Any] | None = None
+
+
+def _json_maybe(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
+_SEARCH_DECISION_UI_KEYS = (
+    "id",
+    "game_id",
+    "turn",
+    "decision_index",
+    "decision_type",
+    "mode",
+    "my_player_index",
+    "chosen_line_id",
+    "chosen_line_score",
+    "best_candidate_score",
+    "regret",
+    "score_margin",
+    "num_candidates",
+    "selector_source",
+    "selector_reasoning",
+    "origin",
+    "timestamp",
+)
+
+_SNAPSHOT_UI_DROP = {
+    "analysis_state_json",
+    "brief_state_json",
+    "brief_state",
+}
+
+
+def _slim_candidate_for_ui(cand: dict[str, Any]) -> dict[str, Any]:
+    """Keep line identity + moves; drop per-candidate search/feature snapshots."""
+    return {
+        "line_id": cand.get("line_id"),
+        "rank": cand.get("rank"),
+        "score": cand.get("score"),
+        "chosen": bool(cand.get("chosen")),
+        "moves": cand.get("moves") or [],
+    }
+
+
+def _slim_search_decision_for_ui(dec: Any) -> Optional[dict[str, Any]]:
+    if not isinstance(dec, dict):
+        return None
+    return {k: dec.get(k) for k in _SEARCH_DECISION_UI_KEYS if k in dec}
+
+
+def _analysis_decision_detail(
+    memory: Memory,
+    *,
+    game_id: str,
+    turn: int,
+    decision_index: int,
+    include_state: bool = True,
+) -> dict[str, Any]:
+    """Bundle for the Analysis UI: load_decision_bundle + episodic row.
+
+    ``include_state=False`` skips shipping ``analysis_state`` (the full GameState
+    dump). Open-on-board fetches that separately via ``/analysis/checkpoint``.
+    Candidates are always slimmed: search_state / features / resolved_state are
+    not needed to list or replay a line.
+    """
+    from .analysis import counterfactual as cf
+
+    bundle = cf.load_decision_bundle(
+        memory,
+        game_id=game_id,
+        turn=turn,
+        decision_index=decision_index,
+        candidate_detail=False,
+        include_analysis_state=include_state,
+    )
+    episodic = memory.get_episodic_decision(
+        game_id=game_id, turn=turn, decision_index=decision_index,
+    )
+    if episodic is not None:
+        episodic = dict(episodic)
+        episodic["move"] = _json_maybe(episodic.get("move_json"))
+        episodic.pop("move_json", None)
+
+    snap = bundle.get("snapshot")
+    analysis_state = None
+    replay = None
+    if include_state:
+        raw_state = snap.get("analysis_state_json") if isinstance(snap, dict) else None
+        if raw_state:
+            parsed = _json_maybe(raw_state)
+            if isinstance(parsed, dict):
+                replay = parsed.get("replay")
+                analysis_state = parsed
+        status = cf.snapshot_status(bundle)
+    elif isinstance(snap, dict) and snap.get("has_analysis_state"):
+        status = cf.STATUS_OK
+    else:
+        status = cf.snapshot_status(bundle)
+    seat = 0
+    dec = bundle.get("search_decision") or {}
+    if dec.get("my_player_index") is not None:
+        seat = int(dec["my_player_index"])
+
+    snap_out = None
+    if isinstance(snap, dict):
+        snap_out = {k: v for k, v in snap.items() if k not in _SNAPSHOT_UI_DROP}
+        snap_out["analysis_state"] = analysis_state
+        snap_out["analysis_state_json"] = None
+
+    return {
+        "game_id": game_id,
+        "turn": turn,
+        "decision_index": decision_index,
+        "seat": seat,
+        "snapshot_status": status,
+        "episodic": episodic,
+        "search_decision": _slim_search_decision_for_ui(bundle.get("search_decision")),
+        "snapshot": snap_out,
+        "root_state_hash": (snap or {}).get("root_state_hash") if snap else None,
+        "replay": replay,
+        "candidates": [_slim_candidate_for_ui(c) for c in (bundle.get("candidates") or [])],
+        "reasoner": bundle.get("reasoner"),
+        "game": bundle.get("game"),
+        "weight_version": {
+            "id": (bundle.get("weight_version") or {}).get("id"),
+            "label": (bundle.get("weight_version") or {}).get("label"),
+        } if bundle.get("weight_version") else None,
+    }
+
+
+def _analysis_checkpoint(
+    memory: Memory,
+    *,
+    game_id: str,
+    turn: int,
+    decision_index: int,
+) -> dict[str, Any]:
+    """Just the restore blob for Open on Board — no candidate / CF payloads."""
+    from .analysis import counterfactual as cf
+
+    with memory._connect() as conn:
+        snap = conn.execute(
+            """
+            SELECT analysis_state_json, root_state_hash
+            FROM decision_snapshots
+            WHERE game_id=? AND turn=? AND decision_index=?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (game_id, turn, decision_index),
+        ).fetchone()
+        dec = conn.execute(
+            """
+            SELECT my_player_index FROM search_decisions
+            WHERE game_id=? AND turn=? AND decision_index=?
+            ORDER BY id DESC LIMIT 1
+            """,
+            (game_id, turn, decision_index),
+        ).fetchone()
+    analysis_state = None
+    replay = None
+    root_hash = None
+    status = cf.STATUS_NO_SNAPSHOT
+    if snap is not None:
+        root_hash = snap["root_state_hash"]
+        parsed = _json_maybe(snap["analysis_state_json"])
+        if isinstance(parsed, dict):
+            analysis_state = parsed
+            replay = parsed.get("replay")
+            if isinstance(replay, dict) and replay.get("supported") is False:
+                status = cf.STATUS_UNSUPPORTED
+            else:
+                status = cf.STATUS_OK
+    seat = 0
+    if dec is not None and dec["my_player_index"] is not None:
+        seat = int(dec["my_player_index"])
+    return {
+        "game_id": game_id,
+        "turn": turn,
+        "decision_index": decision_index,
+        "seat": seat,
+        "root_state_hash": root_hash,
+        "replay": replay,
+        "snapshot_status": status,
+        "analysis_state": analysis_state,
+    }
+
+
 @app.post("/decision_metrics")
 async def decision_metrics_endpoint(body: DecisionMetricsRequest) -> dict:
     """Godot reports engine-observed metrics for one AI decision (eval track)."""
@@ -801,6 +979,197 @@ async def card_stats_endpoint(min_plays: int = 20) -> dict:
     if _memory is None:
         raise HTTPException(status_code=503, detail="Service not ready")
     return _memory.card_stats_report(min_plays=min_plays)
+
+
+# ── Post-game analysis UI ─────────────────────────────────────────────────────
+
+
+@app.get("/analysis/db-status")
+async def analysis_db_status() -> dict:
+    """Self-play / counterfactual readiness checks for agent_memory.db."""
+    if _memory is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    from .analysis import wpa_report
+
+    with _memory._connect() as conn:
+        return wpa_report.validate_db_readiness(conn)
+
+
+@app.get("/analysis/decisions")
+async def analysis_list_decisions(
+    game_id: str | None = None,
+    replay_only: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+) -> dict:
+    """Paginated decision list for the Godot Analysis scene."""
+    if _memory is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    rows = _memory.list_decisions(
+        game_id=game_id,
+        replay_only=replay_only,
+        limit=limit,
+        offset=offset,
+    )
+    return {"decisions": rows, "count": len(rows), "limit": limit, "offset": offset}
+
+
+@app.get("/analysis/decision")
+async def analysis_get_decision(
+    game_id: str,
+    turn: int,
+    decision_index: int,
+    include_state: bool = False,
+) -> dict:
+    """Decision bundle for the Analysis UI.
+
+    Default omits ``analysis_state`` (full GameState dump). Pass
+    ``include_state=true`` or GET ``/analysis/checkpoint`` when restoring
+    the board.
+    """
+    if _memory is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    detail = _analysis_decision_detail(
+        _memory,
+        game_id=game_id,
+        turn=turn,
+        decision_index=decision_index,
+        include_state=include_state,
+    )
+    if (
+        detail.get("episodic") is None
+        and detail.get("search_decision") is None
+        and detail.get("snapshot") is None
+    ):
+        raise HTTPException(status_code=404, detail="Decision not found")
+    return detail
+
+
+@app.get("/analysis/checkpoint")
+async def analysis_get_checkpoint(
+    game_id: str,
+    turn: int,
+    decision_index: int,
+) -> dict:
+    """Restore blob only: analysis_state + hash. Used by Open on Board."""
+    if _memory is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    payload = _analysis_checkpoint(
+        _memory,
+        game_id=game_id,
+        turn=turn,
+        decision_index=decision_index,
+    )
+    if payload.get("analysis_state") is None:
+        raise HTTPException(status_code=404, detail="No analysis_state for this decision")
+    return payload
+
+
+@app.post("/analysis/counterfactual")
+async def analysis_counterfactual(body: AnalysisDecisionKey) -> dict:
+    """Run outcome rollout (default) or same-turn offline counterfactual."""
+    if _memory is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    from .analysis import counterfactual as cf
+
+    try:
+        result = cf.analyze_decision(
+            _memory,
+            game_id=body.game_id,
+            turn=body.turn,
+            decision_index=body.decision_index,
+            persist=body.persist,
+            mode=body.mode,
+            preset=body.preset,
+            future_player_turns=body.future_player_turns,
+            target=body.target,
+            force_same_turn=body.force_same_turn,
+            budget=body.budget,
+        )
+    except Exception as exc:
+        logger.exception("Counterfactual analysis failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {
+        "result": result,
+        "markdown": cf.render_markdown(result),
+    }
+
+
+@app.get("/analysis/counterfactual-runs")
+async def analysis_counterfactual_runs(
+    game_id: str,
+    turn: int,
+    decision_index: int,
+    limit: int = 20,
+    include_result: bool = False,
+) -> dict:
+    """List persisted CF / rollout runs for a decision (newest first).
+
+    Results are omitted by default; fetch one run via
+    ``GET /analysis/counterfactual-runs/{run_id}``.
+    """
+    if _memory is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    rows = _memory.list_counterfactual_runs(
+        game_id=game_id,
+        turn=turn,
+        decision_index=decision_index,
+        limit=limit,
+        include_result=include_result,
+    )
+    return {"runs": rows, "count": len(rows)}
+
+
+@app.get("/analysis/counterfactual-runs/{run_id}")
+async def analysis_counterfactual_run(run_id: int) -> dict:
+    """One persisted CF / rollout run including the full result tree."""
+    if _memory is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    row = _memory.get_counterfactual_run(run_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return row
+
+
+@app.post("/analysis/failure-report")
+async def analysis_failure_report(body: FailureReportRequest) -> dict:
+    """Classify failure modes; optionally run (or reuse) a counterfactual."""
+    if _memory is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    from .analysis import counterfactual as cf
+    from .analysis import failure_modes as fm
+
+    try:
+        bundle = cf.load_decision_bundle(
+            _memory,
+            game_id=body.game_id,
+            turn=body.turn,
+            decision_index=body.decision_index,
+        )
+        cf_result = body.counterfactual_result
+        if cf_result is None and body.with_counterfactual:
+            cf_result = cf.analyze_decision(
+                _memory,
+                game_id=body.game_id,
+                turn=body.turn,
+                decision_index=body.decision_index,
+                persist=body.persist,
+                mode=body.mode,
+                preset=body.preset,
+                future_player_turns=body.future_player_turns,
+                target=body.target,
+                force_same_turn=body.force_same_turn,
+                budget=body.budget,
+            )
+        report = fm.classify_with_counterfactual(bundle, cf_result)
+    except Exception as exc:
+        logger.exception("Failure-report analysis failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {
+        "report": report,
+        "markdown": fm.render_markdown(report),
+        "counterfactual": cf_result,
+    }
 
 
 @app.post("/opponent_action")
@@ -951,12 +1320,16 @@ def _capture_reasoner_row(
     emit: Any,
     committed_line: Optional[dict[str, Any]],
     eval_metrics: Optional[dict[str, Any]] = None,
+    decision_index: Optional[int] = None,
 ) -> None:
     """Best-effort SQL write for one /reason call."""
     if _memory is None or not hasattr(_memory, "record_reasoner_decision"):
         return
     try:
-        decision_index = _memory._decision_counters.get(game_id, 0)
+        # When a line commit also wrote decisions/*, use that allocated index.
+        # Otherwise point at the upcoming /decision index (goals / fallback).
+        if decision_index is None:
+            decision_index = _memory._decision_counters.get(game_id, 0)
         capture_mod.capture_reasoner_decision(
             memory=_memory,
             game_id=game_id,
@@ -1069,6 +1442,28 @@ async def reason_endpoint(request: ReasonRequest) -> dict:
     else:
         _reasoner_overlays.pop(key, None)
 
+    # Reasoner line commits skip /decision on the Godot side — persist the same
+    # episodic / snapshot / search rows here so Analysis UI can list them.
+    allocated_index: Optional[int] = None
+    if (
+        emit.kind == "line"
+        and isinstance(committed_line, dict)
+        and committed_line.get("moves")
+        and _memory is not None
+    ):
+        allocated_index = capture_mod.capture_reasoner_line_decision(
+            memory=_memory,
+            brief_state=brief_state,
+            request=request,
+            committed_line=committed_line,
+            rationale=getattr(emit, "rationale", None),
+            eval_metrics=eval_metrics,
+            search_enabled=_search_enabled,
+            data_origin=_data_origin,
+            capture_seat=_capture_seat,
+            weight_resolver=_resolve_weight_version,
+        )
+
     _capture_reasoner_row(
         game_id=game_id,
         turn=turn,
@@ -1078,6 +1473,7 @@ async def reason_endpoint(request: ReasonRequest) -> dict:
         emit=emit,
         committed_line=committed_line,
         eval_metrics=eval_metrics,
+        decision_index=allocated_index,
     )
     return {
         **emit.model_dump(),

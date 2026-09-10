@@ -1,6 +1,7 @@
 """ANSI-colored, compact formatters for agent_search.log."""
 from __future__ import annotations
 
+import json
 from typing import Any, Mapping
 
 # ESC sequences — render in a terminal (`less -R`, `cat`) or an ANSI Colors
@@ -153,12 +154,306 @@ def format_delta_line(delta: Mapping[str, Any] | None) -> str:
     return paint("Delta:", DIM) + " " + body
 
 
-def format_line_header(line_id: str, score: float) -> str:
+def _fmt_pct(value: float) -> str:
+    pct = max(0.0, min(1.0, float(value))) * 100.0
+    if abs(pct - round(pct)) < 1e-9:
+        return f"{int(round(pct))}%"
+    return f"{pct:.1f}%"
+
+
+def format_risk_line(risk: Mapping[str, Any] | None) -> str:
+    """One-line reaction-risk summary (worst/expected + flags)."""
+    label = paint("Risk:", BOLD + YELLOW)
+    if not risk:
+        return label + " " + paint("—", DIM)
+    parts: list[str] = []
+    threats = list(risk.get("threats") or [])
+    skipped = [
+        s for s in (risk.get("skipped") or [])
+        if isinstance(s, Mapping)
+    ]
+    worst = risk.get("risk_worst")
+    expected = risk.get("risk_expected")
+    if threats and isinstance(worst, (int, float)) and not _is_zeroish(worst):
+        parts.append(f"worst={_signed_num(float(worst))}")
+    elif threats and isinstance(worst, (int, float)):
+        parts.append(f"worst={paint('0', DIM)}")
+    if isinstance(expected, (int, float)) and not _is_zeroish(expected):
+        parts.append(f"expected={_signed_num(float(expected))}")
+    if risk.get("needs_recapture") is True:
+        parts.append(paint("plan_broken", BOLD + RED))
+    if risk.get("can_recapture") is True:
+        parts.append(paint("can_recapture", GREEN))
+    method = str(risk.get("risk_adjustment_method") or "").strip()
+    if method and method != "none":
+        parts.append(paint(f"method={method}", DIM))
+    if not threats and skipped:
+        parts.append(paint("no legal assumed interrupt", YELLOW))
+    elif not threats:
+        parts.append(paint("clear", GREEN))
+    info_mode = str(risk.get("information_mode") or "").strip()
+    if info_mode and threats:
+        parts.append(paint(info_mode, DIM))
+    if threats:
+        parts.append(paint(f"({len(threats)} probed)", DIM))
+    if skipped:
+        skip_bits = []
+        for item in skipped[:6]:
+            card = str(item.get("card_id") or "?")
+            reason = str(item.get("reason") or "skipped")
+            skip_bits.append(f"{card}/{reason}")
+        extra = "" if len(skipped) <= 6 else f" +{len(skipped) - 6}"
+        parts.append(paint(f"skipped[{', '.join(skip_bits)}{extra}]", DIM))
+    body = " ".join(str(p) for p in parts) if parts else paint("clear", GREEN)
+    return label + " " + body
+
+
+def format_risk_threat(threat: Mapping[str, Any]) -> str:
+    """One probed assumed-interrupt threat."""
+    card = str(threat.get("card_id") or threat.get("assumed_card") or "?")
+    parts: list[str] = [paint(card, BOLD + WHITE)]
+    p = threat.get("p_in_hand")
+    if isinstance(p, (int, float)):
+        parts.append(f"p={paint(_fmt_pct(float(p)), CYAN)}")
+    delta = threat.get("window_delta")
+    if isinstance(delta, (int, float)):
+        parts.append(f"Δ={_signed_num(float(delta))}")
+    after_move = str(threat.get("window_after_move") or "").strip()
+    if after_move:
+        parts.append(f"@{paint(after_move, YELLOW)}")
+    if threat.get("plan_broken") is True:
+        parts.append(paint("plan_broken", BOLD + RED))
+    elif threat.get("script_legal") is False:
+        parts.append(paint("script_illegal", RED))
+    broken = list(threat.get("broken_claims") or [])
+    if broken:
+        claims = ", ".join(str(c) for c in broken)
+        parts.append(f"broken=[{paint(claims, MAGENTA)}]")
+    if threat.get("can_recapture") is True:
+        parts.append(paint("recapture_ok", GREEN))
+    recapture = threat.get("score_after_recapture")
+    if isinstance(recapture, (int, float)) and not _is_zeroish(recapture):
+        parts.append(f"after_recapture={_signed_num(float(recapture))}")
+    note = str(threat.get("note") or "").strip()
+    if note:
+        parts.append(paint(note, DIM))
+    return "    · " + " ".join(str(p) for p in parts)
+
+
+def format_risk_block(risk: Mapping[str, Any] | None) -> list[str]:
+    """Summary line plus indented probed threats."""
+    if not risk:
+        return []
+    out = ["  " + format_risk_line(risk)]
+    threats = list(risk.get("threats") or [])
+    ordered = sorted(
+        (t for t in threats if isinstance(t, Mapping)),
+        key=lambda t: float(t.get("window_delta", 0.0) or 0.0),
+    )
+    for threat in ordered:
+        out.append(format_risk_threat(threat))
+    return out
+
+
+def summarize_risk_payload(risk: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Compact risk summary for Reasoner prompts and tool corpora."""
+    if not isinstance(risk, Mapping) or not risk:
+        return {}
+    if "risk_worst" not in risk and "threats" not in risk:
+        return {}
+    out: dict[str, Any] = {}
+    for key in ("risk_worst", "risk_expected", "risk_penalty", "risk_adjusted_score"):
+        val = risk.get(key)
+        if isinstance(val, (int, float)):
+            out[key] = round(float(val), 3)
+    method = str(risk.get("risk_adjustment_method") or "").strip()
+    if method:
+        out["risk_adjustment_method"] = method
+    for key in ("can_recapture", "needs_recapture", "risk_expanded"):
+        if risk.get(key) is True:
+            out[key] = True
+    info = str(risk.get("information_mode") or "").strip()
+    if info:
+        out["information_mode"] = info
+    threats_out: list[dict[str, Any]] = []
+    threats = sorted(
+        (t for t in (risk.get("threats") or []) if isinstance(t, Mapping)),
+        key=lambda t: float(t.get("window_delta", 0.0) or 0.0),
+    )
+    for threat in threats[:3]:
+        card_id = str(threat.get("card_id") or threat.get("assumed_card") or "")
+        if not card_id:
+            continue
+        entry: dict[str, Any] = {"card_id": card_id}
+        p = threat.get("p_in_hand")
+        if isinstance(p, (int, float)):
+            entry["p_in_hand"] = round(float(p), 3)
+        delta = threat.get("window_delta")
+        if isinstance(delta, (int, float)):
+            entry["window_delta"] = round(float(delta), 3)
+        after_move = str(threat.get("window_after_move") or "").strip()
+        if after_move:
+            entry["window_after_move"] = after_move
+        if threat.get("plan_broken") is True:
+            entry["plan_broken"] = True
+        elif threat.get("script_legal") is False:
+            entry["script_legal"] = False
+        broken = list(threat.get("broken_claims") or [])
+        if broken:
+            entry["broken_claims"] = [str(c) for c in broken]
+        if threat.get("can_recapture") is True:
+            entry["can_recapture"] = True
+        recapture = threat.get("score_after_recapture")
+        if isinstance(recapture, (int, float)):
+            entry["score_after_recapture"] = round(float(recapture), 3)
+        note = str(threat.get("note") or "").strip()
+        if note:
+            entry["note"] = note
+        threats_out.append(entry)
+    if threats_out:
+        out["threats"] = threats_out
+    skipped = [
+        {
+            "card_id": str(s.get("card_id") or ""),
+            "reason": str(s.get("reason") or ""),
+        }
+        for s in (risk.get("skipped") or [])
+        if isinstance(s, Mapping) and str(s.get("card_id") or "")
+    ]
+    if skipped:
+        out["skipped"] = skipped[:6]
+    return out
+
+
+def format_line_header(
+    line_id: str,
+    score: float,
+    cluster_key: str = "",
+    cluster_size: int = 0,
+    *,
+    risk_worst: float | None = None,
+    risk_adjusted_score: float | None = None,
+    risk_penalty: float | None = None,
+) -> str:
     colored_score = paint(
         f"{score:+.3f}",
         GREEN if score > 0 else RED if score < 0 else DIM,
     )
-    return f"{paint(line_id, BOLD + CYAN)} | score={colored_score}"
+    header = f"{paint(line_id, BOLD + CYAN)} | score={colored_score}"
+    if risk_adjusted_score is not None:
+        header += f" | risk_adj={_signed_num(float(risk_adjusted_score))}"
+    if risk_penalty is not None and abs(float(risk_penalty)) >= 1e-9:
+        header += f" | penalty={_signed_num(float(risk_penalty))}"
+    if risk_worst is not None and abs(float(risk_worst)) >= 1e-9:
+        header += f" | risk_worst={_signed_num(float(risk_worst))}"
+    if cluster_key and int(cluster_size or 0) > 1:
+        header += (
+            f" | cluster={paint(str(cluster_key), WHITE)}"
+            f" {paint(f'×{int(cluster_size)}', DIM)}"
+        )
+    return header
+
+
+def _line_mapping(line: Any) -> Mapping[str, Any]:
+    if isinstance(line, Mapping):
+        return line
+    if hasattr(line, "model_dump"):
+        return line.model_dump()
+    return {}
+
+
+def _move_command(move: Any) -> str:
+    if hasattr(move, "to_command"):
+        return str(move.to_command())
+    return str(move)
+
+
+def format_candidate_line(line: Any) -> list[str]:
+    """One candidate: id/score, moves, breakdown, delta, risk, opponent windows."""
+    data = _line_mapping(line)
+    line_id = str(data.get("line_id") or "?")
+    try:
+        score = float(data.get("score") or 0.0)
+    except (TypeError, ValueError):
+        score = 0.0
+    risk = data.get("risk")
+    risk_worst: float | None = None
+    if isinstance(risk, Mapping):
+        raw_worst = risk.get("risk_worst")
+        if isinstance(raw_worst, (int, float)):
+            risk_worst = float(raw_worst)
+    risk_adj = data.get("risk_adjusted_score")
+    risk_pen = data.get("risk_penalty")
+    out = [format_line_header(
+        line_id,
+        score,
+        cluster_key=str(data.get("cluster_key") or ""),
+        cluster_size=int(data.get("cluster_size") or 0),
+        risk_worst=risk_worst,
+        risk_adjusted_score=float(risk_adj) if isinstance(risk_adj, (int, float)) else None,
+        risk_penalty=float(risk_pen) if isinstance(risk_pen, (int, float)) else None,
+    )]
+    moves = list(data.get("moves") or [])
+    contexts = list(data.get("move_contexts") or [])
+    for i, move in enumerate(moves):
+        cmd = _move_command(move)
+        ctx = contexts[i] if i < len(contexts) else {}
+        if not isinstance(ctx, Mapping):
+            ctx = {}
+        kind = ctx.get("kind", "scripted")
+        context_text = ctx.get("context", "") or ""
+        if kind == "intermediate":
+            note = context_text or "auto-resolved decision"
+            out.append(
+                f"  - {cmd}    "
+                f"{paint('← [intermediate]', DIM + YELLOW)} "
+                f"{paint(note, DIM)}"
+            )
+        elif context_text:
+            out.append(f"  - {cmd}    {paint(f'({context_text})', DIM)}")
+        else:
+            out.append(f"  - {cmd}")
+    out.append("  " + format_breakdown_line(data.get("score_breakdown") or {}))
+    out.append("  " + format_delta_line(data.get("resolved_state") or {}))
+    windows = data.get("opponent_windows") or []
+    if "risk" in data and isinstance(risk, Mapping):
+        out.extend(format_risk_block(risk))
+    elif windows:
+        out.append(
+            "  "
+            + paint("Risk:", BOLD + YELLOW)
+            + " "
+            + paint("not probed", YELLOW)
+        )
+    if windows:
+        dumped = [
+            w.model_dump() if hasattr(w, "model_dump") else w for w in windows
+        ]
+        out.append(
+            "  "
+            + paint("Opp windows:", DIM)
+            + " "
+            + paint(json.dumps(dumped, default=str, separators=(",", ":")), DIM)
+        )
+    return out
+
+
+def format_candidate_corpus(
+    lines: list[Any] | None,
+    *,
+    stats: Mapping[str, Any] | None = None,
+    heading: str | None = "Candidate lines:",
+) -> list[str]:
+    """Stats + heading + each candidate line. Used by search and Reasoner logs."""
+    out: list[str] = []
+    if stats:
+        out.append(format_stats_line(stats))
+    if heading:
+        out.append(paint(heading, BOLD))
+    for line in lines or []:
+        out.append("")
+        out.extend(format_candidate_line(line))
+    return out
 
 
 def format_banner(title: str) -> list[str]:

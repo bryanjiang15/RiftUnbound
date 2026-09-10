@@ -178,6 +178,11 @@ static func specs() -> Array:
 			"feature_key": "power_used", "weight_key": "power_used",
 			"sign_hint": -1, "doc": "domain power spent root→leaf (small tempo cost)",
 		},
+		{
+			"id": "rune_recycled", "group": "action", "kind": "scalar",
+			"feature_key": "runes_recycled", "weight_key": "rune_recycled",
+			"sign_hint": -1, "doc": "own channeled runes permanently recycled/removed root→leaf",
+		},
 	]
 
 

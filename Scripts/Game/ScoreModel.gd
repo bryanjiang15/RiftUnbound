@@ -73,6 +73,10 @@ static func snapshot(gs: GameState, ai_index: int) -> Dictionary:
 		"my_hand": me.hand.size(),
 		"opp_hand": opp.hand.size(),
 		"my_energy": me.rune_pool.energy,
+		"my_power": _pool_power(me.rune_pool.power),
+		"opp_power": _pool_power(opp.rune_pool.power),
+		"my_legend": _legend_snap(me.legend),
+		"opp_legend": _legend_snap(opp.legend),
 		"my_ready_runes": ready_runes(me),
 		"opp_ready_runes": ready_runes(opp),
 		"my_channeled_runes": me.channeled_runes.size(),
@@ -86,6 +90,26 @@ static func snapshot(gs: GameState, ai_index: int) -> Dictionary:
 		"bf": bf,
 		"bf_scored": bf_scored,
 		"units": units,
+	}
+
+
+static func _pool_power(power: Dictionary) -> Dictionary:
+	## Non-zero domain / spell-rainbow pool counters. Used by structural_hash so
+	## resource-setup (Kai'Sa legend, etc.) is not a transposition of the root.
+	var out: Dictionary = {}
+	for domain in power:
+		var amount := int(power[domain])
+		if amount != 0:
+			out[str(domain)] = amount
+	return out
+
+
+static func _legend_snap(legend: CardInstance) -> Dictionary:
+	if legend == null:
+		return {}
+	return {
+		"id": str(legend.instance_id),
+		"exhausted": legend.is_exhausted,
 	}
 
 
@@ -207,8 +231,11 @@ static func build_score_features(root_snap: Dictionary, leaf_snap: Dictionary, s
 	features["cards_drawn"] = maxi(0, int(leaf_snap.get("my_hand", 0)) - int(root_snap.get("my_hand", 0)))
 	# Spending runes is not penalised (the pool empties each turn anyway, and
 	# reactive_potential already values leftover ready runes); spending domain
-	# power is slightly penalised below as a tempo cost.
+	# power is slightly penalised below as a tempo cost. Permanently recycling a
+	# channeled rune is tracked separately from temporary pool spending.
 	features["power_used"] = maxi(0, int(root_snap.get("my_energy", 0)) - int(leaf_snap.get("my_energy", 0)))
+	features["runes_recycled"] = maxi(0,
+		int(root_snap.get("my_channeled_runes", 0)) - int(leaf_snap.get("my_channeled_runes", 0)))
 
 	var kills := _unit_losses(root_snap, leaf_snap, ai_index)
 	features["enemy_units_killed"] = kills["enemy"]

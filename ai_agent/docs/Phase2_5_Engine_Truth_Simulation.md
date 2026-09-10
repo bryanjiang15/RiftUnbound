@@ -601,6 +601,7 @@ while it stabilizes.
 |---|---|---|
 | `Scripts/Domain/GameState.gd` (+ peer domain classes) | Modified | `clone()` deep-copy methods |
 | `Scripts/Game/MoveSimulator.gd` | Created | Headless clone-apply-quiescence simulator + delta serializer |
+| `Scripts/Game/LineReplayer.gd` / `OutcomeRollout.gd` | Created (later) | Multi-turn / reactive CF tree — **not** an extension of `simulate_line`; composes `TurnSearch` + decision-boundary replay with oracle opponent policy via `/engine/rollout` |
 | `Scripts/AI/AIPlayer.gd` | Modified | Protocol-B continuation handling; trigger pre-sim |
 | `Scripts/AI/BriefStateSerializer.gd` | Modified | Inline single-move pre-sim (option C); shared delta vocabulary |
 | `Scripts/Tests/Tcg/suites/...` | Created/Modified | Clone-fidelity + simulator correctness tests |

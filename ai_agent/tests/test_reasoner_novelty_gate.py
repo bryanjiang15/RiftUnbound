@@ -283,7 +283,13 @@ def test_score_only_rationale_rejected_when_comparison_required():
     )
 
 
-def test_scout_render_includes_resolved_state_and_score_band():
+def test_scout_render_includes_resolved_state_and_score_band(monkeypatch):
+    # With risk ranking off, raw unanswered scores stay hidden by default
+    # (RIFTBOUND_REASONER_HIDE_RAW_SCORE=1). Risk ranking on intentionally
+    # exposes score as unanswered_leaf so risk_adjusted = score + penalty is
+    # interpretable — covered by test_render_scout_lines_includes_risk.
+    monkeypatch.setenv("RIFTBOUND_LINE_RISK", "0")
+    monkeypatch.setenv("RIFTBOUND_RISK_RANK", "0")
     rendered = reasoner._render_scout_lines(
         [
             {
@@ -296,14 +302,40 @@ def test_scout_render_includes_resolved_state_and_score_band():
                 ],
                 "score": 3.93,
                 "score_breakdown": {"points": 2.0},
-                "resolved_state": {"points_scored": 1, "hand_size": 3},
+                "resolved_state": {"runes_recycled": 1, "my_score_after": 3},
                 "complete": True,
                 "opponent_windows": [],
                 "root_state_hash": "root",
             }
         ]
     )
-    assert rendered[0]["resolved_state"]["points_scored"] == 1
+    assert rendered[0]["resolved_state"]["runes_recycled"] == 1
     assert "score_band" in rendered[0]
-    assert "score" not in rendered[0]  # hidden by default
+    assert "score" not in rendered[0]  # hidden by default when risk rank off
     assert rendered[0]["strategic_prefix_moves"] == ["play a"]
+    assert rendered[0]["cluster_size"] == 1
+    assert rendered[0]["deepen_hint"]["cluster_prefix_steps"] == 1
+
+
+def test_scout_render_includes_cluster_metadata():
+    rendered = reasoner._render_scout_lines(
+        [
+            {
+                "line_id": "scout-1",
+                "moves": ["play falling-star-3 target a", "end turn"],
+                "move_contexts": [{"kind": "scripted"}, {"kind": "scripted"}],
+                "score": 3.9,
+                "score_breakdown": {},
+                "resolved_state": {},
+                "complete": True,
+                "opponent_windows": [],
+                "root_state_hash": "root",
+                "cluster_key": "play falling-star-3",
+                "cluster_size": 3,
+                "cluster_prefix_steps": 1,
+            }
+        ]
+    )
+    assert rendered[0]["cluster_key"] == "play falling-star-3"
+    assert rendered[0]["cluster_size"] == 3
+    assert rendered[0]["deepen_hint"]["cluster_prefix_steps"] == 1

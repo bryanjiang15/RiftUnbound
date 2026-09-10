@@ -25,9 +25,12 @@ const HTTP_TIMEOUT := 60.0     # seconds before falling back to heuristic
 							   # calls per decision; 8s was far too short)
 const MAX_RETRIES := 3         # max rejection retry attempts
 const TurnSearchScript = preload("res://Scripts/Game/TurnSearch.gd")
+const LineRiskProbeScript = preload("res://Scripts/Game/LineRiskProbe.gd")
+const RiskScoreScript = preload("res://Scripts/Game/RiskScore.gd")
 const ScoringProfileScript = preload("res://Scripts/Game/ScoringProfile.gd")
 const MulliganHeuristicScript = preload("res://Scripts/AI/MulliganHeuristic.gd")
 const EngineServerScript = preload("res://Scripts/AI/EngineServer.gd")
+const AnalysisStateCodecScript = preload("res://Scripts/AI/AnalysisStateCodec.gd")
 const ENGINE_PORT_DEFAULT := 8766
 
 # Resolved in setup() so it can differ per OS (see _agent_base_url()).
@@ -85,6 +88,8 @@ var _last_rejection_reason: String = ""
 var _waiting_for_http: bool = false
 var _candidate_lines: Array = []
 var _search_stats: Dictionary = {}
+var _line_risk_enabled: bool = true
+var _line_risk_priors: Dictionary = {}
 var _committed_line: Dictionary = {}
 var _committed_line_index: int = 0
 
@@ -122,7 +127,9 @@ func setup(gc: GameController, pi: int, scoring_profile_path: String = "") -> vo
 	_scoring_profile_path = scoring_profile_path
 	# Pre-handshake default from the engine's own env (usually unset); the agent
 	# service's /health response is authoritative and overrides this below.
-	_search_mode = _env_flag("RIFTBOUND_SEARCH")
+	_search_mode = _env_flag("RIFTBOUND_SEARCH", true)
+	_reasoner_mode = _env_flag("RIFTBOUND_REASONER", true)
+	_goals_mode = _env_flag("RIFTBOUND_GOALS", false)
 	# Scout search defaults ON; disable only with an explicit falsey value so the
 	# grounded strategist is the default whenever goals are enabled.
 	var scout_env := OS.get_environment("RIFTBOUND_GOALS_SCOUT").strip_edges().to_lower()
@@ -132,6 +139,8 @@ func setup(gc: GameController, pi: int, scoring_profile_path: String = "") -> vo
 	# is skipped.
 	var capture_path := OS.get_environment("RIFTBOUND_SELFPLAY_CAPTURE").strip_edges()
 	_capture_mode = capture_path != ""
+	_line_risk_enabled = _env_flag("RIFTBOUND_LINE_RISK", true)
+	_line_risk_priors = _load_line_risk_priors()
 	if _capture_mode:
 		_search_mode = true
 		if capture_path == "1" or capture_path.to_lower() == "on" or capture_path.to_lower() == "true":
@@ -228,8 +237,34 @@ func _on_config_completed(result: int, response_code: int, _headers: PackedStrin
 
 # Mirror the Python agent's truthy-env parsing so both sides agree on whether
 # search mode is enabled.
-func _env_flag(name: String) -> bool:
-	return OS.get_environment(name).strip_edges().to_lower() in ["1", "true", "yes", "on"]
+func _env_flag(name: String, default_value: bool = false) -> bool:
+	var raw := OS.get_environment(name).strip_edges().to_lower()
+	if raw == "":
+		return default_value
+	return raw in ["1", "true", "yes", "on"]
+
+
+func _load_line_risk_priors() -> Dictionary:
+	var path := "res://Data/AI/reaction_priors.json"
+	if not FileAccess.file_exists(path):
+		return {}
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return {}
+	var parsed = JSON.parse_string(file.get_as_text())
+	return parsed if parsed is Dictionary else {}
+
+
+func _annotate_line_risk(gs: GameState, lines: Array, budget_ms: int = 350) -> Array:
+	if not _line_risk_enabled or lines.is_empty():
+		return lines
+	var probe = LineRiskProbeScript.new()
+	var annotated: Array = probe.annotate_lines(gs, player_index, lines, {
+		"profile_path": _scoring_profile_path,
+		"reaction_priors": _line_risk_priors,
+		"budget_ms": budget_ms,
+	})
+	return RiskScoreScript.annotate_lines(annotated)
 
 
 func _agent_base_url() -> String:
@@ -329,15 +364,36 @@ func _request_decision(gs: GameState) -> void:
 			var scout_lines: Array = []
 			var scout_stats: Dictionary = {}
 			if _goals_scout:
+				var scout_t0 := Time.get_ticks_msec()
 				var scout: TurnSearch = TurnSearchScript.new(_scoring_profile_path)
 				var scout_result: Dictionary = scout.search(gs, player_index, {
-					"mode": "main", "max_depth": 8, "node_budget": 150, "time_budget_ms": 400
+					"mode": "main",
+					"max_depth": 10,
+					"beam_width": 12,
+					"node_budget": 300,
+					"time_budget_ms": 800,
 				})
+				var scout_ms := int(Time.get_ticks_msec() - scout_t0)
 				if gs.game_over:
 					_clear_engine_pin()
 					return
 				scout_lines = scout_result.get("candidate_lines", [])
 				scout_stats = scout_result.get("search_stats", {})
+				if not (scout_stats is Dictionary):
+					scout_stats = {}
+				else:
+					scout_stats = scout_stats.duplicate(true)
+				var risk_t0 := Time.get_ticks_msec()
+				scout_lines = _annotate_line_risk(gs, scout_lines, 400)
+				var cheap_risk_ms := int(Time.get_ticks_msec() - risk_t0)
+				scout_stats["scout_ms"] = scout_ms
+				scout_stats["cheap_risk_ms"] = cheap_risk_ms
+				scout_stats["scout_line_count"] = scout_lines.size()
+				scout_stats["pre_llm_godot_ms"] = scout_ms + cheap_risk_ms
+				print(
+					"AIPlayer Pre-LLM: scout=%dms lines=%d | cheap_risk=%dms | total=%dms"
+					% [scout_ms, scout_lines.size(), cheap_risk_ms, scout_ms + cheap_risk_ms]
+				)
 			if _reasoner_mode:
 				var reasoner_emit := await _fetch_reasoner_emit(scout_lines, scout_stats)
 				if gs.game_over:
@@ -365,6 +421,7 @@ func _request_decision(gs: GameState) -> void:
 			"mode": "main", "max_depth": 12, "node_budget": 300, "time_budget_ms": 800
 		})
 		_candidate_lines = result.get("candidate_lines", [])
+		_candidate_lines = _annotate_line_risk(gs, _candidate_lines, 350)
 		_search_stats = result.get("search_stats", {})
 	elif _search_mode and _should_run_reactive_search(gs):
 		var reactive: TurnSearch = TurnSearchScript.new(_scoring_profile_path)
@@ -409,6 +466,13 @@ func _build_request_payload() -> Dictionary:
 		payload["search_stats"] = _search_stats
 		if _scoring_profile_json != "":
 			payload["scoring_profile_json"] = _scoring_profile_json
+	# Authoritative replay dump — capture/SQL only. Never included in model prompts.
+	var gs: GameState = controller.gs if controller else null
+	if gs != null:
+		var analysis: Dictionary = AnalysisStateCodecScript.export_state(gs)
+		payload["analysis_state_json"] = analysis
+		payload["analysis_state_schema_version"] = AnalysisStateCodecScript.SCHEMA_VERSION
+		payload["root_state_hash"] = _live_hash(gs)
 	return payload
 
 
@@ -463,6 +527,14 @@ func _fetch_reasoner_emit(scout_lines: Array = [], scout_stats: Dictionary = {})
 	if not scout_lines.is_empty():
 		body_dict["candidate_lines"] = scout_lines.slice(0, 5)
 		body_dict["search_stats"] = scout_stats
+	# Capture-only dump so reasoner line commits can write decision_snapshots
+	# without a follow-up /decision (which this path skips).
+	var gs: GameState = controller.gs if controller else null
+	if gs != null:
+		body_dict["analysis_state_json"] = AnalysisStateCodecScript.export_state(gs)
+		body_dict["analysis_state_schema_version"] = AnalysisStateCodecScript.SCHEMA_VERSION
+	if _scoring_profile_json != "":
+		body_dict["scoring_profile_json"] = _scoring_profile_json
 	var headers := PackedStringArray(["Content-Type: application/json"])
 	_waiting_for_http = true
 	var err := _goals_http.request(
@@ -520,9 +592,11 @@ func _try_commit_reasoner_line(gs: GameState, emit: Dictionary) -> bool:
 	_submit(first)
 	if controller.last_command_error:
 		_drop_committed_line()
+		_report_outcome(false, "Game engine rejected the command.")
 		_report_decision_metrics(false, false)
 		return false
 	_committed_line_index = 1
+	_report_outcome(true)
 	_report_decision_metrics(false, true)
 	ai_move_completed.emit(first, gs.turn_number, _move_seq)
 	_move_seq += 1
@@ -584,19 +658,26 @@ func _decide_offline(gs: GameState) -> void:
 		_report_outcome(true)
 
 
-# Engine-side equivalent of the server's _argmax_line: among candidate lines
-# (already score-descending from TurnSearch), return the first with a non-empty
-# first command. Empty-move lines are unplayable, so the caller falls back to
-# pass — exactly as _PASS_DECISION does server-side. Returns {} when none qualify.
+# Engine-side equivalent of the server's _argmax_line: among candidate lines,
+# return the playable line with the highest risk_adjusted_score (fallback: score).
+# Empty-move lines are unplayable, so the caller falls back to pass — exactly as
+# _PASS_DECISION does server-side. Returns {} when none qualify.
 func _argmax_local(lines: Array) -> Dictionary:
+	var best: Dictionary = {}
+	var best_score := -INF
 	for line in lines:
+		if not (line is Dictionary):
+			continue
 		var moves: Array = line.get("moves", [])
 		if moves.is_empty():
 			continue
 		if str(moves[0]).strip_edges() == "":
 			continue
-		return line
-	return {}
+		var s := RiskScoreScript.rank_score(line)
+		if s > best_score:
+			best_score = s
+			best = line
+	return best
 
 
 func _on_request_completed(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:

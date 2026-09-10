@@ -12,6 +12,7 @@ from .search_log_fmt import (
     MAGENTA,
     RED,
     YELLOW,
+    format_candidate_corpus,
     paint,
 )
 
@@ -88,6 +89,39 @@ def summarize_tool_result(name: str, result: Any) -> str:
             parts.append(f"seed={_short(result['seed_moves'], 80)}")
         if result.get("error"):
             parts.append(f"error={_short(result['error'], 100)}")
+        return " ".join(str(p) for p in parts)
+
+    if name == "expand_risk":
+        if result.get("ok") is False:
+            return f"error={_short(result.get('error', 'failed'), 120)}"
+        risk = (result.get("risk") or {}) if isinstance(result, dict) else {}
+        parts = [f"ok={result.get('ok', True)}"]
+        if result.get("assumed_card"):
+            parts.append(f"card={result['assumed_card']}")
+        if isinstance(risk, dict):
+            worst = risk.get("risk_worst")
+            if worst is not None:
+                parts.append(f"worst={worst}")
+            if risk.get("needs_recapture"):
+                parts.append("plan_broken")
+            if risk.get("can_recapture"):
+                parts.append("can_recapture")
+            try:
+                from .risk_score import compute_risk_adjustment
+
+                score = float(result.get("score", 0.0) or 0.0)
+                adj = compute_risk_adjustment({"score": score, "risk": risk})
+                pre = result.get("risk_adjusted_score_before")
+                post = adj.get("risk_adjusted_score")
+                if pre is not None and post is not None:
+                    parts.append(f"risk_adj={pre}→{post}")
+                elif post is not None:
+                    parts.append(f"risk_adj={post}")
+                method = adj.get("risk_adjustment_method")
+                if method:
+                    parts.append(f"method={method}")
+            except Exception:
+                pass
         return " ".join(str(p) for p in parts)
 
     if name == "search_turn":
@@ -167,6 +201,8 @@ def format_tools_session(
     outcome: str,
     reasoning: str = "",
     final_output: Any = None,
+    scout_lines: list[Any] | None = None,
+    scout_stats: dict[str, Any] | None = None,
 ) -> list[str]:
     """Full tool-call block embedded in agent_search.log."""
     title = (
@@ -178,6 +214,17 @@ def format_tools_session(
     )
     bar = paint("─" * 72, DIM)
     lines = ["", bar, title, bar]
+
+    if scout_lines:
+        heading = f"Scout lines ({len(scout_lines)}):"
+        lines.extend(
+            format_candidate_corpus(
+                scout_lines,
+                stats=scout_stats,
+                heading=heading,
+            )
+        )
+        lines.append("")
 
     if not tool_trace:
         lines.append(paint("  (no tools — model answered directly)", DIM))

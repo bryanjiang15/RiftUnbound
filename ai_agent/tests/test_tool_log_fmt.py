@@ -102,3 +102,32 @@ def test_format_reasoner_session_includes_recommendation_and_final_output():
     assert "Final output:" in plain
     assert '"kind": "line"' in plain
     assert "play card-1" in plain
+
+
+def test_format_reasoner_session_prints_scout_lines():
+    lines = format_tools_session(
+        stage="reasoner",
+        turn=3,
+        decision_type="main_phase",
+        state="Neutral Open",
+        game_id="g1",
+        ts="2026-01-01T00:00:00Z",
+        tool_trace=[],
+        outcome="emit=line after 0 tool call(s)",
+        scout_lines=[
+            {
+                "line_id": "scout-line-1",
+                "score": 2.25,
+                "moves": ["play scout-unit", "end turn"],
+                "score_breakdown": {"unit_might_on_board": 2.25, "total": 2.25},
+                "resolved_state": {"next_decision": "opponent's turn"},
+            }
+        ],
+        scout_stats={"mode": "main", "nodes_explored": 20},
+    )
+    plain = "\n".join(_strip_ansi(line) for line in lines)
+    assert "Scout lines (1):" in plain
+    assert "mode=main" in plain
+    assert "scout-line-1 | score=+2.250" in plain
+    assert "play scout-unit" in plain
+    assert "end turn" in plain

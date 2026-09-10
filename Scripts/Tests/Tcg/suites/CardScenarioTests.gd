@@ -61,6 +61,8 @@ static func run(assertions) -> void:
 	_test_vilemaw_blocks_move_to_base(assertions)
 	_test_shanghai_deck_validates(assertions)
 	_test_charm_move_contests_occupied_battlefield(assertions)
+	_test_charm_onto_controlled_battlefield_defends(assertions)
+	_test_charm_onto_controlled_battlefield_triggers_on_defend(assertions)
 
 
 static func _test_charm_move_contests_occupied_battlefield(assertions) -> void:
@@ -68,6 +70,7 @@ static func _test_charm_move_contests_occupied_battlefield(assertions) -> void:
 	h.load_fixture_dict({
 		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
 		"battlefields": ["zaun-warrens", "targons-peak"],
+		"battlefield_control": [0, 1],
 		"players": [
 			{"pool": {"energy": 2, "power": {"calm": 2}}, "hand": ["charm"],
 			 "battlefield-a": [{"id": "stalwart-poro", "owner": 0}],
@@ -87,6 +90,57 @@ static func _test_charm_move_contests_occupied_battlefield(assertions) -> void:
 		bf.is_contested or not h.gs().board.staged_combats.is_empty() or h.gs().combat_bf_index >= 0,
 		"charm move contests battlefield when both sides present"
 	)
+
+
+# Charming an enemy onto a battlefield you control makes them the attacker and you
+# the defender, so Shield (and other defend-only effects) apply to your units.
+static func _test_charm_onto_controlled_battlefield_defends(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"battlefield_control": [0, 1],
+		"players": [
+			{"pool": {"energy": 2, "power": {"calm": 2}}, "hand": ["charm"],
+			 "battlefield-a": [{"id": "stalwart-poro", "owner": 0}],
+			 "deck_size": 5, "rune_deck_size": 12},
+			{"battlefield-b": [{"id": "chemtech-enforcer", "owner": 1}],
+			 "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd_with_choices(0, "play charm", ["chemtech-enforcer", "battlefield-a"])
+	var poro = h.find_unit("stalwart-poro")
+	var enemy = h.find_unit("chemtech-enforcer")
+	assertions.assert_eq(h.gs().attacker_player_index, 1, "charmed unit's owner is the attacker")
+	assertions.assert_true(poro.is_defender, "controller's unit is defending")
+	assertions.assert_true(not poro.is_attacker, "controller's unit is not attacking")
+	assertions.assert_true(enemy.is_attacker, "moved enemy unit is attacking")
+	assertions.assert_true(not enemy.is_defender, "moved enemy unit is not defending")
+	assertions.assert_eq(poro.get_current_might(), 3, "defender shield applies after charm combat")
+
+
+static func _test_charm_onto_controlled_battlefield_triggers_on_defend(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["fortified-position", "targons-peak"],
+		"battlefield_control": [0, 1],
+		"players": [
+			{"pool": {"energy": 2, "power": {"calm": 2}}, "hand": ["charm"],
+			 "battlefield-a": [{"id": "stalwart-poro", "owner": 0}],
+			 "deck_size": 5, "rune_deck_size": 12},
+			{"battlefield-b": [{"id": "chemtech-enforcer", "owner": 1}],
+			 "deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	h.cmd_with_choices(0, "play charm", ["chemtech-enforcer", "battlefield-a"])
+	var poro = h.find_unit("stalwart-poro")
+	var enemy = h.find_unit("chemtech-enforcer")
+	assertions.assert_true(poro.is_defender, "charm onto controlled bf defends")
+	assertions.assert_eq(poro.get_keyword_value("shield"), 3,
+		"fortified position on_defend grants shield to the controlling defender")
+	assertions.assert_eq(enemy.get_keyword_value("shield"), 0,
+		"fortified position does not shield the charmed attacker")
 
 
 static func _test_zhonya_sacrifices_gear_on_lethal(assertions) -> void:
@@ -291,7 +345,7 @@ static func _test_ravenbloom_student_spell_trigger(assertions) -> void:
 		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
 		"battlefields": ["zaun-warrens", "targons-peak"],
 		"players": [
-			{"pool": {"energy": 1, "power": {}}, "hand": ["hextech-ray"],
+			{"pool": {"energy": 1, "power": {"fury": 1}}, "hand": ["hextech-ray"],
 			 "base": [{"id": "ravenbloom-student"}], "deck_size": 5, "rune_deck_size": 12},
 			{"battlefield-a": [{"id": "chemtech-enforcer", "owner": 1}], "deck_size": 5, "rune_deck_size": 12}
 		]
@@ -378,7 +432,7 @@ static func _test_noxus_hopeful_legion_cost(assertions) -> void:
 		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
 		"battlefields": ["zaun-warrens", "targons-peak"],
 		"players": [
-			{"pool": {"energy": 4, "power": {}}, "hand": ["noxus-hopeful", "lecturing-yordle"],
+			{"pool": {"energy": 7, "power": {}}, "hand": ["noxus-hopeful", "lecturing-yordle"],
 			 "deck_size": 5, "rune_deck_size": 12},
 			{"deck_size": 5, "rune_deck_size": 12}
 		]

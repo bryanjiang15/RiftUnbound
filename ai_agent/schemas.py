@@ -68,6 +68,23 @@ class FacedownCard(BaseModel):
     play_from_hidden_cost: str = "0E"
 
 
+class LegendAbility(BaseModel):
+    ability_id: str = ""
+    ability_type: str = ""
+    effect_type: str = ""
+    is_action: bool = False
+    is_reaction: bool = False
+    cost: str = "free"
+
+
+class LegendInfo(BaseModel):
+    instance_id: str
+    name: str
+    is_exhausted: bool = False
+    effect_text: str = ""
+    abilities: list[LegendAbility] = Field(default_factory=list)
+
+
 class BattlefieldInfo(BaseModel):
     battlefield_id: str
     display_name: str
@@ -244,6 +261,7 @@ class BriefState(BaseModel):
     # My board
     my_base_units: list[UnitSummary]
     my_champion: Optional[UnitSummary] = None  # champion zone, if not yet played
+    my_legend: Optional[LegendInfo] = None
 
     # Opponent public info only
     opponent_score: int
@@ -599,6 +617,16 @@ class CandidateLine(BaseModel):
     search_mode: str = "main"
     original_line_id: Optional[str] = None
     source_lineage: list[str] = Field(default_factory=list)
+    cluster_key: str = ""
+    cluster_size: int = 1
+    cluster_prefix_steps: int = 1
+    # Live same-turn reaction-risk summary (belief-mode assumed interruptions).
+    risk: dict[str, Any] = Field(default_factory=dict)
+    # Ranking fields from ai_agent.risk_score (optional; absent → rank by score).
+    risk_penalty: Optional[float] = None
+    risk_adjusted_score: Optional[float] = None
+    risk_adjustment_method: Optional[str] = None
+    risk_expanded: bool = False
 
 
 class SearchStats(BaseModel):
@@ -610,6 +638,11 @@ class SearchStats(BaseModel):
     beam_width: int = 0
     elapsed_ms: int = 0
     stopped_reason: str = ""
+    # Pre-LLM handoff timings (Godot scout + cheap risk), optional.
+    scout_ms: Optional[int] = None
+    cheap_risk_ms: Optional[int] = None
+    scout_line_count: Optional[int] = None
+    pre_llm_godot_ms: Optional[int] = None
 
 
 # ── Decision ──────────────────────────────────────────────────────────────────
@@ -651,6 +684,11 @@ class DecisionRequest(BaseModel):
     # server attributes each captured row to the exact weights that produced it
     # (per-seat). Absent for live play → server falls back to its startup profile.
     scoring_profile_json: Optional[str] = None
+    # Authoritative GameState dump for offline counterfactual replay. Capture-only:
+    # never inject into model prompts or live skills.
+    analysis_state_json: Optional[Any] = None
+    analysis_state_schema_version: Optional[str] = None
+    root_state_hash: Optional[str] = None
 
 
 class GoalsRequest(BaseModel):
@@ -679,3 +717,8 @@ class ReasonRequest(GoalsRequest):
     """
 
     root_state_hash: str = ""
+    # Same capture-only fields as DecisionRequest so a committed reasoner line
+    # can write decision_snapshots / search_decisions without a follow-up /decision.
+    scoring_profile_json: Optional[str] = None
+    analysis_state_json: Optional[Any] = None
+    analysis_state_schema_version: Optional[str] = None

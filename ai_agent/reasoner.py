@@ -23,6 +23,7 @@ from .investigation_metrics import (
 from .prompts import load_prompt
 from .reasoner_context import current_context
 from .schemas import GoalSet, ReasonerEmit
+from .search_log_fmt import summarize_risk_payload
 from .strategist import _chat_kwargs, _extract_json_object, _strip_fences
 from .system_prompt import build_system_prompt_from_modules
 from .tool_budget import current_budget
@@ -38,6 +39,7 @@ REASONER_TOOL_NAMES = frozenset({
     "simulate_move",
     "simulate_line",
     "deepen",
+    "expand_risk",
     "get_card_detail",
     "lookup_rule",
     "get_keyword",
@@ -378,7 +380,17 @@ def _render_scout_lines(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rendered: list[dict[str, Any]] = []
     hide_scores = _hide_raw_scores()
     band = _score_tie_band()
-    for line in lines:
+    from .risk_score import risk_rank_enabled
+
+    rank_on = risk_rank_enabled()
+
+    def _sort_key(line: dict[str, Any]) -> float:
+        if rank_on and line.get("risk_adjusted_score") is not None:
+            return float(line["risk_adjusted_score"])
+        return float(line.get("score", 0.0) or 0.0)
+
+    ordered = sorted(lines, key=_sort_key, reverse=True)
+    for rank_index, line in enumerate(ordered):
         moves = list(line.get("moves", []) or [])
         contexts = list(line.get("move_contexts", []) or [])
         steps = []
@@ -411,7 +423,10 @@ def _render_scout_lines(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "prefix_steps_options": list(
                     range(1, min(4, max(1, len(moves))))
                 ),
+                "cluster_prefix_steps": int(line.get("cluster_prefix_steps") or 1),
             },
+            "cluster_key": line.get("cluster_key", ""),
+            "cluster_size": int(line.get("cluster_size") or 1),
             "score_band": _score_band_label(line.get("score", 0.0), band=band),
             "top_score_terms": dict(drivers),
             "resolved_state": _render_resolved_state(line.get("resolved_state")),
@@ -421,8 +436,25 @@ def _render_scout_lines(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "opponent_windows": len(line.get("opponent_windows", []) or []),
             "root_state_hash": line.get("root_state_hash", ""),
         }
-        if not hide_scores:
+        if not hide_scores or rank_on:
             entry["score"] = line.get("score", 0.0)
+            if rank_on:
+                entry["score_note"] = "unanswered_leaf"
+        if rank_on:
+            if line.get("risk_adjusted_score") is not None:
+                entry["risk_adjusted_score"] = line.get("risk_adjusted_score")
+            if line.get("risk_penalty") is not None:
+                entry["risk_penalty"] = line.get("risk_penalty")
+            if line.get("risk_adjustment_method"):
+                entry["risk_adjustment_method"] = line.get("risk_adjustment_method")
+            if line.get("risk_expanded"):
+                entry["risk_expanded"] = True
+            if rank_index == 0:
+                entry["scout_rank"] = 1
+                entry["scout_leader_by"] = "risk_adjusted_score"
+        risk_summary = summarize_risk_payload(line.get("risk"))
+        if risk_summary:
+            entry["risk"] = risk_summary
         rendered.append(entry)
     return rendered
 
@@ -548,12 +580,69 @@ def _terminal_emit(
         return None, f"line '{line_id}' lacks parallel executable metadata"
     if any(not str(value) for value in hashes):
         return None, f"line '{line_id}' contains an empty pre-step hash"
+    risk_err = _risk_commit_rationale_error(line, rationale, context)
+    if risk_err:
+        return None, risk_err
     return ReasonerEmit(
         kind="line",
         confidence="commit",
         chosen_line_id=line_id,
         rationale=rationale,
     ), None
+
+
+def _line_risk_adjusted(line: dict[str, Any] | None) -> float | None:
+    if not isinstance(line, dict):
+        return None
+    if line.get("risk_adjusted_score") is not None:
+        return float(line["risk_adjusted_score"])
+    return None
+
+
+def _risk_commit_rationale_error(
+    line: dict[str, Any],
+    rationale: str,
+    context: Any,
+) -> str | None:
+    """Reject commits that ignore a large risk_adjusted_score gap vs scout leader."""
+    from .risk_score import risk_rank_enabled
+
+    if not risk_rank_enabled():
+        return None
+    chosen_adj = _line_risk_adjusted(line)
+    if chosen_adj is None:
+        return None
+    scout_lines = list(getattr(context, "scout_lines", None) or [])
+    complete_scouts = [
+        ln for ln in scout_lines
+        if isinstance(ln, dict) and ln.get("complete") and _line_risk_adjusted(ln) is not None
+    ]
+    if not complete_scouts:
+        return None
+    leader = max(complete_scouts, key=lambda ln: float(ln["risk_adjusted_score"]))
+    leader_adj = float(leader["risk_adjusted_score"])
+    gap = leader_adj - chosen_adj
+    if gap <= 0.5:
+        return None
+    text = rationale.lower()
+    risk = line.get("risk") or {}
+    threat_ids = []
+    for t in (risk.get("threats") or []):
+        if isinstance(t, dict):
+            cid = str(t.get("card_id") or t.get("assumed_card") or "").lower()
+            if cid:
+                threat_ids.append(cid)
+    tokens = ("risk", "interrupt", "recapture", "plan_broken", "penalty")
+    if any(tok in text for tok in tokens):
+        return None
+    if any(cid and cid in text for cid in threat_ids):
+        return None
+    return (
+        f"Chosen line risk_adjusted_score ({chosen_adj:.3f}) is {gap:.3f} below "
+        f"scout leader {leader.get('line_id')} ({leader_adj:.3f}). Explain the "
+        "risk tradeoff in rationale (risk/interrupt/recapture/plan_broken or the "
+        "assumed threat card id) before committing."
+    )
 
 
 def _validated_emit(
@@ -603,11 +692,24 @@ async def _request_reasoning(
         if known_lines
         else "(none)"
     )
+    leader_note = ""
+    if known_lines:
+        rendered = _render_scout_lines(known_lines)
+        if rendered:
+            top = rendered[0]
+            leader_note = (
+                f"\nScout leader by risk_adjusted_score: {top.get('line_id')} "
+                f"(unanswered_score={top.get('score')}, "
+                f"risk_penalty={top.get('risk_penalty')}, "
+                f"risk_adjusted_score={top.get('risk_adjusted_score')}, "
+                f"method={top.get('risk_adjustment_method')}).\n"
+            )
     user = (
         f"{_TASK}\n\nRecent timeline:\n{memory_summary or '(none)'}\n\n"
         f"Current state:\n{agent_module._format_brief_state(brief_state)}\n\n"
         f"PINNED ROOT HASH: {root_state_hash or '(unavailable)'}\n\n"
         "SCOUT BASELINE (already grounded; do not call search_turn merely to reread it):\n"
+        f"{leader_note}"
         f"{scout_block}"
     )
     messages: list[dict[str, Any]] = [
@@ -709,6 +811,8 @@ async def _request_reasoning(
                 **emit.model_dump(exclude_none=True),
                 "telemetry": dict(context.telemetry) if context is not None else {},
             },
+            scout_lines=known_lines,
+            scout_stats=context.scout_stats if context is not None else None,
         )
         return emit
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from unittest.mock import patch
 
 from ai_agent import main
@@ -43,6 +44,7 @@ def test_reason_endpoint_returns_full_canonical_committed_line(tmp_path):
         "complete": True,
         "terminal_reason": "end_turn",
         "search_mode": "main",
+        "score": 1.5,
     }
     emit = ReasonerEmit(
         kind="line",
@@ -50,10 +52,20 @@ def test_reason_endpoint_returns_full_canonical_committed_line(tmp_path):
         chosen_line_id=committed["line_id"],
         rationale="Alternative compared with scout.",
     )
+    analysis = {
+        "schema_version": "1",
+        "replay": {"supported": True, "reason": ""},
+        "cards": {},
+        "players": [],
+        "board": {},
+    }
     request = ReasonRequest(
         brief_state=_brief(),
         game_id="g",
         root_state_hash="root",
+        analysis_state_json=analysis,
+        analysis_state_schema_version="1",
+        candidate_lines=[],
     )
 
     async def fake_run(**kwargs):
@@ -66,24 +78,48 @@ def test_reason_endpoint_returns_full_canonical_committed_line(tmp_path):
 
     old_memory = main._memory
     old_enabled = main._reasoner_enabled
+    old_search = main._search_enabled
     mem = Memory(db_path=tmp_path / "reason.db")
     main._memory = mem
     main._reasoner_enabled = True
+    main._search_enabled = True
     try:
         with patch("ai_agent.main.run_reasoner", side_effect=fake_run):
             payload = asyncio.run(main.reason_endpoint(request))
     finally:
         main._memory = old_memory
         main._reasoner_enabled = old_enabled
+        main._search_enabled = old_search
     assert payload["kind"] == "line"
     assert payload["committed_line"] == committed
     assert payload["root_state_hash"] == "root"
     with mem._connect() as conn:
         row = conn.execute("SELECT * FROM reasoner_decisions").fetchone()
+        dec = conn.execute("SELECT * FROM decisions").fetchone()
+        snap = conn.execute("SELECT * FROM decision_snapshots").fetchone()
+        search = conn.execute("SELECT * FROM search_decisions").fetchone()
+        cands = conn.execute("SELECT * FROM candidate_lines").fetchall()
     assert row is not None
     assert row["terminal_kind"] == "line"
     assert row["chosen_line_id"] == committed["line_id"]
     assert row["committed"] == 1
+    assert row["decision_index"] == 0
+    # Same capture shape as /decision so Analysis UI can list/step the commit.
+    assert dec is not None
+    assert dec["decision_type"] == "main_phase"
+    assert dec["decision_index"] == 0
+    move = json.loads(dec["move_json"])
+    assert move["action"] == "pass"
+    assert snap is not None
+    assert snap["root_state_hash"] == "root"
+    assert snap["analysis_state_json"] is not None
+    analysis_stored = json.loads(snap["analysis_state_json"])
+    assert analysis_stored["replay"]["supported"] is True
+    assert search is not None
+    assert search["chosen_line_id"] == committed["line_id"]
+    assert search["selector_source"] == "reasoner"
+    assert search["goals_source"] == "reasoner"
+    assert any(c["line_id"] == committed["line_id"] and c["chosen"] == 1 for c in cands)
 
 
 def test_reason_endpoint_missing_root_uses_explicit_base_search_fallback():

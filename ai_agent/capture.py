@@ -13,12 +13,13 @@ models — no FastAPI globals — so the importer can call them directly.
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Callable, Optional
 
 from .goal_compiler import ProfileOverlay, goal_achievement_for_line
 from .memory import Memory
-from .schemas import Decision, DecisionRequest, GoalSet
+from .schemas import CandidateLine, Decision, DecisionRequest, GoalSet, Move, SearchStats
 
 logger = logging.getLogger(__name__)
 
@@ -113,8 +114,6 @@ def _move_strings(moves: list) -> list[str]:
 
 
 def json_dumps_safe(value: Any) -> str:
-    import json
-
     try:
         return json.dumps(value, default=str, sort_keys=True)
     except Exception:
@@ -171,6 +170,13 @@ def _goal_telemetry(
     }
 
 
+def _selection_score(line: CandidateLine) -> float:
+    """Ranking key used by live choose_line / argmax (risk-adjusted when present)."""
+    if line.risk_adjusted_score is not None:
+        return float(line.risk_adjusted_score)
+    return float(line.score)
+
+
 def capture_search_decision(
     *,
     memory: Memory,
@@ -184,20 +190,27 @@ def capture_search_decision(
     goals_source: Optional[str] = None,
     goal_set: Optional[GoalSet] = None,
     overlay: Optional[ProfileOverlay] = None,
+    candidate_lines: Optional[list[CandidateLine]] = None,
 ) -> None:
-    """Persist the search_decisions / candidate_lines / decision_snapshots rows."""
-    candidates = list(request.candidate_lines or [])
+    """Persist the search_decisions / candidate_lines / decision_snapshots rows.
+
+    Pass ``candidate_lines`` when live selection used an enriched list (e.g. after
+    ``enrich_lines_with_risk``); otherwise ``request.candidate_lines`` is stored.
+    """
+    candidates = list(
+        candidate_lines if candidate_lines is not None else (request.candidate_lines or [])
+    )
     if not candidates:
         return
-    ranked = sorted(candidates, key=lambda c: c.score, reverse=True)
-    best_score = ranked[0].score
-    second_score = ranked[1].score if len(ranked) > 1 else None
+    ranked = sorted(candidates, key=_selection_score, reverse=True)
+    best_score = _selection_score(ranked[0])
+    second_score = _selection_score(ranked[1]) if len(ranked) > 1 else None
     score_margin = (best_score - second_score) if second_score is not None else None
 
     chosen = None
     if decision.chosen_line_id:
         chosen = next((c for c in candidates if c.line_id == decision.chosen_line_id), None)
-    chosen_score = chosen.score if chosen is not None else None
+    chosen_score = _selection_score(chosen) if chosen is not None else None
     regret = (best_score - chosen_score) if chosen_score is not None else None
 
     cand_rows = []
@@ -212,6 +225,12 @@ def capture_search_decision(
                 "breakdown": c.score_breakdown,
                 "features": c.features,
                 "resolved_state": c.resolved_state,
+                "search_state": c.search_state,
+                "risk": c.risk or None,
+                "risk_penalty": c.risk_penalty,
+                "risk_adjusted_score": c.risk_adjusted_score,
+                "risk_adjustment_method": c.risk_adjustment_method,
+                "risk_expanded": bool(c.risk_expanded),
             }
         )
 
@@ -255,12 +274,21 @@ def capture_search_decision(
         chosen_overlay_delta=goal_fields["chosen_overlay_delta"],
         chosen_goal_achieved=goal_fields["chosen_goal_achieved"],
     )
+    analysis_state = request.analysis_state_json
+    if isinstance(analysis_state, str) and analysis_state.strip():
+        try:
+            analysis_state = json.loads(analysis_state)
+        except Exception:
+            pass
     memory.record_decision_snapshot(
         game_id=game_id,
         turn=turn,
         decision_index=decision_index,
         scalars=snapshot_scalars(brief_state),
         brief_state=brief_state,
+        analysis_state=analysis_state if analysis_state else None,
+        analysis_state_schema_version=request.analysis_state_schema_version,
+        root_state_hash=request.root_state_hash,
     )
 
 
@@ -278,12 +306,14 @@ def capture_decision(
     goals_source: Optional[str] = None,
     goal_set: Optional[GoalSet] = None,
     overlay: Optional[ProfileOverlay] = None,
+    candidate_lines: Optional[list[CandidateLine]] = None,
 ) -> None:
     """Persist all rows for one produced decision (episodic + eval + tuning).
 
     Mirrors the side effects of the ``/decision`` endpoint so the live HTTP path
     and the offline importer write identical data. ``decision`` must already be
-    computed (argmax / selector) by the caller.
+    computed (argmax / selector) by the caller. Pass ``candidate_lines`` when the
+    selector saw a risk-enriched list rather than the raw request payload.
     """
     game_id = request.game_id
 
@@ -315,8 +345,11 @@ def capture_decision(
 
     # Capture the tuning dataset row when this decision came from the engine
     # search. When a capture-seat filter is active, store only that seat's rows.
+    lines_for_capture = (
+        candidate_lines if candidate_lines is not None else request.candidate_lines
+    )
     capture_ok = capture_seat is None or brief_state.get("my_player_index") == capture_seat
-    if search_enabled and request.candidate_lines and capture_ok:
+    if search_enabled and lines_for_capture and capture_ok:
         try:
             decision_index = memory._decision_counters.get(game_id, 0) - 1
             capture_search_decision(
@@ -331,6 +364,7 @@ def capture_decision(
                 goals_source=goals_source,
                 goal_set=goal_set,
                 overlay=overlay,
+                candidate_lines=list(lines_for_capture),
             )
         except Exception as exc:
             logger.warning("Search decision capture failed: %s", exc)
@@ -367,6 +401,128 @@ def compact_tool_trace(tool_trace: list[dict[str, Any]] | None) -> list[dict[str
             }
         )
     return out
+
+
+def _candidate_from_committed(committed_line: dict[str, Any]) -> CandidateLine:
+    """Build a CandidateLine from a reasoner registry committed_line dict."""
+    moves = list(committed_line.get("moves") or [])
+    return CandidateLine(
+        line_id=str(committed_line.get("line_id") or "reasoner-line"),
+        moves=moves,
+        move_contexts=list(committed_line.get("move_contexts") or []),
+        expected_pre_hashes=list(committed_line.get("expected_pre_hashes") or []),
+        score=float(committed_line.get("score") or 0.0),
+        score_breakdown=dict(committed_line.get("score_breakdown") or {}),
+        features=dict(committed_line.get("features") or {}),
+        resolved_state=dict(committed_line.get("resolved_state") or {}),
+        search_state=dict(committed_line.get("search_state") or {}),
+        root_state_hash=str(committed_line.get("root_state_hash") or ""),
+        legal=bool(committed_line.get("legal", True)),
+        complete=bool(committed_line.get("complete", False)),
+        terminal_reason=str(committed_line.get("terminal_reason") or ""),
+        search_mode=str(committed_line.get("search_mode") or "main"),
+    )
+
+
+def capture_reasoner_line_decision(
+    *,
+    memory: Memory,
+    brief_state: dict,
+    request: Any,
+    committed_line: dict[str, Any],
+    rationale: Optional[str],
+    eval_metrics: dict,
+    search_enabled: bool,
+    data_origin: str,
+    capture_seat: Optional[int],
+    weight_resolver: WeightResolver,
+) -> Optional[int]:
+    """Persist episodic + snapshot + search rows for a reasoner-committed line.
+
+    Reasoner ``kind=line`` commits skip ``/decision`` on the Godot side, so this
+    mirrors ``capture_decision`` using the committed registry line as the chosen
+    candidate. Returns the allocated ``decision_index``, or None on skip/failure.
+    """
+    from .agent import _move_from_command
+
+    moves = list(committed_line.get("moves") or [])
+    if not moves:
+        return None
+    first_cmd = str(moves[0])
+    move = _move_from_command(first_cmd) or Move(action="pass")
+    chosen_line_id = str(
+        committed_line.get("line_id")
+        or getattr(request, "chosen_line_id", None)
+        or "reasoner-line"
+    )
+    decision = Decision(
+        reasoning=rationale or "Reasoner committed line.",
+        move=move,
+        chosen_line_id=chosen_line_id,
+        selector_source="reasoner",
+    )
+
+    scout = list(getattr(request, "candidate_lines", None) or [])
+    committed_cand = _candidate_from_committed(committed_line)
+    if committed_cand.line_id and not any(
+        getattr(c, "line_id", None) == committed_cand.line_id for c in scout
+    ):
+        candidates = list(scout) + [committed_cand]
+    else:
+        # Replace scout copy with the full committed registry entry when ids match.
+        candidates = []
+        replaced = False
+        for c in scout:
+            if getattr(c, "line_id", None) == committed_cand.line_id:
+                candidates.append(committed_cand)
+                replaced = True
+            else:
+                candidates.append(c)
+        if not replaced:
+            candidates.append(committed_cand)
+
+    search_stats = getattr(request, "search_stats", None) or SearchStats(
+        mode=str(committed_line.get("search_mode") or "main")
+    )
+    root_hash = (
+        getattr(request, "root_state_hash", None)
+        or committed_line.get("root_state_hash")
+        or ""
+    )
+    decision_request = DecisionRequest(
+        brief_state=getattr(request, "brief_state"),
+        game_id=getattr(request, "game_id"),
+        candidate_lines=candidates,
+        search_stats=search_stats,
+        scoring_profile_json=getattr(request, "scoring_profile_json", None),
+        analysis_state_json=getattr(request, "analysis_state_json", None),
+        analysis_state_schema_version=getattr(
+            request, "analysis_state_schema_version", None
+        ),
+        root_state_hash=root_hash or None,
+    )
+
+    try:
+        capture_decision(
+            memory=memory,
+            brief_state=brief_state,
+            request=decision_request,
+            decision=decision,
+            eval_metrics=eval_metrics,
+            search_enabled=search_enabled,
+            data_origin=data_origin,
+            capture_seat=capture_seat,
+            weight_resolver=weight_resolver,
+            goals_source="reasoner",
+            goal_set=None,
+            overlay=None,
+        )
+    except Exception as exc:
+        logger.warning("Reasoner line decision capture failed: %s", exc)
+        return None
+
+    game_id = getattr(request, "game_id", "")
+    return memory._decision_counters.get(game_id, 0) - 1
 
 
 def capture_reasoner_decision(
@@ -520,6 +676,10 @@ def capture_game_over(*, memory: Memory, game_id: str, winner_index: int,
     """
     outcome = "win" if winner_index == my_player_index else "loss"
     first_player = first_player_index if first_player_index >= 0 else None
+    if my_player_index == 0:
+        p0_score, p1_score = my_score, opp_score
+    else:
+        p0_score, p1_score = opp_score, my_score
     try:
         memory.record_game_outcome(
             game_id=game_id,
@@ -529,6 +689,9 @@ def capture_game_over(*, memory: Memory, game_id: str, winner_index: int,
             turns_played=total_turns,
             first_player_index=first_player,
             seed=seed,
+            winner_index=winner_index if winner_index >= 0 else None,
+            p0_score=p0_score,
+            p1_score=p1_score,
         )
     except Exception as exc:
         logger.warning("Game outcome record failed: %s", exc)

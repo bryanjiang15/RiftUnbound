@@ -13,8 +13,9 @@ joins game outcomes, and summarises per BASE ``card_def_id``:
   * Avg turn       — average turn the card was played (curve position).
   * Avg ENG        — average energy spent to play it.
   * Deaths         — times it died after being played.
-  * WR|Played      — win rate of games it was played in (survivorship-biased;
-                     prefer this only as a coarse signal, see doc §3 caveats).
+  * WR|Played      — seat-relative win rate when that seat played the card
+                     (``games.winner_index == card_events.my_player_index``).
+                     Survivorship-biased; prefer WPA when the corpus is large.
 
 The aggregation key is always the base ``card_def_id`` stamped on each event —
 never reverse-engineered from instance_id (doc §3 join-key note).
@@ -42,6 +43,7 @@ import argparse
 import sqlite3
 import sys
 from pathlib import Path
+from typing import Optional
 
 DEFAULT_DB_PATH = Path(__file__).parent / "agent_memory.db"
 
@@ -67,6 +69,7 @@ _SORT_FIELDS = {
     "avg_energy": ("avg_energy_spent", True),
     "deaths": ("deaths", True),
     "win_rate": ("win_rate_when_played", True),
+    "card_wpa": ("card_associated_wpa", True),
     "card": ("card_def_id", False),
 }
 
@@ -99,6 +102,30 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _origin_game_ids(conn: sqlite3.Connection, origin: Optional[str]) -> Optional[set[str]]:
+    if origin is None:
+        return None
+    rows = conn.execute(
+        "SELECT DISTINCT game_id FROM search_decisions WHERE origin = ?",
+        (origin,),
+    ).fetchall()
+    return {r["game_id"] for r in rows}
+
+
+def _has_winner_index(conn: sqlite3.Connection) -> bool:
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(games)")}
+    return "winner_index" in cols
+
+
+def _seat_won(winner_index, seat) -> Optional[bool]:
+    if winner_index is None or seat is None:
+        return None
+    try:
+        return int(winner_index) == int(seat)
+    except (TypeError, ValueError):
+        return None
+
+
 def gather(conn: sqlite3.Connection, *, filters: dict) -> dict:
     has_table = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='card_events'"
@@ -113,26 +140,64 @@ def gather(conn: sqlite3.Connection, *, filters: dict) -> dict:
         where.append("ce.my_player_index = ?")
         params.append(filters["seat"])
 
-    origin = filters.get("origin")
-    # Origin lives on search_decisions, not card_events; restrict to games that
-    # have at least one decision with this origin when the filter is set.
-    origin_games: set | None = None
-    if origin is not None:
-        rows = conn.execute(
-            "SELECT DISTINCT game_id FROM search_decisions WHERE origin = ?",
-            (origin,),
-        ).fetchall()
-        origin_games = {r["game_id"] for r in rows}
-
-    games_total = conn.execute("SELECT COUNT(*) AS n FROM games").fetchone()["n"] or 0
-    base_win_rate = None
-    if games_total:
-        wins = conn.execute(
-            "SELECT COUNT(*) AS n FROM games WHERE outcome='win'"
-        ).fetchone()["n"] or 0
-        base_win_rate = wins / games_total
+    origin_games = _origin_game_ids(conn, filters.get("origin"))
+    if origin_games is not None:
+        if not origin_games:
+            return {
+                "games_total": 0,
+                "base_win_rate": None,
+                "cards": [],
+                "filters": filters,
+                "wpa_available": False,
+            }
+        placeholders = ",".join("?" * len(origin_games))
+        where.append(f"ce.game_id IN ({placeholders})")
+        params.extend(sorted(origin_games))
 
     where_sql = " AND ".join(where)
+    game_filter_sql = "1=1"
+    game_filter_params: list = []
+    if origin_games is not None:
+        placeholders = ",".join("?" * len(origin_games))
+        game_filter_sql = f"game_id IN ({placeholders})"
+        game_filter_params = sorted(origin_games)
+
+    games_total = conn.execute(
+        f"SELECT COUNT(*) AS n FROM games WHERE {game_filter_sql}",
+        game_filter_params,
+    ).fetchone()["n"] or 0
+
+    # Seat-relative baseline: (game, reporting seat) wins via canonical winner_index.
+    # games.outcome is last-writer and wrong for two-seat self-play.
+    base_win_rate = None
+    use_winner = _has_winner_index(conn)
+    if use_winner:
+        base_row = conn.execute(
+            f"""
+            SELECT COUNT(*) AS n,
+                   SUM(CASE WHEN g.winner_index = ce.my_player_index THEN 1 ELSE 0 END) AS wins
+            FROM (
+                SELECT DISTINCT game_id, my_player_index
+                FROM card_events ce
+                WHERE {where_sql}
+            ) ce
+            JOIN games g ON g.game_id = ce.game_id
+            WHERE g.winner_index IS NOT NULL
+            """,
+            params,
+        ).fetchone()
+        n_seats = int(base_row["n"] or 0)
+        if n_seats:
+            base_win_rate = (base_row["wins"] or 0) / n_seats
+    elif games_total:
+        # Legacy DBs without winner_index: outcome is only safe with a seat filter.
+        if filters.get("seat") is not None:
+            wins = conn.execute(
+                f"SELECT COUNT(*) AS n FROM games WHERE {game_filter_sql} AND outcome='win'",
+                game_filter_params,
+            ).fetchone()["n"] or 0
+            base_win_rate = wins / games_total
+
     rows = conn.execute(
         f"""
         SELECT
@@ -157,28 +222,38 @@ def gather(conn: sqlite3.Connection, *, filters: dict) -> dict:
         params,
     ).fetchall()
 
-    # Win-rate-when-played: distinct (card, game) played, joined to outcome.
+    wr_select = (
+        "ce.card_def_id AS card_def_id, ce.game_id AS game_id, "
+        "ce.my_player_index AS my_player_index, g.winner_index AS winner_index"
+        if use_winner
+        else "ce.card_def_id AS card_def_id, ce.game_id AS game_id, "
+        "ce.my_player_index AS my_player_index, g.outcome AS outcome"
+    )
     wr_rows = conn.execute(
         f"""
-        SELECT ce.card_def_id AS card_def_id,
-               ce.game_id AS game_id,
-               g.outcome AS outcome
+        SELECT {wr_select}
         FROM (
             SELECT DISTINCT card_def_id, game_id, my_player_index
             FROM card_events ce WHERE {where_sql} AND event='played'
         ) ce
         JOIN games g ON g.game_id = ce.game_id
-        WHERE g.outcome IS NOT NULL
         """,
         params,
     ).fetchall()
     wr_by_card: dict[str, list[int]] = {}
     for r in wr_rows:
-        if origin_games is not None and r["game_id"] not in origin_games:
+        won: Optional[bool]
+        if use_winner:
+            won = _seat_won(r["winner_index"], r["my_player_index"])
+        elif filters.get("seat") is not None:
+            won = (r["outcome"] == "win")
+        else:
+            won = None
+        if won is None:
             continue
         played_games, played_wins = wr_by_card.setdefault(r["card_def_id"], [0, 0])
         wr_by_card[r["card_def_id"]][0] = played_games + 1
-        if r["outcome"] == "win":
+        if won:
             wr_by_card[r["card_def_id"]][1] = played_wins + 1
 
     cards: list[dict] = []
@@ -203,13 +278,39 @@ def gather(conn: sqlite3.Connection, *, filters: dict) -> dict:
             "scored": r["scored"] or 0,
             "deaths": r["died"] or 0,
             "win_rate_when_played": (pw / pg) if pg else None,
+            "card_associated_wpa": None,
+            "card_associated_wpa_ci95_lo": None,
+            "card_associated_wpa_ci95_hi": None,
+            "multi_card_turn_share": None,
         })
+
+    wpa_ok = False
+    try:
+        from .analysis.wpa_report import build_report
+        report = build_report(
+            conn,
+            origin=filters.get("origin"),
+            min_plays=int(filters.get("min_plays") or 20),
+        )
+        if report.get("model", {}).get("ok"):
+            wpa_ok = True
+            by_card = {c["card_def_id"]: c for c in report.get("card_associated_wpa") or []}
+            for card in cards:
+                rec = by_card.get(card["card_def_id"])
+                if rec:
+                    card["card_associated_wpa"] = rec.get("card_associated_wpa")
+                    card["card_associated_wpa_ci95_lo"] = rec.get("ci95_lo")
+                    card["card_associated_wpa_ci95_hi"] = rec.get("ci95_hi")
+                    card["multi_card_turn_share"] = rec.get("multi_card_turn_share")
+    except Exception:
+        wpa_ok = False
 
     return {
         "games_total": games_total,
         "base_win_rate": base_win_rate,
         "cards": cards,
         "filters": filters,
+        "wpa_available": wpa_ok,
     }
 
 
@@ -313,8 +414,15 @@ def render(data: dict, sort_key: str, desc: bool | None, min_plays: int) -> str:
         _emit(low_sample)
 
     out.append("")
-    out.append(_dim("  WPA omitted (needs turn_snapshots). WR|Pl is "
-                    "survivorship-biased — see doc §3 caveats."))
+    if data.get("wpa_available"):
+        out.append(_dim("  card_associated_wpa is associative (own-turn WPA vs baseline), "
+                        "not causal. Multi-card turns are not split. WR|Pl is "
+                        "seat-relative (winner_index == reporting seat) and "
+                        "survivorship-biased."))
+    else:
+        out.append(_dim("  WR|Pl is seat-relative (winner_index == reporting seat), "
+                        "survivorship-biased. scored events are not emitted. "
+                        "breakdown_delta_json is unused."))
     out.append("")
     return "\n".join(out)
 
@@ -335,6 +443,7 @@ def main(argv: list[str] | None = None) -> int:
                         help="Filter by game origin (self_play|vs_human|vs_heuristic)")
     parser.add_argument("--min-plays", type=int, default=20, dest="min_plays",
                         help="Cards below N plays go to a low-sample section (default: 20)")
+    # card_wpa sort key is registered in _SORT_FIELDS.
     args = parser.parse_args(argv)
 
     filters = {"seat": args.seat, "origin": args.origin}

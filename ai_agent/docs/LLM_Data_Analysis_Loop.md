@@ -50,6 +50,10 @@ argmax weight-tuning data with goals-on quality data without saying so.
 | Goal / overlay telemetry | `search_decisions.goals_source` / `goal_set_json` / `overlay_json` / `chosen_overlay_delta` / `chosen_goal_achieved_json` |
 | Reasoner summary | `reasoner_decisions` (+ compact `tool_trace` on `/reason` telemetry) |
 | Turn pulses | `turn_snapshots` via `/turn_snapshot` + self-play JSONL |
+| Authoritative replay dump | `decision_snapshots.analysis_state_json` + `root_state_hash` (capture-only; not in prompts) |
+| Candidate search_state | `candidate_lines.search_state_json` |
+| Canonical outcomes | `games.winner_index` / `p0_score` / `p1_score` (WPA labels; distinct from seat-relative `outcome`) |
+| Counterfactual runs | `counterfactual_runs` via `python -m ai_agent.analysis` |
 | Outcome backfill | `/game_over` → `game_outcome`, `final_score_diff`, `went_first` |
 | Self-play harness | `SelfPlaySim.gd` + offline JSONL capture / `import_selfplay_logs.py` |
 | Deterministic reports | `feature_report.py`, `card_report.py`, `texel_tune.py` |
@@ -62,7 +66,7 @@ argmax weight-tuning data with goals-on quality data without saying so.
 |---|---|
 | `hypotheses` + `tuning_runs` | Audit trail for the loop below |
 | Typed analysis API + briefing generator | §1–2 (not built) |
-| Offline counterfactual line search | §3 (not built; reuses EngineServer) |
+| Offline counterfactual line search | §3 **v1 shipped:** `python -m ai_agent.analysis counterfactual` (same-turn, no opponent policy) |
 
 ---
 
@@ -134,24 +138,66 @@ Offline, on a stored `decision_snapshot` (or pinned engine state):
 
 This is the cheap, high-precision slice. Prefer it before multi-turn rollouts.
 
+**V1 implementation (shipped):** `ai_agent/analysis/` restores
+`decision_snapshots.analysis_state_json` (not BriefState), verifies
+`root_state_hash` against `ScoreModel.structural_hash`, and runs offline
+`TurnSearch` via `Scripts/Tools/CounterfactualRunner.gd`. Every result is stamped
+`horizon=1_player_turn`, `opponent_policy=none`, `information_mode=public_decision`.
+Predicate packs (`win_now`, `score_more`, `conquer_progress`, `remove_threat`,
+`preserve_with_progress`, `logged_goal`) are deterministic — no LLM. A
+pass-only line cannot be reported as a defensive improvement. Legacy rows
+without an authoritative snapshot return `unsupported_snapshot`.
+
+CLI: `python -m ai_agent.analysis counterfactual --db … --game-id … --turn … --decision-index …`
+
+Failure-mode report: `python -m ai_agent.analysis failure-report …`
+(`reliability` / Reasoner / selection / goal-leaf first; eval / search / goal
+steering upgrade only with counterfactual evidence; otherwise `insufficient_evidence`).
+
+Light WPA: `python -m ai_agent.analysis wpa --db …` (ridge logistic + Platt,
+chronological game splits, turn / exchange swings, associative card WPA).
+
 ### 3.2 Multi-turn: “was there a better setup for a later goal?”
 
-For swing turns in lost (or high-regret) games, run a **bounded** counterfactual:
+**V2 shipped (post-game Analysis UI + `/analysis/counterfactual`).** For swing
+turns in lost (or high-regret) games, run a **bounded** counterfactual:
 
 ```
 restore snapshot S
-propose roots: played line | top candidates | analyst-named hypotheses
-for horizon H ≤ 2 (hard cap):
-  AI TurnSearch from current state
-  opponent reply under LABELED assumptions (known board; named/generic cards)
-  score leaf: win? score proximity? goal predicate? eval features?
-report: line L, horizon H, assumption set A, leaf summary
+roots: played line | distinct original/offline alternatives (≤4 alts)
+for future completed player-turns H (default 4, hard cap 6):
+  at every decision boundary (main turn or reactive window):
+    TurnSearch for the acting seat (analyzed top-2, opponent top-3, oracle hand)
+    LineReplayer hands state across seats; stale suffixes are discarded
+  checkpoint end-of-player-turn outcomes
+report: possible / policy_likely / robust vs simulated played baseline
 ```
 
-This is the offline counterpart of deferred live `simulate_opponent` + `rollout`.
-**Every result must carry its assumption set.** Hidden hands and draws make
-“winning in two turns” conditional — report *winning under A*, never as certain
-blunder proof.
+Engine entry: `POST /engine/rollout` via headless `CounterfactualRunner`.
+Python: `ai_agent.analysis.outcome_rollout` (default mode of
+`analyze_decision`). Same-turn CF remains available with `mode=same_turn` /
+`--same-turn` and as automatic fallback when rollout cannot run.
+
+**Every result carries its assumption set** (`opponent_policy=oracle`,
+`information_mode=oracle_hidden_state`, branch caps, truncation). Hidden hands
+and draws make “winning in N turns” conditional — report *winning under A*,
+never as certain blunder proof. Retained branches are **policy-bounded**, not
+exhaustive.
+
+| Mode | When | `information_mode` stamp |
+|---|---|---|
+| **Same-turn (v1)** | Acting player's current turn only | `public_decision` |
+| **Oracle opponent (v2 offline)** | Post-game upper bound using the captured real opponent hand | `oracle_hidden_state` |
+| **Belief opponent (future live)** | Sample plausible hidden hands; aggregate expected / worst-case / response distribution | `belief_hidden_state` |
+
+Never blindly replay the opponent's historical commands on a branched state —
+rerun a `TurnPolicy` / `TurnSearch` from that state. Default horizon is **4
+future player-turns**; hard cap **6**. Reactive windows do not consume the turn
+horizon. Presets: **Deep** (5 roots / opp 3 / seat 2 / frontier 24 / 10k nodes /
+30s) and **Fast** (smaller caps, same semantics).
+
+Imported self-play JSONL rows without `analysis_state_json` are **not**
+rollout-ready — `validate-db` / Analysis UI surface a readiness warning.
 
 ### 3.3 Analysis tools (engine-backed)
 
@@ -187,7 +233,7 @@ causes useless tuning.
 | **Goal error** | GoalSet/overlay steered search away from a clearly better line | Strategist prompts / vocabulary; not base weights |
 | **Investigation error** *(Reasoner)* | Tools available but unused/misused; missed `search_for` hit | Reasoner prompts / tool policy |
 | **Commit error** *(Reasoner)* | Direct line commit illegal or dominated by search | Emit-contract / validation |
-| **Horizon / setup miss** | Same-turn eval fine; counterfactual shows better later goal under mild assumptions | Delayed-value **features** or sharper goals — not deeper live search by default |
+| **Horizon / setup miss** | Same-turn eval fine; multi-turn outcome tiers show better later goal under oracle assumptions (`horizon_setup_miss_{possible,policy_likely,robust}`) | Delayed-value **features** or sharper goals — not deeper live search by default |
 
 Classic triad (selection / search / eval) still applies to argmax and
 selector-only games. Goals-on and future Reasoner **add** rows above; they do
@@ -324,8 +370,9 @@ set, leaf predicates satisfied, comparison to played line.
    `turn_snapshots`.
 2. **Deterministic briefing + typed DB tools** (§2.1, §5) wrapping existing
    reports — useful to humans with no LLM yet.
-3. **Same-turn counterfactual** (§3.1) on logged snapshots via EngineServer.
-4. **Failure-mode summary** (§4) as code over regret + counterfactual hits.
+3. ~~**Same-turn counterfactual**~~ — **v1 shipped** (`ai_agent/analysis`, §3.1).
+4. ~~**Failure-mode summary**~~ — **v1 shipped** (`failure_modes.py` + CLI).
+   Light WPA / swing turns also shipped (`wpa_model.py` / `wpa_report.py`).
 5. **Read-only LLM analyst** — emit typed hypotheses; measure confirm-set hit
    rate; do not auto-act.
 6. **Multi-turn counterfactual** (§3.2) with hard horizon/assumption labels.

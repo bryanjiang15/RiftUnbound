@@ -185,6 +185,122 @@ func advance_to_quiescence(sc: GameController, after_move: String, windows: Arra
 	return "ply_budget"
 
 
+# Decision-boundary driver for multi-turn / reactive rollouts.
+# Like advance_to_quiescence for the *scripting seat*, but stops (without
+# auto-passing) the moment another seat must act — either via pending prompt
+# or chain/showdown priority/focus. Returns:
+#   "game_over" | "quiescence" | "ply_budget" | "decision_boundary"
+# When stopped at a boundary, `windows` receives a record describing it.
+func advance_until_decision_boundary(
+	sc: GameController,
+	after_move: String,
+	windows: Array,
+	ai_steps: Array = [],
+	choice_ranker: Callable = Callable(),
+) -> String:
+	var steps := 0
+	while steps < PLY_BUDGET:
+		steps += 1
+
+		if sc.gs.game_over:
+			return "game_over"
+
+		if not sc.gs.pending_prompt.is_empty():
+			var prompt_pi: int = sc.gs.pending_prompt.get("player_index", ai_index)
+			if prompt_pi == ai_index:
+				var pre_hash := ScoreModelScript.structural_hash(ScoreModelScript.snapshot(sc.gs, ai_index))
+				var cc := _resolve_ai_prompt(sc, choice_ranker)
+				if sc.last_command_error:
+					return "quiescence"
+				ai_steps.append({
+					"command": cc["command"], "context": cc["context"],
+					"kind": "intermediate", "pre_hash": pre_hash,
+				})
+			else:
+				_record_window(sc.gs, after_move, windows)
+				return "decision_boundary"
+			continue
+
+		var seat := _acting_seat(sc.gs)
+		if seat < 0:
+			return "quiescence"
+
+		if seat == ai_index:
+			var pre_hash := ScoreModelScript.structural_hash(ScoreModelScript.snapshot(sc.gs, ai_index))
+			var ctx := _describe_ai_pass(sc.gs)
+			sc.submit_command(seat, "pass")
+			if sc.last_command_error:
+				return "quiescence"
+			ai_steps.append({
+				"command": "pass", "context": ctx,
+				"kind": "intermediate", "pre_hash": pre_hash,
+			})
+		else:
+			_record_window(sc.gs, after_move, windows)
+			return "decision_boundary"
+
+	return "ply_budget"
+
+
+# Classify the current decision obligation for rollout trees.
+# Returns {kind, acting_seat} where kind is one of:
+#   "none" | "prompt" | "chain" | "showdown" | "main_turn" | "game_over"
+func describe_decision_boundary(gs: GameState, scripting_seat: int = -1) -> Dictionary:
+	if gs == null:
+		return {"kind": "none", "acting_seat": -1}
+	if gs.game_over:
+		return {"kind": "game_over", "acting_seat": -1}
+	if not gs.pending_prompt.is_empty():
+		return {
+			"kind": "prompt",
+			"acting_seat": int(gs.pending_prompt.get("player_index", -1)),
+		}
+	if gs.is_closed_chain_state():
+		return {"kind": "chain", "acting_seat": gs.priority_player_index}
+	if gs.current_state == TurnStateMachine.State.SHOWDOWN_OPEN:
+		return {"kind": "showdown", "acting_seat": gs.focus_player_index}
+	if (
+		gs.current_phase == TurnStateMachine.Phase.MAIN
+		and gs.current_state == TurnStateMachine.State.NEUTRAL_OPEN
+		and gs.pending_prompt.is_empty()
+		and gs.chain.is_empty()
+	):
+		return {"kind": "main_turn", "acting_seat": gs.turn_player_index}
+	return {"kind": "none", "acting_seat": -1}
+
+
+# After an explicit scripted command (including a stored `choose` / `pass`),
+# settle only what must not wait for the next command on this line.
+# Never auto-resolves this seat's prompts or chain/showdown passes.
+#   stop_at_opponent true  — if another seat must act, record the window and
+#                            return "decision_boundary" (do not pass them).
+#   stop_at_opponent false — auto-pass opponent windows (search's unanswered
+#                            assumption) via advance_opponent_windows.
+func advance_after_scripted_command(
+	sc: GameController,
+	after_move: String,
+	windows: Array,
+	stop_at_opponent: bool,
+) -> String:
+	if not stop_at_opponent:
+		return advance_opponent_windows(sc, after_move, windows)
+	if sc.gs.game_over:
+		return "game_over"
+	if not sc.gs.pending_prompt.is_empty():
+		var prompt_pi: int = sc.gs.pending_prompt.get("player_index", ai_index)
+		if prompt_pi == ai_index:
+			return "ai_decision"
+		_record_window(sc.gs, after_move, windows)
+		return "decision_boundary"
+	var acting := _acting_seat(sc.gs)
+	if acting < 0:
+		return "quiescence"
+	if acting == ai_index:
+		return "ai_decision"
+	_record_window(sc.gs, after_move, windows)
+	return "decision_boundary"
+
+
 # Seed-prefix helper: after an explicit AI seed command, only settle opponent
 # response windows / opponent prompts. Stops as soon as the AI seat must act
 # (pending prompt, showdown focus, or chain priority) so the next seed command
@@ -266,8 +382,7 @@ func _resolve_prompt(sc: GameController) -> void:
 	if ptype == "choose_optional":
 		choice = "yes"
 	elif not valid.is_empty():
-		var v = valid[0]
-		choice = v.instance_id if v is CardInstance else str(v)
+		choice = _choice_id(valid[0])
 	sc.submit_command(prompt_pi, "choose %s" % choice)
 
 
@@ -287,8 +402,7 @@ func _resolve_ai_prompt(sc: GameController, choice_ranker: Callable) -> Dictiona
 	elif valid.size() > 1 and choice_ranker.is_valid():
 		choice = _best_choice(sc, valid, choice_ranker)
 	elif not valid.is_empty():
-		var v = valid[0]
-		choice = v.instance_id if v is CardInstance else str(v)
+		choice = _choice_id(valid[0])
 	var ctx := _describe_prompt(prompt, choice)
 	sc.submit_command(prompt_pi, "choose %s" % choice)
 	return {"command": "choose %s" % choice, "context": ctx}
@@ -302,7 +416,9 @@ func _best_choice(sc: GameController, valid: Array, choice_ranker: Callable) -> 
 	var best_id := ""
 	var best_score := -INF
 	for v in valid:
-		var cid: String = v.instance_id if v is CardInstance else str(v)
+		var cid := _choice_id(v)
+		if cid == "" or cid == "none":
+			continue
 		var cand: GameController = build_sim_controller(sc.gs)
 		if cand == null:
 			continue
@@ -315,16 +431,24 @@ func _best_choice(sc: GameController, valid: Array, choice_ranker: Callable) -> 
 				best_id = cid
 		cand.free()
 	if best_id == "":
-		var v0 = valid[0]
-		best_id = v0.instance_id if v0 is CardInstance else str(v0)
+		best_id = _choice_id(valid[0]) if not valid.is_empty() else "none"
 	return best_id
+
+
+func _choice_id(v: Variant) -> String:
+	if typeof(v) == TYPE_OBJECT:
+		if is_instance_valid(v) and v is CardInstance:
+			return v.instance_id
+		return "none"
+	var s := str(v)
+	return s if s != "" else "none"
 
 
 func _describe_prompt(prompt: Dictionary, choice: String) -> String:
 	var ptype: String = prompt.get("type", "")
 	var src = prompt.get("source", null)
 	var src_name := ""
-	if src != null and src is CardInstance:
+	if typeof(src) == TYPE_OBJECT and is_instance_valid(src) and src is CardInstance:
 		src_name = src.definition.name
 	match ptype:
 		"choose_target":

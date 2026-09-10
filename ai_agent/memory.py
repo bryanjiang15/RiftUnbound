@@ -23,7 +23,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 DEFAULT_DB_PATH = Path(__file__).parent / "agent_memory.db"
 
@@ -57,9 +57,12 @@ CREATE INDEX IF NOT EXISTS idx_opp_game ON opponent_actions (game_id, turn);
 CREATE TABLE IF NOT EXISTS games (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     game_id            TEXT UNIQUE NOT NULL,
-    outcome            TEXT,    -- 'win' | 'loss' | 'draw' | NULL = in progress
+    outcome            TEXT,    -- 'win' | 'loss' | 'draw' | NULL = in progress (seat-relative, last writer)
     my_score           INTEGER,
     opp_score          INTEGER,
+    winner_index       INTEGER, -- canonical seat that won (-1 unknown); WPA labels use this
+    p0_score           INTEGER, -- seat 0 final score (canonical, not reporter-relative)
+    p1_score           INTEGER, -- seat 1 final score
     turns_played       INTEGER,
     first_player_index INTEGER, -- which seat took turn 1 (initiative bias control)
     seed               TEXT,    -- deck/shuffle seed (self-play reproducibility)
@@ -212,7 +215,13 @@ CREATE TABLE IF NOT EXISTS candidate_lines (
     moves_json          TEXT,
     breakdown_json      TEXT,
     features_json       TEXT,
-    resolved_state_json TEXT
+    resolved_state_json TEXT,
+    search_state_json   TEXT,
+    risk_json           TEXT,
+    risk_penalty        REAL,
+    risk_adjusted_score REAL,
+    risk_adjustment_method TEXT,
+    risk_expanded       INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_cand_lines_dec ON candidate_lines (search_decision_id);
 
@@ -231,6 +240,9 @@ CREATE TABLE IF NOT EXISTS decision_snapshots (
     cards_in_hand_opp INTEGER,
     bf_control_net    INTEGER,
     brief_state_json  TEXT,
+    analysis_state_json TEXT,           -- authoritative GameState dump (capture-only)
+    analysis_state_schema_version TEXT,
+    root_state_hash   TEXT,
     timestamp         TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_dec_snap_game ON decision_snapshots (game_id, turn, decision_index);
@@ -323,6 +335,28 @@ CREATE TABLE IF NOT EXISTS turn_snapshots (
     timestamp          TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_turn_snap_game ON turn_snapshots (game_id, turn, my_player_index);
+
+-- Offline same-turn / multi-turn counterfactual runs (Phase 2 move-quality judges).
+CREATE TABLE IF NOT EXISTS counterfactual_runs (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id                TEXT    NOT NULL,
+    turn                   INTEGER NOT NULL,
+    decision_index         INTEGER NOT NULL,
+    root_state_hash        TEXT,
+    predicate_pack_version TEXT,
+    search_inputs_json     TEXT,
+    profile_inputs_json    TEXT,
+    budget_json            TEXT,
+    assumptions_json       TEXT,
+    status                 TEXT,
+    result_json            TEXT,
+    run_kind               TEXT,
+    result_schema_version  TEXT,
+    future_player_turns    INTEGER,
+    opponent_policy        TEXT,
+    timestamp              TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cf_runs_dec ON counterfactual_runs (game_id, turn, decision_index);
 """
 
 # Maximum number of recent events (own decisions + opponent actions, merged) to inject into context
@@ -376,6 +410,30 @@ class Memory:
                 "overlay_json TEXT",
                 "chosen_overlay_delta REAL",
                 "chosen_goal_achieved_json TEXT",
+            ],
+            "games": [
+                "winner_index INTEGER",
+                "p0_score INTEGER",
+                "p1_score INTEGER",
+            ],
+            "candidate_lines": [
+                "search_state_json TEXT",
+                "risk_json TEXT",
+                "risk_penalty REAL",
+                "risk_adjusted_score REAL",
+                "risk_adjustment_method TEXT",
+                "risk_expanded INTEGER NOT NULL DEFAULT 0",
+            ],
+            "decision_snapshots": [
+                "analysis_state_json TEXT",
+                "analysis_state_schema_version TEXT",
+                "root_state_hash TEXT",
+            ],
+            "counterfactual_runs": [
+                "run_kind TEXT",
+                "result_schema_version TEXT",
+                "future_player_turns INTEGER",
+                "opponent_policy TEXT",
             ],
         }
         for table, columns in new_columns.items():
@@ -540,6 +598,9 @@ class Memory:
         turns_played: int,
         first_player_index: Optional[int] = None,
         seed: Optional[str] = None,
+        winner_index: Optional[int] = None,
+        p0_score: Optional[int] = None,
+        p1_score: Optional[int] = None,
     ) -> None:
         """Upsert a completed game record. Called via /game_over."""
         now = datetime.now(timezone.utc).isoformat()
@@ -547,13 +608,16 @@ class Memory:
             conn.execute(
                 """
                 INSERT INTO games
-                  (game_id, outcome, my_score, opp_score, turns_played,
-                   first_player_index, seed, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                  (game_id, outcome, my_score, opp_score, winner_index, p0_score, p1_score,
+                   turns_played, first_player_index, seed, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(game_id) DO UPDATE SET
                     outcome=excluded.outcome,
                     my_score=excluded.my_score,
                     opp_score=excluded.opp_score,
+                    winner_index=COALESCE(excluded.winner_index, games.winner_index),
+                    p0_score=COALESCE(excluded.p0_score, games.p0_score),
+                    p1_score=COALESCE(excluded.p1_score, games.p1_score),
                     turns_played=excluded.turns_played,
                     first_player_index=COALESCE(excluded.first_player_index, games.first_player_index),
                     seed=COALESCE(excluded.seed, games.seed),
@@ -564,6 +628,9 @@ class Memory:
                     outcome,
                     my_score,
                     opp_score,
+                    winner_index,
+                    p0_score,
+                    p1_score,
                     turns_played,
                     first_player_index,
                     seed,
@@ -672,12 +739,15 @@ class Memory:
             )
             decision_id = int(cur.lastrowid)  # type: ignore[arg-type]
             for cand in candidates or []:
+                risk = cand.get("risk")
                 conn.execute(
                     """
                     INSERT INTO candidate_lines
                       (search_decision_id, line_id, rank, score, chosen,
-                       moves_json, breakdown_json, features_json, resolved_state_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       moves_json, breakdown_json, features_json, resolved_state_json,
+                       search_state_json, risk_json, risk_penalty, risk_adjusted_score,
+                       risk_adjustment_method, risk_expanded)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         decision_id,
@@ -689,6 +759,12 @@ class Memory:
                         json.dumps(cand.get("breakdown")) if cand.get("breakdown") is not None else None,
                         json.dumps(cand.get("features")) if cand.get("features") is not None else None,
                         json.dumps(cand.get("resolved_state")) if cand.get("resolved_state") is not None else None,
+                        json.dumps(cand.get("search_state")) if cand.get("search_state") is not None else None,
+                        json.dumps(risk) if risk is not None else None,
+                        cand.get("risk_penalty"),
+                        cand.get("risk_adjusted_score"),
+                        cand.get("risk_adjustment_method"),
+                        1 if cand.get("risk_expanded") else 0,
                     ),
                 )
             return decision_id
@@ -701,17 +777,27 @@ class Memory:
         decision_index: int,
         scalars: dict,
         brief_state: dict,
+        analysis_state: Optional[dict] = None,
+        analysis_state_schema_version: Optional[str] = None,
+        root_state_hash: Optional[str] = None,
     ) -> None:
         """Persist the full BriefState at a decision + extracted scalar columns."""
         now = datetime.now(timezone.utc).isoformat()
+        analysis_json = None
+        if analysis_state is not None:
+            analysis_json = (
+                analysis_state if isinstance(analysis_state, str)
+                else json.dumps(analysis_state)
+            )
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO decision_snapshots
                   (game_id, turn, decision_index, my_score, opp_score, my_energy,
                    board_might_diff, cards_in_hand, cards_in_hand_opp, bf_control_net,
-                   brief_state_json, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   brief_state_json, analysis_state_json, analysis_state_schema_version,
+                   root_state_hash, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     game_id,
@@ -725,9 +811,204 @@ class Memory:
                     scalars.get("cards_in_hand_opp"),
                     scalars.get("bf_control_net"),
                     json.dumps(brief_state),
+                    analysis_json,
+                    analysis_state_schema_version,
+                    root_state_hash,
                     now,
                 ),
             )
+
+    def record_counterfactual_run(
+        self,
+        *,
+        game_id: str,
+        turn: int,
+        decision_index: int,
+        root_state_hash: Optional[str],
+        predicate_pack_version: Optional[str],
+        search_inputs: Optional[dict],
+        profile_inputs: Optional[dict],
+        budget: Optional[dict],
+        assumptions: Optional[dict],
+        status: str,
+        result: Optional[dict],
+        run_kind: Optional[str] = None,
+        result_schema_version: Optional[str] = None,
+        future_player_turns: Optional[int] = None,
+        opponent_policy: Optional[str] = None,
+    ) -> int:
+        """Persist one auditable offline counterfactual run. Returns row id."""
+        now = datetime.now(timezone.utc).isoformat()
+        # Infer metadata from result/assumptions when callers omit explicit fields.
+        assumptions = assumptions or {}
+        result = dict(result or {})
+        if run_kind:
+            result.setdefault("run_kind", run_kind)
+        if not result.get("horizon") and assumptions.get("horizon"):
+            result["horizon"] = assumptions["horizon"]
+        from .analysis.persist_compact import compact_result_for_storage
+
+        result = compact_result_for_storage(result) or {}
+        run_kind = run_kind or result.get("run_kind") or (
+            "outcome_rollout" if assumptions.get("horizon") == "multi_turn" else "same_turn"
+        )
+        result_schema_version = result_schema_version or result.get("result_schema_version") or (
+            "2" if run_kind == "outcome_rollout" else "1"
+        )
+        if future_player_turns is None:
+            future_player_turns = result.get("future_player_turns")
+            if future_player_turns is None:
+                future_player_turns = assumptions.get("future_player_turns")
+        opponent_policy = opponent_policy or result.get("opponent_policy") or assumptions.get(
+            "opponent_policy"
+        )
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO counterfactual_runs
+                  (game_id, turn, decision_index, root_state_hash, predicate_pack_version,
+                   search_inputs_json, profile_inputs_json, budget_json, assumptions_json,
+                   status, result_json, run_kind, result_schema_version, future_player_turns,
+                   opponent_policy, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    game_id,
+                    turn,
+                    decision_index,
+                    root_state_hash,
+                    predicate_pack_version,
+                    json.dumps(search_inputs) if search_inputs is not None else None,
+                    json.dumps(profile_inputs) if profile_inputs is not None else None,
+                    json.dumps(budget) if budget is not None else None,
+                    json.dumps(assumptions) if assumptions is not None else None,
+                    status,
+                    json.dumps(result) if result is not None else None,
+                    run_kind,
+                    result_schema_version,
+                    future_player_turns,
+                    opponent_policy,
+                    now,
+                ),
+            )
+            return int(cur.lastrowid)  # type: ignore[arg-type]
+
+    def compact_counterfactual_run_payloads(self) -> dict:
+        """Rewrite existing result_json blobs with the compact storage shape."""
+        from .analysis.persist_compact import compact_result_for_storage
+
+        updated = 0
+        bytes_saved = 0
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, result_json FROM counterfactual_runs"
+            ).fetchall()
+            for row in rows:
+                raw = row["result_json"]
+                if not raw:
+                    continue
+                try:
+                    payload = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                compact = compact_result_for_storage(payload)
+                written = json.dumps(compact, default=str)
+                if written == raw:
+                    continue
+                conn.execute(
+                    "UPDATE counterfactual_runs SET result_json=? WHERE id=?",
+                    (written, int(row["id"])),
+                )
+                updated += 1
+                bytes_saved += max(0, len(raw) - len(written))
+        return {"updated": updated, "bytes_saved": bytes_saved}
+
+    def vacuum(self) -> None:
+        """Reclaim unused SQLite pages. Must run outside a write transaction."""
+        conn = sqlite3.connect(str(self._db_path))
+        try:
+            conn.isolation_level = None
+            conn.execute("VACUUM")
+        finally:
+            conn.close()
+
+    def list_counterfactual_runs(
+        self,
+        *,
+        game_id: str,
+        turn: int,
+        decision_index: int,
+        limit: int = 20,
+        include_result: bool = False,
+    ) -> list[dict]:
+        """Return recent CF/rollout runs for a decision, newest first.
+
+        ``result_json`` is omitted unless ``include_result`` is set — a single
+        outcome-rollout blob can be multi-megabyte, and the Analysis UI only
+        needs metadata to populate the picker.
+        """
+        cols = (
+            "id, game_id, turn, decision_index, root_state_hash, status, "
+            "run_kind, result_schema_version, future_player_turns, opponent_policy, "
+            "assumptions_json, budget_json, timestamp"
+        )
+        if include_result:
+            cols += ", result_json"
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {cols}
+                FROM counterfactual_runs
+                WHERE game_id=? AND turn=? AND decision_index=?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (game_id, turn, decision_index, max(1, min(int(limit), 100))),
+            ).fetchall()
+        out: list[dict] = []
+        for row in rows:
+            out.append(self._parse_counterfactual_run_row(row, include_result=include_result))
+        return out
+
+    def get_counterfactual_run(self, run_id: int) -> Optional[dict]:
+        """Return one CF/rollout run including the full result payload."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, game_id, turn, decision_index, root_state_hash, status,
+                       run_kind, result_schema_version, future_player_turns, opponent_policy,
+                       assumptions_json, budget_json, result_json, timestamp
+                FROM counterfactual_runs
+                WHERE id=?
+                """,
+                (int(run_id),),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._parse_counterfactual_run_row(row, include_result=True)
+
+    @staticmethod
+    def _parse_counterfactual_run_row(row, *, include_result: bool) -> dict:
+        item = dict(row)
+        pairs = [
+            ("assumptions_json", "assumptions"),
+            ("budget_json", "budget"),
+        ]
+        if include_result:
+            pairs.append(("result_json", "result"))
+        else:
+            item.pop("result_json", None)
+            item["result"] = None
+        for src, dest in pairs:
+            raw = item.pop(src, None)
+            if isinstance(raw, str) and raw:
+                try:
+                    item[dest] = json.loads(raw)
+                except json.JSONDecodeError:
+                    item[dest] = None
+            else:
+                item[dest] = None
+        return item
 
     def record_reasoner_decision(
         self,
@@ -1195,6 +1476,133 @@ class Memory:
             )
             return cur.lastrowid  # type: ignore[return-value]
 
+    def list_decisions(
+        self,
+        *,
+        game_id: Optional[str] = None,
+        replay_only: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict]:
+        """List episodic decisions for the Analysis UI (newest first).
+
+        Joins search_decisions / decision_snapshots / games for list columns.
+        ``replay_only`` keeps rows whose snapshot marks ``replay.supported``.
+        """
+        limit = max(1, min(int(limit), 500))
+        offset = max(0, int(offset))
+        where: list[str] = []
+        params: list[Any] = []
+        if game_id:
+            where.append("d.game_id = ?")
+            params.append(game_id)
+        if replay_only:
+            where.append(
+                "json_extract(ds.analysis_state_json, '$.replay.supported') = 1"
+            )
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+        sql = f"""
+            SELECT
+              d.id AS decisions_id,
+              d.game_id,
+              d.turn,
+              d.decision_index,
+              d.decision_type,
+              d.reasoning,
+              d.move_json,
+              d.accepted,
+              d.rejection_reason,
+              d.timestamp,
+              json_extract(d.move_json, '$.action') AS action,
+              json_extract(d.move_json, '$.parameters.card_id') AS card_id,
+              sd.mode AS search_mode,
+              sd.selector_source,
+              sd.chosen_line_id,
+              sd.my_player_index,
+              sd.game_outcome AS search_game_outcome,
+              g.outcome AS game_outcome,
+              g.my_score AS game_my_score,
+              g.opp_score AS game_opp_score,
+              CASE
+                WHEN ds.analysis_state_json IS NOT NULL
+                 AND ds.analysis_state_json != '' THEN 1
+                ELSE 0
+              END AS has_analysis_state,
+              json_extract(ds.analysis_state_json, '$.replay.supported')
+                AS replay_supported_raw,
+              ds.root_state_hash
+            FROM decisions d
+            LEFT JOIN search_decisions sd
+              ON sd.game_id = d.game_id
+             AND sd.turn = d.turn
+             AND sd.decision_index = d.decision_index
+            LEFT JOIN decision_snapshots ds
+              ON ds.game_id = d.game_id
+             AND ds.turn = d.turn
+             AND ds.decision_index = d.decision_index
+            LEFT JOIN games g ON g.game_id = d.game_id
+            {where_sql}
+            ORDER BY d.timestamp DESC, d.id DESC
+            LIMIT ? OFFSET ?
+        """
+        params.extend([limit, offset])
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        out: list[dict] = []
+        for r in rows:
+            raw = r["replay_supported_raw"]
+            if raw is None:
+                replay_supported = None
+            else:
+                replay_supported = bool(raw) if not isinstance(raw, str) else raw.lower() in (
+                    "1", "true", "yes",
+                )
+            out.append({
+                "decisions_id": r["decisions_id"],
+                "game_id": r["game_id"],
+                "turn": r["turn"],
+                "decision_index": r["decision_index"],
+                "decision_type": r["decision_type"],
+                "action": r["action"],
+                "card_id": r["card_id"],
+                "accepted": (
+                    None if r["accepted"] is None else bool(r["accepted"])
+                ),
+                "rejection_reason": r["rejection_reason"],
+                "reasoning": r["reasoning"],
+                "timestamp": r["timestamp"],
+                "search_mode": r["search_mode"],
+                "selector_source": r["selector_source"],
+                "chosen_line_id": r["chosen_line_id"],
+                "my_player_index": r["my_player_index"],
+                "game_outcome": r["game_outcome"] or r["search_game_outcome"],
+                "game_my_score": r["game_my_score"],
+                "game_opp_score": r["game_opp_score"],
+                "has_analysis_state": bool(r["has_analysis_state"]),
+                "replay_supported": replay_supported,
+                "root_state_hash": r["root_state_hash"],
+            })
+        return out
+
+    def get_episodic_decision(
+        self,
+        *,
+        game_id: str,
+        turn: int,
+        decision_index: int,
+    ) -> Optional[dict]:
+        """Return the latest episodic ``decisions`` row for a decision key."""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM decisions
+                WHERE game_id=? AND turn=? AND decision_index=?
+                ORDER BY id DESC LIMIT 1
+                """,
+                (game_id, turn, decision_index),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
     def eval_report(self) -> dict:
         """Return an aggregate reliability + human-feedback scorecard across games."""
         with self._connect() as conn:
@@ -1301,108 +1709,29 @@ class Memory:
     def card_stats_report(self, *, min_plays: int = 20) -> dict:
         """Per-card aggregate statistics (storage doc §3 derived view).
 
-        Aggregation key is the base ``card_def_id``. WPA is intentionally
-        omitted here — ``turn_snapshots`` are now captured, but this report does
-        not yet compute Δ win-probability from them. Cards below ``min_plays``
-        are returned in ``low_sample`` rather than ``cards`` so the sample-size
-        caveat is explicit, not silently mixed in.
+        Delegates to ``card_report.gather`` so CLI and API share seat-relative
+        win rates (``games.winner_index`` vs ``card_events.my_player_index``).
         """
+        from .card_report import gather
+
         with self._connect() as conn:
-            games_total = conn.execute(
-                "SELECT COUNT(*) AS n FROM games"
-            ).fetchone()["n"] or 0
-            base_win_rate = None
-            if games_total:
-                wins = conn.execute(
-                    "SELECT COUNT(*) AS n FROM games WHERE outcome='win'"
-                ).fetchone()["n"] or 0
-                base_win_rate = round(wins / games_total, 3)
-
-            rows = conn.execute(
-                """
-                SELECT
-                    card_def_id,
-                    COUNT(DISTINCT CASE WHEN event IN ('drawn','in_opening_hand')
-                          THEN game_id END)                                  AS games_seen,
-                    COUNT(DISTINCT CASE WHEN event='played' THEN game_id END) AS games_played,
-                    SUM(CASE WHEN event='drawn' THEN 1 ELSE 0 END)           AS drawn,
-                    SUM(CASE WHEN event='in_opening_hand' THEN 1 ELSE 0 END) AS opening_hand,
-                    SUM(CASE WHEN event='played' THEN 1 ELSE 0 END)          AS played,
-                    SUM(CASE WHEN event='discarded' THEN 1 ELSE 0 END)       AS discarded,
-                    SUM(CASE WHEN event='mulliganed' THEN 1 ELSE 0 END)      AS mulliganed,
-                    SUM(CASE WHEN event='scored' THEN 1 ELSE 0 END)          AS scored,
-                    SUM(CASE WHEN event='died' THEN 1 ELSE 0 END)            AS died,
-                    SUM(CASE WHEN event='left_in_hand_at_end' THEN 1 ELSE 0 END) AS stuck,
-                    AVG(CASE WHEN event='played' THEN turn END)             AS avg_turn_played,
-                    AVG(CASE WHEN event='played' THEN energy_spent END)    AS avg_energy_spent
-                FROM card_events
-                GROUP BY card_def_id
-                """
-            ).fetchall()
-
-            # Win-rate-when-played: distinct (card, game) played, joined to outcome.
-            wr_rows = conn.execute(
-                """
-                SELECT ce.card_def_id AS card_def_id,
-                       COUNT(*) AS played_games,
-                       SUM(CASE WHEN g.outcome='win' THEN 1 ELSE 0 END) AS played_wins
-                FROM (
-                    SELECT DISTINCT card_def_id, game_id
-                    FROM card_events WHERE event='played'
-                ) ce
-                JOIN games g ON g.game_id = ce.game_id
-                WHERE g.outcome IS NOT NULL
-                GROUP BY ce.card_def_id
-                """
-            ).fetchall()
-            wr_by_card = {
-                r["card_def_id"]: (r["played_games"], r["played_wins"])
-                for r in wr_rows
-            }
-
-        cards: list[dict] = []
-        low_sample: list[dict] = []
-        for r in rows:
-            drawn = r["drawn"] or 0
-            played = r["played"] or 0
-            played_games, played_wins = wr_by_card.get(r["card_def_id"], (0, 0))
-            win_rate_when_played = (
-                round(played_wins / played_games, 3) if played_games else None
-            )
-            stat = {
-                "card_def_id": r["card_def_id"],
-                "games_seen": r["games_seen"] or 0,
-                "games_played": r["games_played"] or 0,
-                # frequency / tempo
-                "draw_rate": round((r["games_seen"] or 0) / games_total, 3) if games_total else None,
-                "play_rate": round((r["games_played"] or 0) / games_total, 3) if games_total else None,
-                "play_when_drawn_rate": round(played / drawn, 3) if drawn else None,
-                "mulligan_rate": round((r["mulliganed"] or 0) / drawn, 3) if drawn else None,
-                "stuck_in_hand_rate": round((r["stuck"] or 0) / drawn, 3) if drawn else None,
-                "avg_turn_played": round(r["avg_turn_played"], 2) if r["avg_turn_played"] is not None else None,
-                "avg_energy_spent": round(r["avg_energy_spent"], 2) if r["avg_energy_spent"] is not None else None,
-                # raw counts
-                "drawn": drawn,
-                "played": played,
-                "discarded": r["discarded"] or 0,
-                "scored": r["scored"] or 0,
-                "deaths": r["died"] or 0,
-                # impact (survivorship-biased — see caveat)
-                "win_rate_when_played": win_rate_when_played,
-            }
-            (cards if played >= min_plays else low_sample).append(stat)
-
+            data = gather(conn, filters={"min_plays": min_plays})
+        all_cards = data.get("cards") or []
+        cards = [c for c in all_cards if c["played"] >= min_plays]
+        low_sample = [c for c in all_cards if c["played"] < min_plays]
         cards.sort(key=lambda c: c["played"], reverse=True)
         low_sample.sort(key=lambda c: c["played"], reverse=True)
+        base = data.get("base_win_rate")
         return {
-            "games_total": games_total,
-            "base_win_rate": base_win_rate,
+            "games_total": data.get("games_total") or 0,
+            "base_win_rate": round(base, 3) if base is not None else None,
             "min_plays": min_plays,
             "cards": cards,
             "low_sample": low_sample,
+            "wpa_available": bool(data.get("wpa_available")),
             "note": (
-                "WPA not computed yet (turn_snapshots are captured; this report "
-                "does not derive ΔWP). win_rate_when_played is survivorship-biased."
+                "win_rate_when_played uses games.winner_index vs the reporting "
+                "seat (not games.outcome). WPA is associative when available."
             ),
         }
 

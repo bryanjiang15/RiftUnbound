@@ -1,0 +1,99 @@
+{
+  "generic_reactions": [
+    {
+      "card_id": "defy",
+      "play_rate": 0.6512,
+      "avg_copies": 2.5
+    },
+    {
+      "card_id": "en-garde",
+      "play_rate": 0.5579,
+      "avg_copies": 2.8
+    }
+  ],
+  "master-yi-wuju-bladesman": [
+    {
+      "card_id": "defy",
+      "play_rate": 0.9924,
+      "avg_copies": 3.0
+    },
+    {
+      "card_id": "discipline",
+      "play_rate": 0.9765,
+      "avg_copies": 2.8
+    },
+    {
+      "card_id": "find-your-center",
+      "play_rate": 0.7266,
+      "avg_copies": 2.9
+    },
+    {
+      "card_id": "en-garde",
+      "play_rate": 0.7058,
+      "avg_copies": 2.5
+    },
+    {
+      "card_id": "confront",
+      "play_rate": 0.321,
+      "avg_copies": 2.2
+    },
+    {
+      "card_id": "rune-prison",
+      "play_rate": 0.2975,
+      "avg_copies": 1.4
+    },
+    {
+      "card_id": "meditation",
+      "play_rate": 0.1901,
+      "avg_copies": 2.2
+    },
+    {
+      "card_id": "unyielding-spirit",
+      "play_rate": 0.1726,
+      "avg_copies": 1.4
+    }
+  ],
+  "kennen-heart-of-the-tempest": [
+    {
+      "card_id": "charm",
+      "play_rate": 0.42,
+      "avg_copies": 3
+    },
+    {
+      "card_id": "ride-the-wind",
+      "play_rate": 0.33,
+      "avg_copies": 2
+    },
+    {
+      "card_id": "defy",
+      "play_rate": 0.31,
+      "avg_copies": 2
+    }
+  ],
+  "irelia-blade-dancer": [
+    {
+      "card_id": "en-garde",
+      "play_rate": 0.41,
+      "avg_copies": 3
+    },
+    {
+      "card_id": "punch-first",
+      "play_rate": 0.34,
+      "avg_copies": 2
+    },
+    {
+      "card_id": "stupefy",
+      "play_rate": 0.24,
+      "avg_copies": 2
+    }
+  ],
+  "_meta": {
+    "source": "riftdecks.com",
+    "metagame_id": 1,
+    "fetched_at": "2026-08-19T18:47:27.586033+00:00",
+    "legend_count": 1,
+    "refreshed_legends": [
+      "master-yi-wuju-bladesman"
+    ]
+  }
+}

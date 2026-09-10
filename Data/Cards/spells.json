@@ -644,7 +644,12 @@
     ],
     "rarity": "Common",
     "energy_cost": 1,
-    "power_cost": [],
+    "power_cost": [
+      {
+        "domain": "fury",
+        "amount": 1
+      }
+    ],
     "keywords": [
       {
         "id": "action"

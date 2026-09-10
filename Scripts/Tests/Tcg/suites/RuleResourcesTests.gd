@@ -2,6 +2,7 @@ class_name RuleResourcesTests
 extends RefCounted
 
 const TcgTestHarness = preload("res://Scripts/Tests/Tcg/TcgTestHarness.gd")
+const BriefStateSerializerScript = preload("res://Scripts/AI/BriefStateSerializer.gd")
 
 static func run(assertions) -> void:
 	_test_tap_adds_energy(assertions)
@@ -22,6 +23,7 @@ static func run(assertions) -> void:
 	_test_play_from_hidden_target_restricted_to_hidden_battlefield(assertions)
 	_test_kaisa_spell_rainbow_pays_spell_only(assertions)
 	_test_kaisa_spell_rainbow_legal_moves(assertions)
+	_test_kaisa_legend_in_brief_state(assertions)
 
 
 static func _test_tap_adds_energy(assertions) -> void:
@@ -68,6 +70,37 @@ static func _test_kaisa_spell_rainbow_legal_moves(assertions) -> void:
 		"spell-only rainbow makes matching spell legal")
 	assertions.assert_true(not ("play jinx-demolitionist" in moves),
 		"spell-only rainbow does not make unit power costs legal")
+
+
+static func _test_kaisa_legend_in_brief_state(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"legend": "kaisa-daughter-of-the-void", "pool": {"energy": 3, "power": {}},
+			 "hand": ["void-seeker"], "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	var brief: Dictionary = BriefStateSerializerScript.serialize(h.gs(), 0, false)
+	var legend = brief.get("my_legend", null)
+	assertions.assert_true(legend is Dictionary, "brief state includes my_legend")
+	assertions.assert_eq(str(legend.get("instance_id", "")), "legend-p0", "legend instance id")
+	assertions.assert_true(str(legend.get("name", "")).find("Kai") >= 0, "legend name is present")
+	assertions.assert_eq(bool(legend.get("is_exhausted", true)), false, "legend starts ready")
+	assertions.assert_true(str(legend.get("effect_text", "")).find("rainbow") >= 0,
+		"legend effect text describes the rainbow rune")
+	var abilities: Array = legend.get("abilities", [])
+	assertions.assert_true(not abilities.is_empty(), "legend abilities are listed")
+	assertions.assert_eq(str(abilities[0].get("ability_type", "")), "activated",
+		"Kai'Sa legend ability is activated")
+	assertions.assert_eq(bool(abilities[0].get("is_reaction", false)), true,
+		"Kai'Sa legend ability is a Reaction")
+	var cats: Array = brief.get("legal_action_categories", [])
+	assertions.assert_true("use_ability" in cats, "legal categories include use_ability")
+	assertions.assert_true("use legend-p0" in brief.get("legal_moves", []),
+		"legal moves include use legend-p0")
 
 
 # BUG-001: power costs must auto-recycle channeled runes when the pool is short.

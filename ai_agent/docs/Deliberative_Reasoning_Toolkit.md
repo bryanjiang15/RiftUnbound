@@ -282,7 +282,7 @@ All Reasoner work lands on a **separate branch** behind `RIFTBOUND_REASONER`
 | **2** | ✅ **DONE** — Godot `EngineServer` (`POST /engine/simulate`, `/engine/search`); live `simulate` / `deepen` / `search_for` with Phase-1 fail-safe fallback. | Live "what if X?" | Phase 0 |
 | **3** | ✅ **DONE (deterministic contracts)** — Reasoner stage (§5a) now uses request-scoped engine-line registries, native `commit_line` / `emit_goals` terminals, strict non-empty goals, complete root/hash-matched replay, and a successful `search_for` / `deepen` gate. Deterministic Python/Godot regressions pass; the live behavioral sample remains — see `Reasoner_Investigation_Improvements.md`. | **The deep-planning payoff** | Phase 2 |
 | **4** | SPRT self-play gate — Reasoner seat vs. current strategist+actor seat; commit only on a significant win-rate lift (`Goal_Oriented_Strategist.md §8`). Run only after the corrective plan’s acceptance criteria pass. | Evidence it helped | Phase 3 + corrective plan |
-| **5+** *(deferred)* | Opponent modeling: `simulate_opponent` (4.3, assumption-driven) → `branch` (4.5) → `rollout` (4.4), each behind the same gate. | Adversarial + multi-turn reasoning | Phase 3 |
+| **5+** *(deferred)* | Opponent modeling: `simulate_opponent` (4.3, assumption-driven) → `branch` (4.5) → `rollout` (4.4), each behind the same gate. Offline **oracle** (`information_mode=oracle_hidden_state`) vs live **belief** sampling (`belief_hidden_state`) are specified in `ai_agent/analysis/rollout_contracts.py`; v1 offline judges use same-turn `public_decision` only. | Adversarial + multi-turn reasoning | Phase 3 |
 
 ## 8. Open questions
 
@@ -302,6 +302,11 @@ All Reasoner work lands on a **separate branch** behind `RIFTBOUND_REASONER`
   every result with its assumption set. Open sub-question: seed a *default*
   assumption set from opponent history / archetype (ties into `Memory_Roadmap.md`
   LTM work) so the LLM does not have to specify from scratch each time.
+- **Offline vs live information modes** — offline post-game analysis may use an
+  **oracle** opponent policy (captured real hidden hand → `oracle_hidden_state`)
+  as an upper-bound diagnosis. Live search must use a **belief** policy (sampled
+  hidden hands → `belief_hidden_state`) and never treat oracle results as live
+  truth. V1 move-quality judges do neither: same-turn, `opponent_policy=none`.
 
 ## 9. Prior art
 
