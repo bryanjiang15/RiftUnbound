@@ -1,7 +1,7 @@
 # Riftbound Simulation — Gaps & Implementation Plan
 
 > Analysis of the Godot TCG simulation (`Scripts/Game/`) against card data in `Data/Cards/` and the rules distilled in `riftbound-implementation-rules.md` and `riftbound-card-data-schema.md`.  
-> Generated: 2026-05-26. Updated: 2026-06-29.
+> Generated: 2026-05-26. Updated: 2026-08-10.
 
 ---
 
@@ -17,15 +17,15 @@ This document records **what works today**, **what card data expects**, and **wh
 
 | File | Count | Notes |
 |---|---|---|
-| `units.json` | 20 | Fury/Chaos starter units + Calm/Body Master Yi units |
-| `spells.json` | 12 | Action, Reaction, Hidden, and Master Yi spells |
-| `gear.json` | 1 | Scrapheap (on-play / on-discard / on-death triggers) |
-| `battlefields.json` | 4 | Conquer/defend triggers (incl. Fortified Position) |
-| `legends.json` | 2 | Jinx — Loose Cannon, Master Yi — Wuju Bladesman |
-| `runes.json` | 4 | Fury, Chaos, Calm, Body Runes (tap + recycle activated) |
-| `tokens.json` | 0 | Empty — no token definitions yet |
+| `units.json` | 36 | Fury/Chaos starter units, Calm/Body Master Yi units, and WIP Kai'Sa/Fury/Mind content |
+| `spells.json` | 24 | Action, Reaction, Hidden, Master Yi, and WIP Kai'Sa/Fury/Mind spells |
+| `gear.json` | 2 | Scrapheap draw hooks and Zhonya's Hourglass death-replacement sacrifice |
+| `battlefields.json` | 7 | Conquer/defend triggers and battlefield keywords such as `no_move_to_base` |
+| `legends.json` | 3 | Jinx — Loose Cannon, Master Yi — Wuju Bladesman, plus WIP legend data |
+| `runes.json` | 5 | Fury, Chaos, Calm, Body, and Mind Runes (tap + recycle activated) |
+| `tokens.json` | 1 | `sprite-3m` Temporary unit token for Sprite Mother |
 
-**Starter deck scope:** 24 unique card IDs, 40+ main-deck cards each, 12 runes, 3 battlefields per deck (2 placed at game start).
+**Configured deck scope:** starter decks for both players, `master-yi-calm-body`, `master-yi-shanghai-open`, and `kaisa-fury-mind-wip`; decks still use 12 runes and 3 battlefields, with 2 battlefields placed at game start.
 
 ---
 
@@ -63,14 +63,14 @@ These effects are still unhandled by `AbilityResolver.gd` and should be treated 
 | `spend_buff` | No handler |
 | `banish` | No handler, though `PlayerState` has a banishment zone |
 | `gain_xp` | No handler |
-| `prevent_damage` | No handler |
 | `custom` | No general script-loading path for bespoke card behavior; specific custom costs may be hard-coded in controller/chain paths |
 
 Other content-facing gaps:
 
-- `play_token` has a handler, but `Data/Cards/tokens.json` is empty.
+- `play_token` has a handler and `sprite-3m` data exists; new token-creating cards still need matching entries in `Data/Cards/tokens.json`.
 - `vision` has no implementation and no current cards.
 - `on_attack` is not emitted. `on_defend` is emitted at combat start and is used by Reaver's Row.
+- `prevent_damage` is implemented only for spell/ability damage prevention this turn (`source: "spells_and_abilities"` or `"all"`). Other damage sources would need new resolver coverage.
 
 ### 4.2 Rule fidelity gaps
 
@@ -100,14 +100,16 @@ Passive keyword and Might auras are refreshed by `emit_passive_auras()` and curr
 - Use `GameController.try_pay_cost()` for costs with energy or power so auto-tap/auto-recycle can satisfy shortfalls.
 - Discard costs go through `begin_discard()` to preserve player choice and `on_discard` triggers.
 - `play_self` assumes the dispatcher already paid the ability cost; `_play_self()` only moves the card from trash to base.
-- `CostCalculator.compute_play_cost()` applies card-local `cost_reduction`, `per_card_in_trash`, Legion conditions, and Accelerate surcharge.
+- `CostCalculator.compute_play_cost()` applies card-local `cost_reduction`, `per_card_in_trash`, ability conditions such as Legion, and Accelerate surcharge.
+- Legion discounts are represented only as `cost_reduction` abilities with `condition.type = "legion"`; there is no second keyword-based discount pass. This keeps Noxus Hopeful at 4 → 2 energy after another card has been played.
 - Meditation's `cost.custom = may_exhaust_friendly_unit` is a hard-coded chain/controller continuation, not a general custom-cost plug-in system.
 
 ### 4.5 Developer-facing command pitfalls
 
 - `_cmd_help()` lists `play ... from hidden`, but currently omits `hide`, `equip`, `assign`, and `choose`.
 - The controller expects `equip <gear-id> target <unit-id>`. `LegalMoveEnumerator` currently emits `equip <gear-id> to <unit-id>`, which is not accepted by `_cmd_equip()`.
-- Prompt types in use: `choose_target`, `choose_discard`, `choose_optional`, `choose_battlefield`, `choose_trash_return`.
+- Prompt types in use: `choose_target`, `choose_discard`, `choose_optional`, `choose_battlefield`, `choose_trash_return`, and `choose_mode`.
+- `choose_battlefield` is used both for staged combat/showdown selection and for spell-driven movement destinations (`move_destination_resume`, e.g. Charm). `choose_mode` currently resumes Qiyana's draw-or-channel choice.
 
 ### 4.6 Tests
 
@@ -141,6 +143,8 @@ Legend: ✅ works · ⚠️ partial · ❌ broken/missing
 | Undercover Agent | ✅ | Deathknell `discard_then_draw` with player choice |
 | Traveling Merchant | ✅ | `on_move` `discard_then_draw` with player choice |
 | Rhasa the Sunderer | ✅ | `cost_reduction` per card in trash applies in `CostCalculator` |
+| Noxus Hopeful | ✅ | Legion discount applies once through conditional `cost_reduction` (4 → 2 energy) |
+| Qiyana — Victorious | ✅ | `on_conquer` prompts `choose_mode` to draw 1 or channel 1 rune exhausted |
 
 ### Spells
 
@@ -151,6 +155,9 @@ Legend: ✅ works · ⚠️ partial · ❌ broken/missing
 | Fight or Flight | ✅ | `move_unit_to_base`; Hidden hide/play-from-hidden workflow covered by resource tests |
 | Gust | ✅ | `return_to_hand` with Might ≤ 3 target filter |
 | Fading Memories | ✅ | `give_keyword` accepts nested keyword params; Temporary cleanup is implemented |
+| Falling Star | ✅ | Costs 2 energy + 2 Fury power; two chosen damage targets may repeat |
+| Charm | ✅ | `move_unit` with `destination: choose` prompts for base or another battlefield |
+| Unyielding Spirit | ✅ | `prevent_damage` blocks spell/ability damage for the rest of the turn |
 
 ### Gear, Battlefields, Legend
 
@@ -160,7 +167,9 @@ Legend: ✅ works · ⚠️ partial · ❌ broken/missing
 | Zaun Warrens | ✅ | `on_conquer` → `discard_then_draw` |
 | Targon's Peak | ✅ | `on_conquer` queues delayed `ready_runes` for end of turn |
 | Reaver's Row | ✅ | `on_defend` optional `move_unit_to_base` through battlefield trigger dispatch |
+| Vilemaw's Lair | ✅ | `no_move_to_base` blocks standard and effect-based moves from that battlefield to base |
 | Jinx — Loose Cannon | ✅ | `beginning_phase_start` draw with hand size condition |
+| Zhonya's Hourglass | ✅ | `CleanupProcessor` consumes `death_replacement_sacrifice_gear` to sacrifice the Gear and recall/heal/exhaust a dying friendly unit |
 
 ### Runes
 
@@ -187,8 +196,8 @@ Work in this order to close the remaining verified gaps without reworking implem
 
 ### 6.3 Future content hooks
 
-1. Implement unsupported effects only when cards need them: `spend_buff`, `banish`, `gain_xp`, `prevent_damage`, and `custom`.
-2. Populate `tokens.json` before relying on `play_token`.
+1. Implement unsupported effects only when cards need them: `spend_buff`, `banish`, `gain_xp`, and general `custom`.
+2. Add token definitions to `tokens.json` before relying on new `play_token.token_type` values.
 3. Add `vision` and `on_attack` dispatch when cards introduce those mechanics.
 4. Extend deck validation for signature-card limits and Chosen Champion identity handling.
 
@@ -274,6 +283,16 @@ the Main Menu ("Master Yi Deck (vs AI)").
 - Optional triggered abilities with more than one valid target can prompt for the target
   after the controller accepts the trigger. Reaver's Row and Fortified Position use this
   for `on_defend`.
+- Spell/effect movement can ask for a destination with `move_unit` + `destination: "choose"`.
+  `GameController._handle_choose_battlefield` resumes the move, and Vilemaw's Lair removes
+  `base` from valid destinations through the `no_move_to_base` battlefield keyword.
+- `prevent_damage` sets `GameState.prevent_spell_ability_damage` for the turn; `deal_damage`,
+  combat-wide spell damage, and chosen-unit fight damage check this flag before adding damage.
+- `choose_draw_or_channel` prompts with `choose_mode` when a controller is present, and falls
+  back to channel-then-draw behavior for direct resolver simulations without a controller.
+- `CleanupProcessor._try_sacrifice_gear_death_replacement` handles
+  `death_replacement_sacrifice_gear` directly; it is intentionally not an
+  `AbilityResolver` match case.
 
 ### Remaining gaps (require further engine work)
 
@@ -330,7 +349,7 @@ so `targons-peak` and `reavers-row` were added to round out the deck's `battlefi
 [ ] spend_buff          [x] move_unit           [x] stun_unit
 [ ] banish              [x] recycle             [x] discard
 [x] channel_rune        [x] ready_permanent     [x] play_token
-[ ] gain_xp             [x] gain_points         [ ] prevent_damage
+[ ] gain_xp             [x] gain_points         [x] prevent_damage
 [x] cost_reduction      [x] counter_spell       [x] attach
 [x] predict             [x] return_to_hand      [x] enter_ready
 [x] return_from_trash   [~] custom
@@ -340,12 +359,14 @@ so `targons-peak` and `reavers-row` were added to round out the deck's `battlefi
 [x] other_friendly_units_enter_ready
 [x] deal_damage_equal_to_discarded_energy_cost
 [x] channel_rune_or_draw
+[x] choose_draw_or_channel
 [x] units_enter_ready_this_turn
 [x] give_might_with_alone_bonus
 [x] deal_damage_all_enemies_in_combat
 [x] fight_chosen_units
 [x] conditional_might   [x] aura_might
 [x] death_replacement_recall
+[x] death_replacement_sacrifice_gear
 
 [x] implemented   [~] specific handler exists, but no general framework   [ ] missing
 ```

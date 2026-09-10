@@ -503,7 +503,8 @@ Prompt `type` values currently handled by the controller:
 | `choose_target` | `choose <instance-id>` | Target prompts may be queued before a spell enters the Chain when multiple resolution abilities need targets |
 | `choose_discard` | `choose <hand-card-id>` | Used for discard costs/effects so `on_discard` triggers fire correctly |
 | `choose_optional` | `choose yes` / `choose no` | Optional ability or optional cost branch |
-| `choose_battlefield` | `choose <battlefield-id>` | Selects a staged combat/showdown battlefield |
+| `choose_battlefield` | `choose <battlefield-id>` | Selects a staged combat/showdown battlefield; also resumes spell/effect move destinations such as Charm |
+| `choose_mode` | `choose draw` / `choose channel` | Selects a modal effect branch, currently Qiyana's draw-or-channel conquer trigger |
 | `choose_trash_return` | `choose <trash-card-id>` | Used by `return_from_trash` when multiple matching trash cards are valid; a single match returns automatically |
 
 Discard prompts appear when an effect or cost requires discarding from hand:
