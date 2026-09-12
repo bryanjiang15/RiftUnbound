@@ -90,7 +90,7 @@ static func can_afford(player_index: int, cost: Dictionary, gs: GameState, sourc
 	var ps: PlayerState = gs.players[player_index]
 	if cost.get("discard", 0) > ps.hand.size():
 		return false
-	if cost.get("recycle", 0) > ps.deck.size():
+	if cost.get("recycle", 0) > ps.trash.size():
 		return false
 	return ps.rune_pool.can_pay(cost.get("energy", 0), cost.get("power", []), _payment_context(source))
 
@@ -103,7 +103,7 @@ static func can_afford_with_autopay(player_index: int, cost: Dictionary, gs: Gam
 	var ps: PlayerState = gs.players[player_index]
 	if cost.get("discard", 0) > ps.hand.size():
 		return false
-	if cost.get("recycle", 0) > ps.deck.size():
+	if cost.get("recycle", 0) > ps.trash.size():
 		return false
 
 	# Simulate auto-pay without mutating game state.
@@ -201,9 +201,9 @@ static func pay_cost(player_index: int, cost: Dictionary, source: CardInstance, 
 		ps.recycle_to_bottom(source, true)
 	var recycle_n = int(cost.get("recycle", 0))
 	for _i in range(recycle_n):
-		if ps.deck.is_empty():
+		if ps.trash.is_empty():
 			break
-		var card = ps.deck.pop_back()
+		var card = ps.trash.pop_back()
 		ps.recycle_to_bottom(card, false)
 	# Discard leg is handled via GameController.begin_discard (player choice + on_discard triggers).
 
