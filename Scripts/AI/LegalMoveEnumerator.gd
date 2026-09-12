@@ -142,7 +142,7 @@ static func _add_playable_cards(gs: GameState, ps: PlayerState, player_index: in
 			moves.append("play %s" % card.instance_id)
 			for perm in ps.base_permanents:
 				if perm.definition.card_type == "unit":
-					moves.append("equip %s to %s" % [card.instance_id, perm.instance_id])
+					moves.append("equip %s target %s" % [card.instance_id, perm.instance_id])
 		elif card.definition.card_type == "spell":
 			var tab = _choose_one_target_ability(card)
 			if tab.is_empty():

@@ -63,6 +63,7 @@ static func run(assertions) -> void:
 	_test_charm_move_contests_occupied_battlefield(assertions)
 	_test_charm_onto_controlled_battlefield_defends(assertions)
 	_test_charm_onto_controlled_battlefield_triggers_on_defend(assertions)
+	_test_equip_command_syntax_regression(assertions)
 
 
 static func _test_charm_move_contests_occupied_battlefield(assertions) -> void:
@@ -1172,6 +1173,34 @@ static func _test_play_targeted_spell_enumerates_targets(assertions) -> void:
 		"targeted spell enumerates an explicit target option")
 	assertions.assert_true(not ("play void-seeker" in moves),
 		"targeted spell does not offer an untargeted play")
+
+
+# Regression test for AI/console command alignment: LegalMoveEnumerator must
+# emit equip commands in the syntax GameController expects (equip … target …).
+static func _test_equip_command_syntax_regression(assertions) -> void:
+	var h = TcgTestHarness.new()
+	h.load_fixture_dict({
+		"first_player": 0, "phase": "MAIN", "state": "NEUTRAL_OPEN",
+		"battlefields": ["zaun-warrens", "targons-peak"],
+		"players": [
+			{"pool": {"energy": 5, "power": {}}, "hand": ["scrapheap"],
+			 "base": [{"id": "stalwart-poro", "owner": 0}],
+			 "deck_size": 5, "rune_deck_size": 12},
+			{"deck_size": 5, "rune_deck_size": 12}
+		]
+	})
+	var moves: Array = LegalMoveEnumerator.enumerate(h.gs(), 0)
+	assertions.assert_true("equip scrapheap target stalwart-poro" in moves,
+		"enumerator emits equip with 'target' syntax")
+	assertions.assert_true(not ("equip scrapheap to stalwart-poro" in moves),
+		"enumerator does not emit old 'to' syntax")
+	# Verify the enumerated command is accepted by the controller
+	h.cmd(0, "equip scrapheap target stalwart-poro")
+	assertions.assert_true(not h.controller.last_command_error,
+		"controller accepts enumerated equip command")
+	var unit = h.gs().players[0].get_board_instance("stalwart-poro")
+	assertions.assert_true(unit.attached_gear.size() == 1,
+		"gear is attached after equip command")
 
 
 static func _harness_with_play(base_ally: Dictionary, extra_hand: Array, play_id: String = "", energy: int = 10, runes: Array = []) -> TcgTestHarness:
