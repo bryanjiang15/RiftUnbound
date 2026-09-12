@@ -933,13 +933,28 @@ static func _test_vi_recycle_cost(assertions) -> void:
 		"battlefields": ["zaun-warrens", "targons-peak"],
 		"players": [
 			{"pool": {"energy": 0, "power": {}}, "battlefield-a": [{"id": "vi-destructive", "owner": 0}],
+			 "trash": [{"id": "noxus-hopeful"}, {"id": "flame-chompers"}],
 			 "deck_size": 5, "rune_deck_size": 12},
 			{"deck_size": 5, "rune_deck_size": 12}
 		]
 	})
-	var deck_before = h.gs().players[0].deck.duplicate()
+	var trash_before = h.gs().players[0].trash.size()
+	var deck_before = h.gs().players[0].deck.size()
+	assertions.assert_eq(trash_before, 2, "player starts with 2 cards in trash")
+	
 	h.cmd(0, "use vi-destructive")
-	assertions.assert_log_contains(h.controller, "Might", "vi recycle cost consumes deck card")
+	assertions.assert_log_contains(h.controller, "Might", "vi ability activated")
+	assertions.assert_eq(h.gs().players[0].trash.size(), trash_before - 1, "one card recycled from trash")
+	assertions.assert_eq(h.gs().players[0].deck.size(), deck_before + 1, "recycled card added to deck")
+	
+	# Use ability a second time
+	h.cmd(0, "use vi-destructive")
+	assertions.assert_log_contains(h.controller, "Might", "vi ability activated second time")
+	assertions.assert_eq(h.gs().players[0].trash.size(), 0, "all trash cards recycled")
+	
+	# Try to use when trash is empty - should fail
+	h.cmd(0, "use vi-destructive")
+	assertions.assert_log_contains(h.controller, "[ERROR]", "cannot use ability without trash cards")
 
 
 static func _test_raging_soul_keywords(assertions) -> void:
