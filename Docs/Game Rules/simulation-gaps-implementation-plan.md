@@ -138,7 +138,7 @@ Legend: ✅ works · ⚠️ partial · ❌ broken/missing
 | Magma Wurm | ✅ | `other_friendly_units_enter_ready` readies other friendly units on play |
 | Raging Soul | ✅ | Conditional `gain_keywords` applies after a discard this turn |
 | Jinx — Demolitionist | ✅ | Accelerate + player-chosen discard on play |
-| Vi — Destructive | ✅ | Activated `give_might` pays `cost.recycle: 1` from deck |
+| Vi — Destructive | ✅ | Activated `give_might` pays `cost.recycle: 1` from trash to deck |
 | Cemetery Attendant | ✅ | `return_from_trash` prompts with `choose_trash_return` when multiple unit cards are in trash |
 | Undercover Agent | ✅ | Deathknell `discard_then_draw` with player choice |
 | Traveling Merchant | ✅ | `on_move` `discard_then_draw` with player choice |
