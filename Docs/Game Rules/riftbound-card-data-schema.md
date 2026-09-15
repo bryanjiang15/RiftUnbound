@@ -112,6 +112,17 @@ Abilities are defined as structured objects. They are **not free-form text** in 
 | `is_action` | `true` / `false` | Can be used during Showdowns |
 | `is_reaction` | `true` / `false` | Can be used during Closed States on any player's turn |
 
+Cost sub-fields are paid by `CostCalculator.gd` after `GameController.try_pay_cost()` confirms resources are available:
+
+| Cost key | Meaning | Notes |
+|---|---|---|
+| `energy` | Spend Energy from the Rune Pool | `try_pay_cost()` may auto-tap channeled runes when the pool is short |
+| `power` | Spend domain Power from the Rune Pool | `try_pay_cost()` may auto-recycle matching channeled runes for Power |
+| `exhaust` | Exhaust the ability source | Used by tap-style rune abilities and exhausted activated costs |
+| `recycle` | Recycle N cards from the controller's trash to the bottom of the main deck | This is a trash-card cost, e.g. Vi — Destructive's `cost.recycle: 1` |
+| `discard` | Discard N cards from hand | Routed through `begin_discard()` so player choice and `on_discard` triggers resolve |
+| `recycle_self` | Recycle the source rune itself to the bottom of the rune deck | Separate from `recycle`; used by basic rune Power abilities |
+
 ### Implemented Conditions
 
 `ConditionEvaluator.gd` treats unknown condition types as `true`, so card authors should use only the implemented names below unless they also add evaluator coverage and tests.
