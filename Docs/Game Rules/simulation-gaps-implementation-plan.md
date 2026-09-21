@@ -1,7 +1,7 @@
 # Riftbound Simulation — Gaps & Implementation Plan
 
 > Analysis of the Godot TCG simulation (`Scripts/Game/`) against card data in `Data/Cards/` and the rules distilled in `riftbound-implementation-rules.md` and `riftbound-card-data-schema.md`.  
-> Generated: 2026-05-26. Updated: 2026-08-10.
+> Generated: 2026-05-26. Updated: 2026-09-21.
 
 ---
 
@@ -48,7 +48,7 @@ These systems are present and usable for the starter-deck TCG simulation:
 | Conditions / targeting | ✅ | `ConditionEvaluator.gd` and `TargetResolver.gd` cover hand size, discard-this-turn, Legion, Might filters, battlefield-local units, trash units, and unit-or-gear targets |
 | Keywords (partial) | ✅ | Accelerate, Assault, Shield, Tank, Ganking, Deathknell, Hidden, Temporary, Ambush gate, Deflect surcharge |
 | Effect handlers (partial) | ✅ | Current starter-pool and Master Yi handlers are implemented; unused schema effects remain missing (see §4.1) |
-| AI integration | ✅ (with caveats) | `BriefStateSerializer`, `LegalMoveEnumerator`, HTTP agent loop; see §4.5 for command-format pitfalls |
+| AI integration | ✅ | `BriefStateSerializer`, `LegalMoveEnumerator`, HTTP agent loop; enumerated legal moves should pass the same console validation as human commands |
 
 ---
 
@@ -104,10 +104,10 @@ Passive keyword and Might auras are refreshed by `emit_passive_auras()` and curr
 - Legion discounts are represented only as `cost_reduction` abilities with `condition.type = "legion"`; there is no second keyword-based discount pass. This keeps Noxus Hopeful at 4 → 2 energy after another card has been played.
 - Meditation's `cost.custom = may_exhaust_friendly_unit` is a hard-coded chain/controller continuation, not a general custom-cost plug-in system.
 
-### 4.5 Developer-facing command pitfalls
+### 4.5 Developer-facing command contract notes
 
-- `_cmd_help()` lists `play ... from hidden`, but currently omits `hide`, `equip`, `assign`, and `choose`.
-- The controller expects `equip <gear-id> target <unit-id>`. `LegalMoveEnumerator` currently emits `equip <gear-id> to <unit-id>`, which is not accepted by `_cmd_equip()`.
+- `_cmd_help()` lists the playable console surface, including `hide`, `equip`, `assign`, and `choose`.
+- Gear attachment commands use `equip <gear-id> target <unit-id>`. `_cmd_equip()` delegates to `_cmd_use()` with a target, and `LegalMoveEnumerator` emits the same syntax when a Gear in hand can attach to a friendly unit at base. The old `equip <gear-id> to <unit-id>` form is intentionally unsupported.
 - Prompt types in use: `choose_target`, `choose_discard`, `choose_optional`, `choose_battlefield`, `choose_trash_return`, and `choose_mode`.
 - `choose_battlefield` is used both for staged combat/showdown selection and for spell-driven movement destinations (`move_destination_resume`, e.g. Charm). `choose_mode` currently resumes Qiyana's draw-or-channel choice.
 
@@ -183,18 +183,12 @@ Legend: ✅ works · ⚠️ partial · ❌ broken/missing
 
 Work in this order to close the remaining verified gaps without reworking implemented systems.
 
-### 6.1 Console / AI command alignment
-
-1. Update `_cmd_help()` to list `hide`, `equip`, `assign`, and `choose`.
-2. Align `LegalMoveEnumerator` gear commands with `_cmd_equip()` (`equip <gear-id> target <unit-id>`).
-3. Add a regression for AI-enumerated equip commands once gear attachment is exercised by the starter decks.
-
-### 6.2 Remaining starter-card fidelity
+### 6.1 Remaining starter-card fidelity
 
 1. Wire Scrapheap's gear `on_death` to an attached-death or gear-destruction path if that rule is intended for the simulation.
 2. Decide whether mandatory triggered abilities with multiple valid targets should prompt instead of auto-picking the first valid target.
 
-### 6.3 Future content hooks
+### 6.2 Future content hooks
 
 1. Implement unsupported effects only when cards need them: `spend_buff`, `banish`, `gain_xp`, and general `custom`.
 2. Add token definitions to `tokens.json` before relying on new `play_token.token_type` values.
