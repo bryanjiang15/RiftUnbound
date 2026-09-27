@@ -568,6 +568,8 @@ func _try_commit_reasoner_line(gs: GameState, emit: Dictionary) -> bool:
 	var live_root := _live_hash(gs)
 	if str(emit.get("root_state_hash", "")) != live_root or \
 			str(committed.get("root_state_hash", "")) != live_root:
+		var expected_hash := str(committed.get("root_state_hash", ""))
+		print("[HASH_DIVERGE] root_state_hash mismatch at step -1: expected=%s actual=%s" % [expected_hash, live_root])
 		push_warning("AIPlayer: reasoner root hash mismatch; base search.")
 		return false
 	var moves: Array = committed.get("moves", [])
@@ -581,6 +583,8 @@ func _try_commit_reasoner_line(gs: GameState, emit: Dictionary) -> bool:
 		if str(expected) == "":
 			return false
 	if str(hashes[0]) != live_root:
+		var expected_hash := str(hashes[0])
+		print("[HASH_DIVERGE] expected_pre_hash mismatch at step 0: expected=%s actual=%s" % [expected_hash, live_root])
 		push_warning("AIPlayer: reasoner step-0 hash mismatch; base search.")
 		return false
 	var first := str(moves[0])
@@ -1067,7 +1071,9 @@ func _play_committed_step(gs: GameState) -> bool:
 	var idx := _committed_line_index
 	if idx < hashes.size():
 		var expected := str(hashes[idx])
-		if expected != "" and _live_hash(gs) != expected:
+		var actual := _live_hash(gs)
+		if expected != "" and actual != expected:
+			print("[HASH_DIVERGE] expected_pre_hash mismatch at step %d: expected=%s actual=%s" % [idx, expected, actual])
 			_drop_committed_line()
 			return false
 	var cmd := str(moves[idx])
