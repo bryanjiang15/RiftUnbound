@@ -17,6 +17,9 @@ Post-game analyst plan: `LLM_Data_Analysis_Loop.md`. Weight-tuning algorithms:
   weighted-sum eval via `ScoreModel.build_score_features` → per-term
   `score_breakdown` (exact additive attribution; no SHAP needed). Optional
   transient GoalSet overlay (`RIFTBOUND_GOALS`).
+- **`Scripts/Game/LineRiskProbe.gd` + `ai_agent/risk_score.py`** — same-turn
+  reaction-risk pass. It annotates candidates with signed risk penalties and a
+  `risk_adjusted_score` used by live argmax / fallback / Reasoner ranking.
 - **Line selection** — `choose_line` (LLM), argmax (`RIFTBOUND_SEARCH_ARGMAX`),
   or single-line short-circuit. Strategist may bias generation/selection; a
   future Reasoner may commit lines directly
@@ -89,6 +92,11 @@ self-play import). Details in §2.
 - `chosen_line_score`, `best_candidate_score`
 - `regret` = best − chosen
 - `score_margin` = best − 2nd-best
+- These score/margin fields use the same selection key as live play:
+  `risk_adjusted_score` when present, otherwise raw `score`. This keeps capture
+  aligned with `choose_line`, argmax, and fallback behavior, but it means
+  `search_decisions.best_candidate_score` may not match the highest
+  `candidate_lines.score` when risk is on.
 - `chosen_breakdown_json` — per-term `score_breakdown`
 - `chosen_features_json` — raw `build_score_features` dict (**shipped** on
   `CandidateLine.features`; required for Texel — do not reverse from breakdown at
@@ -107,6 +115,23 @@ line even generated?"
 - `id` PK, `search_decision_id` FK
 - `line_id`, `rank`, `score`, `chosen` (bool)
 - `moves_json`, `breakdown_json`, `features_json`, `resolved_state_json`
+- `search_state_json` — concrete post-line board snapshot used by analysis tools
+- `risk_json` — raw line-risk summary from `LineRiskProbe`: worst/expected
+  interruption deltas, threat list, recapture flags, and recapture scores when
+  expanded
+- `risk_penalty` — signed score adjustment from `risk_score.py` (normally `<= 0`
+  when an assumed interruption hurts the line)
+- `risk_adjusted_score` — `score + risk_penalty`; this is the persisted rank key
+  and may differ from raw `score`
+- `risk_adjustment_method` — `expected`, `pessimistic_worst`, `recapture_gap`, or
+  `none`
+- `risk_expanded` — bool; true means auto-expand searched a recapture line for a
+  risky candidate. It does not change the card-in-hand belief probability.
+
+**Analyst pitfall:** `rank = 0` is the live-play leader by selection score, not
+necessarily the highest raw unanswered `score`. For risk-aware queries, sort by
+`COALESCE(risk_adjusted_score, score)` and keep raw `score` visible when you need
+to separate eval strength from interrupt vulnerability.
 
 ### C. `decision_snapshots` — full queryable state at each decision
 Replaces hash-only. Store compact normalized `BriefState` JSON + extracted scalar
