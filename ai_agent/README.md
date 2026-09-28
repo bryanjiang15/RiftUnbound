@@ -310,15 +310,18 @@ later score tuning, card statistics, and post-game review (see
 - `weight_versions` — the active `Data/AI/scoring_profile.json`, hashed + tagged
   with the current git SHA, recorded on server start. Search requests can also
   carry a per-seat profile JSON; each distinct profile gets its own row.
-- `search_decisions` — one row per searched decision: chosen/best score, regret,
-  score margin, the chosen line's raw feature vector (`chosen_features_json`) and
-  `score_breakdown`, search stats, `selector_source` (`llm` | `fallback` |
-  `argmax`), `origin`, and the deciding seat (`my_player_index`). When goals or
-  the Reasoner produce an overlay, the row also stores `goals_source`,
-  `goal_set_json`, `overlay_json`, `chosen_overlay_delta`, and
-  `chosen_goal_achieved_json`.
-- `candidate_lines` — every candidate per decision (rank, score, moves, features,
-  breakdown) for search-vs-eval-vs-selection error analysis.
+- `search_decisions` — one row per searched decision: chosen/best selection
+  score, regret, score margin, the chosen line's raw feature vector
+  (`chosen_features_json`) and `score_breakdown`, search stats,
+  `selector_source` (`llm` | `fallback` | `argmax`), `origin`, and the deciding
+  seat (`my_player_index`). Selection score uses `risk_adjusted_score` when line
+  risk is attached, otherwise raw `score`. When goals or the Reasoner produce an
+  overlay, the row also stores `goals_source`, `goal_set_json`, `overlay_json`,
+  `chosen_overlay_delta`, and `chosen_goal_achieved_json`.
+- `candidate_lines` — every candidate per decision (rank, raw score, moves,
+  features, breakdown, and line-risk fields) for search-vs-eval-vs-selection
+  error analysis. `rank` follows the same selection score as live play:
+  `risk_adjusted_score` first, then raw `score` when no risk adjustment exists.
 - `decision_snapshots` — full `BriefState` + extracted scalar columns.
 - `reasoner_decisions` — compact `/reason` investigation telemetry:
   terminal kind, commit/fallback flags, tool mix, budgets, selected lineage, and
@@ -346,6 +349,13 @@ SELECT game_id, turn, my_player_index, selector_source, goals_source,
   FROM search_decisions ORDER BY id DESC LIMIT 10;
 SELECT game_id, turn, terminal_kind, committed, fallback_reason
   FROM reasoner_decisions ORDER BY id DESC LIMIT 10;
+SELECT line_id, rank, ROUND(score, 3) AS raw_score,
+       ROUND(risk_adjusted_score, 3) AS risk_adjusted,
+       ROUND(risk_penalty, 3) AS risk_penalty,
+       risk_adjustment_method, risk_expanded, chosen
+  FROM candidate_lines
+ WHERE search_decision_id = (SELECT id FROM search_decisions ORDER BY id DESC LIMIT 1)
+ ORDER BY rank ASC;
 SELECT game_id, turn, my_player_index, my_score, opp_score, board_might_diff
   FROM turn_snapshots ORDER BY id DESC LIMIT 10;
 SQL
