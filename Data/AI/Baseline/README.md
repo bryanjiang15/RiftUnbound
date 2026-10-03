@@ -70,7 +70,7 @@ This setup compares Reasoner decision-making against base-argmax search on the s
 ```bash
 python -m ai_agent.baseline_report \
   --db ai_agent/reasoner_baseline.db \
-  --log agent_search.log \
+  --log ai_agent/agent_search.log \
   --out Data/AI/Baseline/reasoner-multi-game-$(date +%Y-%m-%d)/baseline_summary.json \
   --markdown Data/AI/Baseline/reasoner-multi-game-$(date +%Y-%m-%d)/summary.md \
   --git-sha $(git rev-parse HEAD) \
@@ -85,8 +85,8 @@ BASELINE_DIR="Data/AI/Baseline/reasoner-multi-game-$(date +%Y-%m-%d)"
 
 # Copy database and logs
 cp ai_agent/reasoner_baseline.db $BASELINE_DIR/baseline.db
-cp agent_search.log $BASELINE_DIR/
-cp agent_tools.log $BASELINE_DIR/ 2>/dev/null || true
+cp ai_agent/agent_search.log $BASELINE_DIR/
+cp ai_agent/agent_tools.log $BASELINE_DIR/ 2>/dev/null || true
 
 # Create run_info.json
 cat > $BASELINE_DIR/run_info.json <<EOF
@@ -197,7 +197,7 @@ These are excluded from rate denominators.
 ### Games hang or timeout
 **Cause:** Agent service crashed or decision loop stalled.
 
-**Fix:** Check `agent_search.log` for exceptions. Restart the service and reduce `--games` for smoke testing.
+**Fix:** Check `ai_agent/agent_search.log` for exceptions. Restart the service and reduce `--games` for smoke testing.
 
 ## Acceptance Checklist
 

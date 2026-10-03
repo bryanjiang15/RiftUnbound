@@ -8,7 +8,7 @@ self-play session to archive operational reliability metrics.
 Usage:
     python -m ai_agent.baseline_report \\
       --db ai_agent/reasoner_baseline.db \\
-      --log agent_search.log \\
+      --log ai_agent/agent_search.log \\
       --out Data/AI/Baseline/reasoner-multi-game-2026-09-27/baseline_summary.json \\
       [--markdown Data/AI/Baseline/reasoner-multi-game-2026-09-27/summary.md]
 
