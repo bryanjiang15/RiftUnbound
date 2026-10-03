@@ -309,6 +309,7 @@ def get_latency_stats(db_path: str) -> dict[str, Any]:
     latencies = [row["reasoner_latency_ms"] for row in cur if row["reasoner_latency_ms"]]
     
     if not latencies:
+        conn.close()
         return {"median_ms": 0, "p95_ms": 0, "count": 0}
     
     count = len(latencies)

@@ -182,7 +182,7 @@ These are excluded from rate denominators.
 ### All fallbacks are "missing_root_hash"
 **Cause:** Engine server not running or EngineServer disabled.
 
-**Fix:** Verify `RIFTBOUND_ENGINE_SERVER=on` and port 8766 is accessible.
+**Fix:** Verify `RIFTBOUND_ENGINE_SERVER=on` and port 8770 is accessible.
 
 ### High API failure rate
 **Cause:** LLM service rate limits or network issues.
@@ -192,7 +192,7 @@ These are excluded from rate denominators.
 ### Zero commits
 **Cause:** Reasoner not enabled or agent service misconfigured.
 
-**Fix:** Verify `/health` endpoint shows `reasoner_enabled: true` and `RIFTBOUND_REASONER=on` on both sides.
+**Fix:** Verify `/health` endpoint shows `reasoner_enabled: true` and the Reasoner agent has `RIFTBOUND_REASONER=on`.
 
 ### Games hang or timeout
 **Cause:** Agent service crashed or decision loop stalled.
@@ -214,7 +214,7 @@ Before archiving a baseline, verify:
 
 ## Related Documentation
 
-- [Reasoner Multi-Game Baseline Plan](ai_agent/docs/Reasoner_Multi_Game_Baseline_Plan.md) — full specification
-- [Deliberative Reasoning Toolkit](ai_agent/docs/Deliberative_Reasoning_Toolkit.md) — Reasoner design
-- [AI Evaluation Operations](ai_agent/docs/AI_Evaluation_Operations.md) — eval pipeline (complementary)
-- [Agent README](ai_agent/README.md) — agent service flags and self-play runbook
+- [Reasoner Multi-Game Baseline Plan](../../../ai_agent/docs/Reasoner_Multi_Game_Baseline_Plan.md) — full specification
+- [Deliberative Reasoning Toolkit](../../../ai_agent/docs/Deliberative_Reasoning_Toolkit.md) — Reasoner design
+- [AI Evaluation Operations](../../../ai_agent/docs/AI_Evaluation_Operations.md) — eval pipeline (complementary)
+- [Agent README](../../../ai_agent/README.md) — agent service flags and self-play runbook

@@ -1284,11 +1284,18 @@ async def hash_divergence_endpoint(body: HashDivergenceRequest) -> dict:
     try:
         # Log in the same format baseline_report.py expects
         if body.step == -1:
-            logger.info("[HASH_DIVERGE] root_state_hash mismatch at step %d: expected=%s actual=%s",
-                       body.step, body.expected_hash, body.actual_hash)
+            msg = "[HASH_DIVERGE] root_state_hash mismatch at step %d: expected=%s actual=%s" % (
+                body.step, body.expected_hash, body.actual_hash
+            )
         else:
-            logger.info("[HASH_DIVERGE] expected_pre_hash mismatch at step %d: expected=%s actual=%s",
-                       body.step, body.expected_hash, body.actual_hash)
+            msg = "[HASH_DIVERGE] expected_pre_hash mismatch at step %d: expected=%s actual=%s" % (
+                body.step, body.expected_hash, body.actual_hash
+            )
+        logger.info(msg)
+        # Append to search log so baseline_report.compute_hash_diverge_rate can parse it
+        if _LOG_INPUTS and _search_enabled:
+            with open(_SEARCH_LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(msg + "\n")
     except Exception as exc:
         logger.warning("Hash divergence log failed: %s", exc)
     return {"status": "ok"}

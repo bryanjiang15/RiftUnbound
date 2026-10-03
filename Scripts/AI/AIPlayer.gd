@@ -1406,5 +1406,7 @@ func _capture_kind_for_url(url: String) -> String:
 		return "opponent_action"
 	if url.ends_with("/turn_snapshot"):
 		return "turn_snapshot"
+	if url.ends_with("/hash_divergence"):
+		return "hash_divergence"
 	# /game_state_event → no SQL; drop.
 	return ""
