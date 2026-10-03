@@ -408,6 +408,7 @@ def generate_baseline_summary(
         "fallback_breakdown": fallback["breakdown"],
         "hash_diverge_count": diverge["diverge_count"],
         "hash_diverge_rate": round(diverge["diverge_rate"], 3),
+        "hash_diverge_rate_denominator": diverge["committed_lines_attempted"],
         "diverge_breakdown": diverge["breakdown"],
         "tool_usage": tool_usage,
         "decision_latency": latency,
@@ -446,7 +447,7 @@ def generate_markdown_summary(summary: dict[str, Any]) -> str:
     
     lines.extend([
         "",
-        f"**Hash Diverge Rate:** {summary['hash_diverge_rate']:.1%} ({summary['hash_diverge_count']} / {summary.get('hash_diverge_rate_denominator', 'N/A')})",
+        f"**Hash Diverge Rate:** {summary['hash_diverge_rate']:.1%} ({summary['hash_diverge_count']} / {summary['hash_diverge_rate_denominator']})",
     ])
     
     if summary.get("diverge_breakdown"):

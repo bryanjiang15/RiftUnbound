@@ -43,6 +43,7 @@ def fixture_db(tmp_path):
             selected_source_lineage_json TEXT,
             tool_mix_json TEXT,
             reasoner_latency_ms INTEGER,
+            engine_latency_ms INTEGER,
             model_calls INTEGER,
             timestamp TEXT NOT NULL
         )
@@ -81,10 +82,10 @@ def fixture_db(tmp_path):
             (game_id, turn, decision_index, root_state_hash, terminal_kind, 
              committed, chosen_line_id, chosen_line_complete, fallback_reason,
              investigation_exemption, selected_source_lineage_json, tool_mix_json,
-             reasoner_latency_ms, model_calls, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+             reasoner_latency_ms, engine_latency_ms, model_calls, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         """, (game_id, turn, dec_idx, root_hash, term_kind, committed, line_id,
-              complete, fb_reason, exemption, source_json, tool_json, latency, model_calls))
+              complete, fb_reason, exemption, source_json, tool_json, latency, latency, model_calls))
     
     conn.commit()
     conn.close()
@@ -168,6 +169,7 @@ def test_generate_baseline_summary(fixture_db, fixture_log):
     assert summary["fallback_rate"] == 0.2
     assert summary["hash_diverge_count"] == 2
     assert summary["hash_diverge_rate"] == 0.25
+    assert summary["hash_diverge_rate_denominator"] == 8
     
     # Check exemptions
     exemptions = summary["exemptions"]
@@ -213,6 +215,7 @@ def test_empty_database(tmp_path):
             selected_source_lineage_json TEXT,
             tool_mix_json TEXT,
             reasoner_latency_ms INTEGER,
+            engine_latency_ms INTEGER,
             timestamp TEXT NOT NULL
         )
     """)

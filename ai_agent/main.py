@@ -597,6 +597,15 @@ class GameStateEventRequest(BaseModel):
     state: dict[str, Any] | None = None
 
 
+class HashDivergenceRequest(BaseModel):
+    game_id: str
+    turn: int = 0
+    diverge_type: str
+    expected_hash: str
+    actual_hash: str
+    step: int
+
+
 @app.post("/outcome")
 async def outcome_endpoint(body: dict) -> dict:
     """
@@ -1263,6 +1272,25 @@ async def game_state_event_endpoint(body: GameStateEventRequest) -> dict:
         )
     except Exception as exc:
         logger.warning("Game state event log failed: %s", exc)
+    return {"status": "ok"}
+
+
+@app.post("/hash_divergence")
+async def hash_divergence_endpoint(body: HashDivergenceRequest) -> dict:
+    """
+    Godot calls this when a committed Reasoner line diverges from the expected
+    state hash. Logs the divergence event so baseline_report.py can parse it.
+    """
+    try:
+        # Log in the same format baseline_report.py expects
+        if body.step == -1:
+            logger.info("[HASH_DIVERGE] root_state_hash mismatch at step %d: expected=%s actual=%s",
+                       body.step, body.expected_hash, body.actual_hash)
+        else:
+            logger.info("[HASH_DIVERGE] expected_pre_hash mismatch at step %d: expected=%s actual=%s",
+                       body.step, body.expected_hash, body.actual_hash)
+    except Exception as exc:
+        logger.warning("Hash divergence log failed: %s", exc)
     return {"status": "ok"}
 
 

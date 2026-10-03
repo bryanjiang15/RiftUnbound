@@ -9,14 +9,15 @@ Operational reliability baseline for the Reasoner investigation tooling. Measure
 **Godot side (engine):**
 ```bash
 export RIFTBOUND_SEARCH=on
-export RIFTBOUND_REASONER=on
 export RIFTBOUND_ENGINE_SERVER=on
-export RIFTBOUND_ENGINE_PORT=8766
+export RIFTBOUND_ENGINE_PORT=8770
 export RIFTBOUND_AI_THINK_DELAY=0
 export RIFTBOUND_LOG_INPUTS=1
 ```
 
 **Python side (agent service):**
+
+For the Reasoner seat (port 8765):
 ```bash
 export OPENAI_API_KEY=sk-...
 export RIFTBOUND_SEARCH=on
@@ -25,19 +26,31 @@ export RIFTBOUND_SEARCH_ARGMAX=off
 export RIFTBOUND_LOG_INPUTS=1
 export RIFTBOUND_DB_PATH=ai_agent/reasoner_baseline.db
 export RIFTBOUND_DATA_ORIGIN=baseline_live
-
-# Start the agent service
 uvicorn ai_agent.main:app --port 8765
 ```
 
+For the base-argmax seat (port 8766):
+```bash
+export OPENAI_API_KEY=sk-...
+export RIFTBOUND_SEARCH=on
+export RIFTBOUND_REASONER=off
+export RIFTBOUND_SEARCH_ARGMAX=on
+export RIFTBOUND_LOG_INPUTS=1
+uvicorn ai_agent.main:app --port 8766
+```
+
 ### 2. Run N Games
+
+**Configuration:** One seat uses the Reasoner (port 8765), the other uses base-argmax (port 8766).
 
 **Small smoke test (N=2):**
 ```bash
 <godot> --headless --script res://Scripts/Tools/SelfPlaySim.gd -- \
   --games 2 --seed 5000 --turn-cap 100 \
   --p1-profile res://Data/AI/scoring_profile.json \
-  --p2-profile res://Data/AI/scoring_profile.json
+  --p2-profile res://Data/AI/scoring_profile.json \
+  --p1-agent-url http://localhost:8765 \
+  --p2-agent-url http://localhost:8766
 ```
 
 **Full baseline (N=20):**
@@ -45,10 +58,12 @@ uvicorn ai_agent.main:app --port 8765
 <godot> --headless --script res://Scripts/Tools/SelfPlaySim.gd -- \
   --games 20 --seed 5000 --turn-cap 100 \
   --p1-profile res://Data/AI/scoring_profile.json \
-  --p2-profile res://Data/AI/scoring_profile.json
+  --p2-profile res://Data/AI/scoring_profile.json \
+  --p1-agent-url http://localhost:8765 \
+  --p2-agent-url http://localhost:8766
 ```
 
-Both seats will use the Reasoner-enabled agent service by default. For more controlled testing, run two separate agent services on different ports using `--p1-agent-url` and `--p2-agent-url` flags (one Reasoner-enabled, one base argmax).
+This setup compares Reasoner decision-making against base-argmax search on the same profile.
 
 ### 3. Generate Report
 
