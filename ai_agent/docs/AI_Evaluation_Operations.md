@@ -118,6 +118,57 @@ python -m ai_agent.eval sprt-report --pairs-jsonl /tmp/pairs.jsonl --out Data/AI
 
 `eval_lanes: ["agent"]` only — e.g. win-from-seven, turn8 continuation, card-play preferences. Spawns `EvalPositionRunner --mode agent_ready`, pins `EngineServer`, then runs in-process `run_reasoner`.
 
+### Multi-game Reasoner reliability baseline
+
+Use fixed-position evals to measure decision quality. Use the multi-game
+Reasoner baseline to measure live reliability: whether `/reason` keeps returning
+legal, hash-verified line commits across full games, how often it falls back to
+base search, and how often committed lines diverge during replay.
+
+The source-of-truth plan is
+[Reasoner_Multi_Game_Baseline_Plan.md](Reasoner_Multi_Game_Baseline_Plan.md).
+Run it as a full-game harness, not as `python -m ai_agent.eval run`:
+
+```bash
+# Service A: Reasoner seat.
+export OPENAI_API_KEY=...
+export RIFTBOUND_SEARCH=on
+export RIFTBOUND_REASONER=on
+export RIFTBOUND_SEARCH_ARGMAX=off
+export RIFTBOUND_LOG_INPUTS=1
+export RIFTBOUND_DB_PATH=ai_agent/reasoner_baseline.db
+uvicorn ai_agent.main:app --port 8765
+
+# Optional service B: argmax opponent.
+RIFTBOUND_SEARCH=on RIFTBOUND_SEARCH_ARGMAX=on \
+RIFTBOUND_REASONER=off RIFTBOUND_DB_PATH=ai_agent/argmax_baseline.db \
+uvicorn ai_agent.main:app --port 8766
+
+# Godot side: full games. Keep RIFTBOUND_AGENT_PORT pointed at a reachable
+# service because SelfPlaySim checks /health before running.
+export RIFTBOUND_AGENT_PORT=8765
+export RIFTBOUND_AI_THINK_DELAY=0
+<godot> --headless --script res://Scripts/Tools/SelfPlaySim.gd -- \
+  --games 20 --seed 5000 --turn-cap 100 \
+  --p1-agent-url http://localhost:8765 \
+  --p2-agent-url http://localhost:8766 \
+  --p1-profile res://Data/AI/scoring_profile.json \
+  --p2-profile res://Data/AI/scoring_profile.json
+```
+
+Operational constraints:
+
+- `SelfPlaySim.gd` supports `--p1-agent-url` / `--p2-agent-url` for per-seat
+  services, but its startup reachability check still uses `RIFTBOUND_AGENT_PORT`.
+  Point that port at one live service so the run fails fast only for real setup
+  problems.
+- Do not set `RIFTBOUND_SELFPLAY_CAPTURE` for a Reasoner baseline. Offline
+  capture bypasses the Python service, so `/reason`, live tools, and
+  `agent_search.log` Reasoner telemetry never run.
+- Archive logs and summaries under `Data/AI/Baseline/reasoner-multi-game-<date>/`
+  when the baseline is accepted. Keep large SQLite DBs external if needed, but
+  commit `run_info.json`, `baseline_summary.json`, and review notes.
+
 #### Rate limits
 
 Trials run sequentially, but each one spends several tool rounds against the API, so a small quota trips its per-minute limit well before the run finishes. Two controls:

@@ -196,6 +196,11 @@ Operational constraints:
 - The engine pin is decision-scoped and cleared when a line commits, falls back,
   or the `/decision` request finishes. A `/reason` call without a
   `root_state_hash` deliberately returns `base_search_fallback`.
+- Position evals (`python -m ai_agent.eval run ...`) answer whether the Reasoner
+  made the right choice on curated turns. Full-game reliability baselines answer
+  whether it keeps committing legal lines over many live turns. See
+  `ai_agent/docs/Reasoner_Multi_Game_Baseline_Plan.md` and
+  `ai_agent/docs/AI_Evaluation_Operations.md` for the baseline workflow.
 
 Troubleshooting quick checks:
 
