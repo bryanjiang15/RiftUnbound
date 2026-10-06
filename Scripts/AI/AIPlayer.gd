@@ -193,17 +193,44 @@ func _maybe_start_engine_server() -> void:
 	var port_override := OS.get_environment("RIFTBOUND_ENGINE_PORT").strip_edges()
 	if port_override != "" and int(port_override) > 0:
 		port = int(port_override)
+	# Two AI seats share one process, and the agent calls a single engine port.
+	# The second seat reuses the listener and pins its own state on its turn.
+	if port > 0:
+		var existing := _find_listening_engine_server(port)
+		if existing != null:
+			_engine_server = existing
+			return
 	_engine_server = EngineServerScript.new()
 	add_child(_engine_server)
 	var err: Error = _engine_server.start(port, _scoring_profile_path)
 	if err != OK:
 		_engine_server.queue_free()
-		_engine_server = null
+		_engine_server = _find_listening_engine_server(port)
+
+
+func _find_listening_engine_server(port: int) -> EngineServer:
+	var tree := get_tree()
+	if tree == null:
+		return null
+	return _find_listening_engine_server_in(tree.root, port)
+
+
+func _find_listening_engine_server_in(node: Node, port: int) -> EngineServer:
+	if node is EngineServer:
+		var server := node as EngineServer
+		if server.is_listening() and server.get_port() == port:
+			return server
+	for child in node.get_children():
+		var found := _find_listening_engine_server_in(child, port)
+		if found != null:
+			return found
+	return null
 
 
 func _pin_engine_state(gs: GameState) -> void:
 	if _engine_server == null or gs == null:
 		return
+	_engine_server.set_profile_path(_scoring_profile_path)
 	_engine_server.pin_state(gs, player_index)
 
 
@@ -568,6 +595,10 @@ func _try_commit_reasoner_line(gs: GameState, emit: Dictionary) -> bool:
 	var live_root := _live_hash(gs)
 	if str(emit.get("root_state_hash", "")) != live_root or \
 			str(committed.get("root_state_hash", "")) != live_root:
+		var expected_hash := str(committed.get("root_state_hash", ""))
+		var diverge_msg := "[HASH_DIVERGE] root_state_hash mismatch at step -1: expected=%s actual=%s" % [expected_hash, live_root]
+		print(diverge_msg)
+		_report_hash_divergence("root_mismatch_pre_step_0", expected_hash, live_root, -1)
 		push_warning("AIPlayer: reasoner root hash mismatch; base search.")
 		return false
 	var moves: Array = committed.get("moves", [])
@@ -581,6 +612,10 @@ func _try_commit_reasoner_line(gs: GameState, emit: Dictionary) -> bool:
 		if str(expected) == "":
 			return false
 	if str(hashes[0]) != live_root:
+		var expected_hash := str(hashes[0])
+		var diverge_msg := "[HASH_DIVERGE] expected_pre_hash mismatch at step 0: expected=%s actual=%s" % [expected_hash, live_root]
+		print(diverge_msg)
+		_report_hash_divergence("pre_hash_mismatch_step_0", expected_hash, live_root, 0)
 		push_warning("AIPlayer: reasoner step-0 hash mismatch; base search.")
 		return false
 	var first := str(moves[0])
@@ -1067,7 +1102,11 @@ func _play_committed_step(gs: GameState) -> bool:
 	var idx := _committed_line_index
 	if idx < hashes.size():
 		var expected := str(hashes[idx])
-		if expected != "" and _live_hash(gs) != expected:
+		var actual := _live_hash(gs)
+		if expected != "" and actual != expected:
+			var diverge_msg := "[HASH_DIVERGE] expected_pre_hash mismatch at step %d: expected=%s actual=%s" % [idx, expected, actual]
+			print(diverge_msg)
+			_report_hash_divergence("pre_hash_mismatch_mid_line", expected, actual, idx)
 			_drop_committed_line()
 			return false
 	var cmd := str(moves[idx])
@@ -1208,6 +1247,22 @@ func _report_game_state_event(event_type: String, description: String, include_s
 	if include_state and gs != null:
 		body["state"] = BriefStateSerializer.serialize(gs, player_index)
 	_fire_and_forget(AGENT_URL.replace("/decision", "/game_state_event"), body)
+
+
+func _report_hash_divergence(diverge_type: String, expected: String, actual: String, step: int) -> void:
+	var gs: GameState = controller.gs if controller else null
+	var game_id := _active_game_id(gs)
+	if game_id.is_empty():
+		return
+	var body := {
+		"game_id": game_id,
+		"turn": (gs.turn_number if gs != null else 0),
+		"diverge_type": diverge_type,
+		"expected_hash": expected,
+		"actual_hash": actual,
+		"step": step,
+	}
+	_fire_and_forget(AGENT_URL.replace("/decision", "/hash_divergence"), body)
 
 
 func _on_board_updated() -> void:
@@ -1378,5 +1433,7 @@ func _capture_kind_for_url(url: String) -> String:
 		return "opponent_action"
 	if url.ends_with("/turn_snapshot"):
 		return "turn_snapshot"
+	if url.ends_with("/hash_divergence"):
+		return "hash_divergence"
 	# /game_state_event → no SQL; drop.
 	return ""

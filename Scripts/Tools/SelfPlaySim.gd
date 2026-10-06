@@ -368,9 +368,6 @@ func _run_one_game(s: int) -> Dictionary:
 	var scores := [0, 0]
 	if _controller.gs.players.size() >= 2:
 		scores = [_controller.gs.players[0].score, _controller.gs.players[1].score]
-	var first_player := s % 2
-	if _first_player_override >= 0:
-		first_player = _first_player_override
 	# Let the fire-and-forget /game_over POST flush before tearing down.
 	await create_timer(1.5).timeout
 
