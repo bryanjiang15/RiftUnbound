@@ -24,6 +24,7 @@ export RIFTBOUND_SEARCH=on
 export RIFTBOUND_REASONER=on
 export RIFTBOUND_SEARCH_ARGMAX=off
 export RIFTBOUND_LOG_INPUTS=1
+export RIFTBOUND_ENGINE_PORT=8770   # must match Godot EngineServer (not agent 8766)
 export RIFTBOUND_DB_PATH=ai_agent/reasoner_baseline.db
 export RIFTBOUND_DATA_ORIGIN=baseline_live
 uvicorn ai_agent.main:app --port 8765
@@ -36,6 +37,7 @@ export RIFTBOUND_SEARCH=on
 export RIFTBOUND_REASONER=off
 export RIFTBOUND_SEARCH_ARGMAX=on
 export RIFTBOUND_LOG_INPUTS=1
+export RIFTBOUND_ENGINE_PORT=8770   # must match Godot EngineServer (not agent 8766)
 uvicorn ai_agent.main:app --port 8766
 ```
 
@@ -43,11 +45,11 @@ uvicorn ai_agent.main:app --port 8766
 
 **Configuration:** One seat uses the Reasoner (port 8765), the other uses base-argmax (port 8766).
 
-Wrapper (sets Godot-side env, checks Reasoner `/health`, then launches SelfPlaySim):
+Wrapper (sets Godot-side env, checks both agents' `/health`, merges dual-agent URL defaults, then launches SelfPlaySim):
 
 ```bash
 ./Scripts/run_reasoner_baseline.sh                  # smoke: N=2, seed 5000, dual-agent URLs
-./Scripts/run_reasoner_baseline.sh --games 20       # full baseline
+./Scripts/run_reasoner_baseline.sh --games 20       # full baseline (still Reasoner vs argmax)
 ```
 
 **Small smoke test (N=2), equivalent manual command:**
