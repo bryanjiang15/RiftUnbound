@@ -89,6 +89,14 @@ func get_port() -> int:
 	return _port
 
 
+func is_listening() -> bool:
+	return _server != null
+
+
+func set_profile_path(profile_path: String) -> void:
+	_profile_path = profile_path
+
+
 func is_pinned() -> bool:
 	return _pinned != null
 

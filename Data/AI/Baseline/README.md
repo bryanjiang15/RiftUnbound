@@ -32,7 +32,14 @@ uvicorn ai_agent.main:app --port 8765
 
 ### 2. Run N Games
 
-**Small smoke test (N=2):**
+Wrapper (sets Godot-side env, checks `/health`, then launches SelfPlaySim):
+
+```bash
+./Scripts/run_reasoner_baseline.sh                  # smoke: N=2, seed 5000
+./Scripts/run_reasoner_baseline.sh --games 20       # full baseline
+```
+
+**Small smoke test (N=2), equivalent manual command:**
 ```bash
 <godot> --headless --script res://Scripts/Tools/SelfPlaySim.gd -- \
   --games 2 --seed 5000 --turn-cap 100 \
@@ -42,10 +49,7 @@ uvicorn ai_agent.main:app --port 8765
 
 **Full baseline (N=20):**
 ```bash
-<godot> --headless --script res://Scripts/Tools/SelfPlaySim.gd -- \
-  --games 20 --seed 5000 --turn-cap 100 \
-  --p1-profile res://Data/AI/scoring_profile.json \
-  --p2-profile res://Data/AI/scoring_profile.json
+./Scripts/run_reasoner_baseline.sh --games 20 --seed 5000 --turn-cap 100
 ```
 
 Both seats will use the Reasoner-enabled agent service by default. For more controlled testing, run two separate agent services on different ports using `--p1-agent-url` and `--p2-agent-url` flags (one Reasoner-enabled, one base argmax).

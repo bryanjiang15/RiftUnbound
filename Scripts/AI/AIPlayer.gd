@@ -193,17 +193,44 @@ func _maybe_start_engine_server() -> void:
 	var port_override := OS.get_environment("RIFTBOUND_ENGINE_PORT").strip_edges()
 	if port_override != "" and int(port_override) > 0:
 		port = int(port_override)
+	# Two AI seats share one process, and the agent calls a single engine port.
+	# The second seat reuses the listener and pins its own state on its turn.
+	if port > 0:
+		var existing := _find_listening_engine_server(port)
+		if existing != null:
+			_engine_server = existing
+			return
 	_engine_server = EngineServerScript.new()
 	add_child(_engine_server)
 	var err: Error = _engine_server.start(port, _scoring_profile_path)
 	if err != OK:
 		_engine_server.queue_free()
-		_engine_server = null
+		_engine_server = _find_listening_engine_server(port)
+
+
+func _find_listening_engine_server(port: int) -> EngineServer:
+	var tree := get_tree()
+	if tree == null:
+		return null
+	return _find_listening_engine_server_in(tree.root, port)
+
+
+func _find_listening_engine_server_in(node: Node, port: int) -> EngineServer:
+	if node is EngineServer:
+		var server := node as EngineServer
+		if server.is_listening() and server.get_port() == port:
+			return server
+	for child in node.get_children():
+		var found := _find_listening_engine_server_in(child, port)
+		if found != null:
+			return found
+	return null
 
 
 func _pin_engine_state(gs: GameState) -> void:
 	if _engine_server == null or gs == null:
 		return
+	_engine_server.set_profile_path(_scoring_profile_path)
 	_engine_server.pin_state(gs, player_index)
 
 
