@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # Headless Reasoner multi-game baseline runner (SelfPlaySim).
 #
-# Prerequisites: agent service already up on RIFTBOUND_AGENT_PORT (default 8765)
-# with RIFTBOUND_SEARCH=on RIFTBOUND_REASONER=on RIFTBOUND_SEARCH_ARGMAX=off
-# and RIFTBOUND_DB_PATH / RIFTBOUND_DATA_ORIGIN set for archival.
+# Prerequisites (see Data/AI/Baseline/README.md):
+#   - Reasoner agent on port 8765 (RIFTBOUND_REASONER=on, SEARCH_ARGMAX=off,
+#     RIFTBOUND_DB_PATH / RIFTBOUND_DATA_ORIGIN set for archival)
+#   - Base-argmax agent on port 8766 (RIFTBOUND_REASONER=off, SEARCH_ARGMAX=on)
+#   - Godot EngineServer on 8770 (default below) so it does not collide with 8766
 #
 # Usage (from repo root):
 #   ./Scripts/run_reasoner_baseline.sh
 #   ./Scripts/run_reasoner_baseline.sh --games 20 --seed 5000 --turn-cap 100
 #
 # Extra args are forwarded to SelfPlaySim.gd. With no args, uses the smoke
-# defaults from Data/AI/Baseline/README.md (N=2, seed 5000, turn-cap 100).
+# defaults from Data/AI/Baseline/README.md (N=2, seed 5000, dual-agent URLs).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GODOT="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
@@ -22,14 +24,21 @@ fi
 export RIFTBOUND_SEARCH="${RIFTBOUND_SEARCH:-on}"
 export RIFTBOUND_REASONER="${RIFTBOUND_REASONER:-on}"
 export RIFTBOUND_ENGINE_SERVER="${RIFTBOUND_ENGINE_SERVER:-on}"
-export RIFTBOUND_ENGINE_PORT="${RIFTBOUND_ENGINE_PORT:-8766}"
+export RIFTBOUND_ENGINE_PORT="${RIFTBOUND_ENGINE_PORT:-8770}"
 export RIFTBOUND_AI_THINK_DELAY="${RIFTBOUND_AI_THINK_DELAY:-0}"
 export RIFTBOUND_LOG_INPUTS="${RIFTBOUND_LOG_INPUTS:-1}"
 
-AGENT_PORT="${RIFTBOUND_AGENT_PORT:-8765}"
-if ! curl -fsS -m 3 "http://localhost:${AGENT_PORT}/health" >/dev/null 2>&1; then
-	echo "ERROR: agent server not reachable at http://localhost:${AGENT_PORT}/health" >&2
+REASONER_URL="${RIFTBOUND_REASONER_AGENT_URL:-http://localhost:8765}"
+ARGMAX_URL="${RIFTBOUND_ARGMAX_AGENT_URL:-http://localhost:8766}"
+
+if ! curl -fsS -m 3 "${REASONER_URL%/}/health" >/dev/null 2>&1; then
+	echo "ERROR: Reasoner agent not reachable at ${REASONER_URL%/}/health" >&2
 	echo "Start it with RIFTBOUND_SEARCH=on RIFTBOUND_REASONER=on RIFTBOUND_SEARCH_ARGMAX=off" >&2
+	exit 1
+fi
+if ! curl -fsS -m 3 "${ARGMAX_URL%/}/health" >/dev/null 2>&1; then
+	echo "ERROR: base-argmax agent not reachable at ${ARGMAX_URL%/}/health" >&2
+	echo "Start it with RIFTBOUND_SEARCH=on RIFTBOUND_REASONER=off RIFTBOUND_SEARCH_ARGMAX=on" >&2
 	exit 1
 fi
 
@@ -39,7 +48,9 @@ if [ "$#" -eq 0 ]; then
 		--seed 5000 \
 		--turn-cap 100 \
 		--p1-profile res://Data/AI/scoring_profile.json \
-		--p2-profile res://Data/AI/scoring_profile.json
+		--p2-profile res://Data/AI/scoring_profile.json \
+		--p1-agent-url "$REASONER_URL" \
+		--p2-agent-url "$ARGMAX_URL"
 fi
 
 exec "$GODOT" --headless --path "$ROOT" --script res://Scripts/Tools/SelfPlaySim.gd -- "$@"

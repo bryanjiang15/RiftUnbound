@@ -285,7 +285,7 @@ def generate_baseline_summary(db_path: str, log_path: str, out_path: str):
 ```bash
 python -m ai_agent.baseline_report \
   --db ai_agent/reasoner_baseline.db \
-  --log agent_search.log \
+  --log ai_agent/agent_search.log \
   --out Data/AI/Baseline/reasoner-multi-game-2026-09-25/baseline_summary.json
 ```
 
@@ -293,7 +293,7 @@ python -m ai_agent.baseline_report \
 
 After a run completes:
 1. Copy `ai_agent/reasoner_baseline.db` (or export relevant tables) to `Data/AI/Baseline/reasoner-multi-game-YYYY-MM-DD/baseline.db`.
-2. Copy `agent_search.log`, `agent_tools.log` to the same directory.
+2. Copy `ai_agent/agent_search.log`, `ai_agent/agent_tools.log` to the same directory.
 3. Run `baseline_report.py` to generate `baseline_summary.json`.
 4. Extract per-game summaries to `games.jsonl` (or generate from DB).
 5. Write `run_info.json` (date, SHA, model, config).

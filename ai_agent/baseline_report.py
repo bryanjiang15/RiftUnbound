@@ -8,7 +8,7 @@ self-play session to archive operational reliability metrics.
 Usage:
     python -m ai_agent.baseline_report \\
       --db ai_agent/reasoner_baseline.db \\
-      --log agent_search.log \\
+      --log ai_agent/agent_search.log \\
       --out Data/AI/Baseline/reasoner-multi-game-2026-09-27/baseline_summary.json \\
       [--markdown Data/AI/Baseline/reasoner-multi-game-2026-09-27/summary.md]
 
@@ -309,6 +309,7 @@ def get_latency_stats(db_path: str) -> dict[str, Any]:
     latencies = [row["reasoner_latency_ms"] for row in cur if row["reasoner_latency_ms"]]
     
     if not latencies:
+        conn.close()
         return {"median_ms": 0, "p95_ms": 0, "count": 0}
     
     count = len(latencies)
@@ -408,6 +409,7 @@ def generate_baseline_summary(
         "fallback_breakdown": fallback["breakdown"],
         "hash_diverge_count": diverge["diverge_count"],
         "hash_diverge_rate": round(diverge["diverge_rate"], 3),
+        "hash_diverge_rate_denominator": diverge["committed_lines_attempted"],
         "diverge_breakdown": diverge["breakdown"],
         "tool_usage": tool_usage,
         "decision_latency": latency,
@@ -446,7 +448,7 @@ def generate_markdown_summary(summary: dict[str, Any]) -> str:
     
     lines.extend([
         "",
-        f"**Hash Diverge Rate:** {summary['hash_diverge_rate']:.1%} ({summary['hash_diverge_count']} / {summary.get('hash_diverge_rate_denominator', 'N/A')})",
+        f"**Hash Diverge Rate:** {summary['hash_diverge_rate']:.1%} ({summary['hash_diverge_count']} / {summary['hash_diverge_rate_denominator']})",
     ])
     
     if summary.get("diverge_breakdown"):

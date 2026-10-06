@@ -596,7 +596,9 @@ func _try_commit_reasoner_line(gs: GameState, emit: Dictionary) -> bool:
 	if str(emit.get("root_state_hash", "")) != live_root or \
 			str(committed.get("root_state_hash", "")) != live_root:
 		var expected_hash := str(committed.get("root_state_hash", ""))
-		print("[HASH_DIVERGE] root_state_hash mismatch at step -1: expected=%s actual=%s" % [expected_hash, live_root])
+		var diverge_msg := "[HASH_DIVERGE] root_state_hash mismatch at step -1: expected=%s actual=%s" % [expected_hash, live_root]
+		print(diverge_msg)
+		_report_hash_divergence("root_mismatch_pre_step_0", expected_hash, live_root, -1)
 		push_warning("AIPlayer: reasoner root hash mismatch; base search.")
 		return false
 	var moves: Array = committed.get("moves", [])
@@ -611,7 +613,9 @@ func _try_commit_reasoner_line(gs: GameState, emit: Dictionary) -> bool:
 			return false
 	if str(hashes[0]) != live_root:
 		var expected_hash := str(hashes[0])
-		print("[HASH_DIVERGE] expected_pre_hash mismatch at step 0: expected=%s actual=%s" % [expected_hash, live_root])
+		var diverge_msg := "[HASH_DIVERGE] expected_pre_hash mismatch at step 0: expected=%s actual=%s" % [expected_hash, live_root]
+		print(diverge_msg)
+		_report_hash_divergence("pre_hash_mismatch_step_0", expected_hash, live_root, 0)
 		push_warning("AIPlayer: reasoner step-0 hash mismatch; base search.")
 		return false
 	var first := str(moves[0])
@@ -1100,7 +1104,9 @@ func _play_committed_step(gs: GameState) -> bool:
 		var expected := str(hashes[idx])
 		var actual := _live_hash(gs)
 		if expected != "" and actual != expected:
-			print("[HASH_DIVERGE] expected_pre_hash mismatch at step %d: expected=%s actual=%s" % [idx, expected, actual])
+			var diverge_msg := "[HASH_DIVERGE] expected_pre_hash mismatch at step %d: expected=%s actual=%s" % [idx, expected, actual]
+			print(diverge_msg)
+			_report_hash_divergence("pre_hash_mismatch_mid_line", expected, actual, idx)
 			_drop_committed_line()
 			return false
 	var cmd := str(moves[idx])
@@ -1241,6 +1247,22 @@ func _report_game_state_event(event_type: String, description: String, include_s
 	if include_state and gs != null:
 		body["state"] = BriefStateSerializer.serialize(gs, player_index)
 	_fire_and_forget(AGENT_URL.replace("/decision", "/game_state_event"), body)
+
+
+func _report_hash_divergence(diverge_type: String, expected: String, actual: String, step: int) -> void:
+	var gs: GameState = controller.gs if controller else null
+	var game_id := _active_game_id(gs)
+	if game_id.is_empty():
+		return
+	var body := {
+		"game_id": game_id,
+		"turn": (gs.turn_number if gs != null else 0),
+		"diverge_type": diverge_type,
+		"expected_hash": expected,
+		"actual_hash": actual,
+		"step": step,
+	}
+	_fire_and_forget(AGENT_URL.replace("/decision", "/hash_divergence"), body)
 
 
 func _on_board_updated() -> void:
@@ -1411,5 +1433,7 @@ func _capture_kind_for_url(url: String) -> String:
 		return "opponent_action"
 	if url.ends_with("/turn_snapshot"):
 		return "turn_snapshot"
+	if url.ends_with("/hash_divergence"):
+		return "hash_divergence"
 	# /game_state_event → no SQL; drop.
 	return ""

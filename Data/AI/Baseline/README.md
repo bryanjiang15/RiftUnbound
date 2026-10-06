@@ -9,14 +9,15 @@ Operational reliability baseline for the Reasoner investigation tooling. Measure
 **Godot side (engine):**
 ```bash
 export RIFTBOUND_SEARCH=on
-export RIFTBOUND_REASONER=on
 export RIFTBOUND_ENGINE_SERVER=on
-export RIFTBOUND_ENGINE_PORT=8766
+export RIFTBOUND_ENGINE_PORT=8770
 export RIFTBOUND_AI_THINK_DELAY=0
 export RIFTBOUND_LOG_INPUTS=1
 ```
 
 **Python side (agent service):**
+
+For the Reasoner seat (port 8765):
 ```bash
 export OPENAI_API_KEY=sk-...
 export RIFTBOUND_SEARCH=on
@@ -25,17 +26,27 @@ export RIFTBOUND_SEARCH_ARGMAX=off
 export RIFTBOUND_LOG_INPUTS=1
 export RIFTBOUND_DB_PATH=ai_agent/reasoner_baseline.db
 export RIFTBOUND_DATA_ORIGIN=baseline_live
-
-# Start the agent service
 uvicorn ai_agent.main:app --port 8765
+```
+
+For the base-argmax seat (port 8766):
+```bash
+export OPENAI_API_KEY=sk-...
+export RIFTBOUND_SEARCH=on
+export RIFTBOUND_REASONER=off
+export RIFTBOUND_SEARCH_ARGMAX=on
+export RIFTBOUND_LOG_INPUTS=1
+uvicorn ai_agent.main:app --port 8766
 ```
 
 ### 2. Run N Games
 
-Wrapper (sets Godot-side env, checks `/health`, then launches SelfPlaySim):
+**Configuration:** One seat uses the Reasoner (port 8765), the other uses base-argmax (port 8766).
+
+Wrapper (sets Godot-side env, checks Reasoner `/health`, then launches SelfPlaySim):
 
 ```bash
-./Scripts/run_reasoner_baseline.sh                  # smoke: N=2, seed 5000
+./Scripts/run_reasoner_baseline.sh                  # smoke: N=2, seed 5000, dual-agent URLs
 ./Scripts/run_reasoner_baseline.sh --games 20       # full baseline
 ```
 
@@ -44,7 +55,9 @@ Wrapper (sets Godot-side env, checks `/health`, then launches SelfPlaySim):
 <godot> --headless --script res://Scripts/Tools/SelfPlaySim.gd -- \
   --games 2 --seed 5000 --turn-cap 100 \
   --p1-profile res://Data/AI/scoring_profile.json \
-  --p2-profile res://Data/AI/scoring_profile.json
+  --p2-profile res://Data/AI/scoring_profile.json \
+  --p1-agent-url http://localhost:8765 \
+  --p2-agent-url http://localhost:8766
 ```
 
 **Full baseline (N=20):**
@@ -52,14 +65,14 @@ Wrapper (sets Godot-side env, checks `/health`, then launches SelfPlaySim):
 ./Scripts/run_reasoner_baseline.sh --games 20 --seed 5000 --turn-cap 100
 ```
 
-Both seats will use the Reasoner-enabled agent service by default. For more controlled testing, run two separate agent services on different ports using `--p1-agent-url` and `--p2-agent-url` flags (one Reasoner-enabled, one base argmax).
+This setup compares Reasoner decision-making against base-argmax search on the same profile.
 
 ### 3. Generate Report
 
 ```bash
 python -m ai_agent.baseline_report \
   --db ai_agent/reasoner_baseline.db \
-  --log agent_search.log \
+  --log ai_agent/agent_search.log \
   --out Data/AI/Baseline/reasoner-multi-game-$(date +%Y-%m-%d)/baseline_summary.json \
   --markdown Data/AI/Baseline/reasoner-multi-game-$(date +%Y-%m-%d)/summary.md \
   --git-sha $(git rev-parse HEAD) \
@@ -74,8 +87,8 @@ BASELINE_DIR="Data/AI/Baseline/reasoner-multi-game-$(date +%Y-%m-%d)"
 
 # Copy database and logs
 cp ai_agent/reasoner_baseline.db $BASELINE_DIR/baseline.db
-cp agent_search.log $BASELINE_DIR/
-cp agent_tools.log $BASELINE_DIR/ 2>/dev/null || true
+cp ai_agent/agent_search.log $BASELINE_DIR/
+cp ai_agent/agent_tools.log $BASELINE_DIR/ 2>/dev/null || true
 
 # Create run_info.json
 cat > $BASELINE_DIR/run_info.json <<EOF
@@ -171,7 +184,7 @@ These are excluded from rate denominators.
 ### All fallbacks are "missing_root_hash"
 **Cause:** Engine server not running or EngineServer disabled.
 
-**Fix:** Verify `RIFTBOUND_ENGINE_SERVER=on` and port 8766 is accessible.
+**Fix:** Verify `RIFTBOUND_ENGINE_SERVER=on` and port 8770 is accessible.
 
 ### High API failure rate
 **Cause:** LLM service rate limits or network issues.
@@ -181,12 +194,12 @@ These are excluded from rate denominators.
 ### Zero commits
 **Cause:** Reasoner not enabled or agent service misconfigured.
 
-**Fix:** Verify `/health` endpoint shows `reasoner_enabled: true` and `RIFTBOUND_REASONER=on` on both sides.
+**Fix:** Verify `/health` endpoint shows `reasoner_enabled: true` and the Reasoner agent has `RIFTBOUND_REASONER=on`.
 
 ### Games hang or timeout
 **Cause:** Agent service crashed or decision loop stalled.
 
-**Fix:** Check `agent_search.log` for exceptions. Restart the service and reduce `--games` for smoke testing.
+**Fix:** Check `ai_agent/agent_search.log` for exceptions. Restart the service and reduce `--games` for smoke testing.
 
 ## Acceptance Checklist
 
@@ -203,7 +216,7 @@ Before archiving a baseline, verify:
 
 ## Related Documentation
 
-- [Reasoner Multi-Game Baseline Plan](ai_agent/docs/Reasoner_Multi_Game_Baseline_Plan.md) — full specification
-- [Deliberative Reasoning Toolkit](ai_agent/docs/Deliberative_Reasoning_Toolkit.md) — Reasoner design
-- [AI Evaluation Operations](ai_agent/docs/AI_Evaluation_Operations.md) — eval pipeline (complementary)
-- [Agent README](ai_agent/README.md) — agent service flags and self-play runbook
+- [Reasoner Multi-Game Baseline Plan](../../../ai_agent/docs/Reasoner_Multi_Game_Baseline_Plan.md) — full specification
+- [Deliberative Reasoning Toolkit](../../../ai_agent/docs/Deliberative_Reasoning_Toolkit.md) — Reasoner design
+- [AI Evaluation Operations](../../../ai_agent/docs/AI_Evaluation_Operations.md) — eval pipeline (complementary)
+- [Agent README](../../../ai_agent/README.md) — agent service flags and self-play runbook
