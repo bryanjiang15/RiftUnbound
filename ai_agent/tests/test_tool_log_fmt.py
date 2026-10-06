@@ -94,6 +94,17 @@ def test_format_reasoner_session_includes_recommendation_and_final_output():
             "kind": "line",
             "confidence": "commit",
             "moves": ["play card-1", "end turn"],
+            "telemetry": {
+                "pre_llm_banner": "Pre-LLM: scout=100ms lines=5 | total=100ms",
+                "reasoner_latency_ms": 5000,
+                "engine_latency_ms": 100,
+                "model_orchestration_latency_ms": 4900,
+                "prompt_tokens": 12000,
+                "completion_tokens": 200,
+                "total_tokens": 12200,
+                "model_calls": 2,
+                "terminal_kind": "line",
+            },
         },
     )
     plain = "\n".join(_strip_ansi(line) for line in lines)
@@ -102,6 +113,10 @@ def test_format_reasoner_session_includes_recommendation_and_final_output():
     assert "Final output:" in plain
     assert '"kind": "line"' in plain
     assert "play card-1" in plain
+    assert "Cost:" in plain
+    assert "Pre-LLM: scout=100ms" in plain
+    assert "Reasoner LLM:" in plain
+    assert "tokens=12200" in plain
 
 
 def test_format_reasoner_session_prints_scout_lines():

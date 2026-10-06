@@ -306,15 +306,27 @@ def get_latency_stats(db_path: str) -> dict[str, Any]:
         ORDER BY reasoner_latency_ms
     """)
     
-    latencies = [row["reasoner_latency_ms"] for row in cur if row["reasoner_latency_ms"]]
+    rows = list(cur)
+    latencies = [row["reasoner_latency_ms"] for row in rows if row["reasoner_latency_ms"]]
+    engine = [
+        int(row["engine_latency_ms"] or 0)
+        for row in rows
+        if row["reasoner_latency_ms"] is not None
+    ]
     
     if not latencies:
         conn.close()
-        return {"median_ms": 0, "p95_ms": 0, "count": 0}
+        return {
+            "median_ms": 0,
+            "p95_ms": 0,
+            "count": 0,
+            "total_ms": 0,
+            "total_engine_ms": 0,
+        }
     
     count = len(latencies)
     median_idx = count // 2
-    p95_idx = int(count * 0.95)
+    p95_idx = min(count - 1, int(count * 0.95))
     
     conn.close()
     
@@ -322,6 +334,50 @@ def get_latency_stats(db_path: str) -> dict[str, Any]:
         "median_ms": latencies[median_idx] if count > 0 else 0,
         "p95_ms": latencies[p95_idx] if count > 0 else 0,
         "count": count,
+        "total_ms": sum(latencies),
+        "total_engine_ms": sum(engine),
+    }
+
+
+def get_token_stats(db_path: str) -> dict[str, Any]:
+    """Aggregate Reasoner token spend from reasoner_decisions."""
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cols = {row["name"] for row in cur.execute("PRAGMA table_info(reasoner_decisions)")}
+    if "prompt_tokens" not in cols:
+        conn.close()
+        return {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "model_calls": 0,
+            "avg_prompt_tokens": 0.0,
+            "turns_with_tokens": 0,
+        }
+    cur.execute("""
+        SELECT
+            COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+            COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+            COALESCE(SUM(model_calls), 0) AS model_calls,
+            SUM(CASE WHEN COALESCE(prompt_tokens, 0) > 0
+                      OR COALESCE(completion_tokens, 0) > 0 THEN 1 ELSE 0 END)
+                AS turns_with_tokens
+        FROM reasoner_decisions
+        WHERE terminal_kind IS NOT NULL
+    """)
+    row = cur.fetchone()
+    conn.close()
+    prompt = int(row["prompt_tokens"] or 0)
+    completion = int(row["completion_tokens"] or 0)
+    turns = int(row["turns_with_tokens"] or 0)
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": prompt + completion,
+        "model_calls": int(row["model_calls"] or 0),
+        "avg_prompt_tokens": (prompt / turns) if turns else 0.0,
+        "turns_with_tokens": turns,
     }
 
 
@@ -389,6 +445,7 @@ def generate_baseline_summary(
     exemptions = compute_exemptions(db_path)
     tool_usage = get_tool_usage(db_path)
     latency = get_latency_stats(db_path)
+    tokens = get_token_stats(db_path)
     games = get_game_stats(db_path)
     
     return {
@@ -413,6 +470,14 @@ def generate_baseline_summary(
         "diverge_breakdown": diverge["breakdown"],
         "tool_usage": tool_usage,
         "decision_latency": latency,
+        "token_usage": {
+            "prompt_tokens": tokens["prompt_tokens"],
+            "completion_tokens": tokens["completion_tokens"],
+            "total_tokens": tokens["total_tokens"],
+            "model_calls": tokens["model_calls"],
+            "avg_prompt_tokens": round(tokens["avg_prompt_tokens"], 1),
+            "turns_with_tokens": tokens["turns_with_tokens"],
+        },
     }
 
 
@@ -474,11 +539,27 @@ def generate_markdown_summary(summary: dict[str, Any]) -> str:
     
     latency = summary.get("decision_latency", {})
     if latency.get("count", 0) > 0:
+        total_s = int(latency.get("total_ms", 0) or 0) / 1000.0
+        eng_s = int(latency.get("total_engine_ms", 0) or 0) / 1000.0
         lines.extend([
             "",
-            "**Decision latency:**",
+            "**Decision latency (Reasoner LLM wall):**",
             f"- Median: {latency['median_ms']}ms",
             f"- p95: {latency['p95_ms']}ms",
+            f"- Total: {total_s:.1f}s (engine tools {eng_s:.1f}s)",
+        ])
+
+    tokens = summary.get("token_usage", {})
+    if tokens.get("total_tokens", 0) > 0:
+        lines.extend([
+            "",
+            "**Token usage (Reasoner LLM):**",
+            f"- Total: {tokens['total_tokens']:,}"
+            f" (prompt {tokens['prompt_tokens']:,}"
+            f" / completion {tokens['completion_tokens']:,})",
+            f"- Model calls: {tokens.get('model_calls', 0):,}",
+            f"- Avg prompt / turn: {tokens.get('avg_prompt_tokens', 0):,.1f}"
+            f" across {tokens.get('turns_with_tokens', 0)} turns",
         ])
     
     lines.extend([
@@ -561,6 +642,21 @@ def main():
     print(f"Commit rate: {summary['commit_rate']:.1%}")
     print(f"Fallback rate: {summary['fallback_rate']:.1%}")
     print(f"Hash diverge rate: {summary['hash_diverge_rate']:.1%}")
+    latency = summary.get("decision_latency", {})
+    if latency.get("count", 0) > 0:
+        print(
+            f"Reasoner latency: median {latency['median_ms']}ms"
+            f" / p95 {latency['p95_ms']}ms"
+            f" / total {int(latency.get('total_ms', 0) or 0) / 1000.0:.1f}s"
+        )
+    tokens = summary.get("token_usage", {})
+    if tokens.get("total_tokens", 0) > 0:
+        print(
+            f"Tokens: {tokens['total_tokens']:,}"
+            f" (prompt {tokens['prompt_tokens']:,}"
+            f" / completion {tokens['completion_tokens']:,})"
+            f" across {tokens.get('turns_with_tokens', 0)} turns"
+        )
     print("=" * 60)
 
 

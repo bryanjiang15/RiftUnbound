@@ -250,6 +250,40 @@ def format_tools_session(
         else:
             rendered = str(final_output)
         lines.extend(f"  {line}" for line in rendered.splitlines())
+        if isinstance(final_output, dict):
+            telem = final_output.get("telemetry")
+            if isinstance(telem, dict):
+                pre = telem.get("pre_llm_banner")
+                llm = telem.get("reasoner_llm_banner")
+                if not llm and (
+                    telem.get("reasoner_latency_ms") is not None
+                    or telem.get("total_tokens") is not None
+                    or telem.get("prompt_tokens") is not None
+                ):
+                    from .risk_score import format_reasoner_llm_banner
+
+                    llm = format_reasoner_llm_banner(
+                        reasoner_ms=telem.get("reasoner_latency_ms"),
+                        engine_ms=telem.get("engine_latency_ms"),
+                        model_ms=telem.get("model_orchestration_latency_ms"),
+                        prompt_tokens=telem.get("prompt_tokens"),
+                        completion_tokens=telem.get("completion_tokens"),
+                        total_tokens=telem.get("total_tokens"),
+                        model_calls=telem.get("model_calls"),
+                        kind=str(
+                            telem.get("terminal_kind")
+                            or final_output.get("kind")
+                            or ""
+                        )
+                        or None,
+                    )
+                if pre or llm:
+                    lines.append("")
+                    lines.append(paint("Cost:", BOLD + CYAN))
+                    if pre:
+                        lines.append(f"  {pre}")
+                    if llm:
+                        lines.append(f"  {llm}")
 
     # Outcome coloring: errors/pass soft-fail vs success.
     out_lower = outcome.lower()

@@ -47,6 +47,7 @@ def test_record_token_usage_splits_by_stage():
     assert metrics["total_tokens"] == 180
     assert metrics["prompt_tokens"] == 145
     assert metrics["completion_tokens"] == 35
+    assert metrics["model_calls"] == 3
 
     assert metrics["planner_model_calls"] == 1
     assert metrics["planner_total_tokens"] == 120
@@ -57,10 +58,21 @@ def test_record_token_usage_splits_by_stage():
     assert metrics["actor_completion_tokens"] == 15
 
 
+def test_record_token_usage_reasoner_stage():
+    metrics: dict = {}
+    agent_module._record_token_usage(metrics, "reasoner", _Response(_Usage(1000, 50)))
+    agent_module._record_token_usage(metrics, "reasoner", _Response(_Usage(2000, 25)))
+    assert metrics["model_calls"] == 2
+    assert metrics["reasoner_model_calls"] == 2
+    assert metrics["prompt_tokens"] == 3000
+    assert metrics["reasoner_total_tokens"] == 3075
+
+
 def test_record_token_usage_tolerates_missing_usage():
     metrics: dict = {}
     agent_module._record_token_usage(metrics, "actor", _Response(usage=None))
     # The call is still counted even when usage is unavailable (test doubles).
+    assert metrics["model_calls"] == 1
     assert metrics["actor_model_calls"] == 1
     assert metrics.get("total_tokens", 0) == 0
 

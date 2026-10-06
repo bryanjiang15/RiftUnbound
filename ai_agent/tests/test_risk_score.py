@@ -5,9 +5,11 @@ import os
 
 from ai_agent.risk_score import (
     apply_risk_adjustment,
+    attach_usage_telemetry,
     compute_risk_adjustment,
     enrich_lines_with_risk,
     format_pre_llm_banner,
+    format_reasoner_llm_banner,
     merge_expanded_risk,
     should_auto_expand,
 )
@@ -262,6 +264,49 @@ def test_format_pre_llm_banner():
     assert "cheap_risk=187ms" in text
     assert "expand=420ms n=2" in text
     assert "total=919ms" in text
+
+
+def test_format_reasoner_llm_banner():
+    text = format_reasoner_llm_banner(
+        reasoner_ms=16022,
+        engine_ms=239,
+        model_ms=15783,
+        prompt_tokens=59574,
+        completion_tokens=534,
+        total_tokens=60108,
+        model_calls=3,
+        kind="line",
+    )
+    assert "wall=16022ms" in text
+    assert "engine=239ms" in text
+    assert "model=15783ms" in text
+    assert "calls=3" in text
+    assert "tokens=60108 (prompt=59574 completion=534)" in text
+    assert "kind=line" in text
+
+
+def test_attach_usage_telemetry_copies_counters():
+    telem = {"reasoner_latency_ms": 1000}
+    attach_usage_telemetry(
+        telem,
+        {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "reasoner_model_calls": 2,
+        },
+    )
+    assert telem["prompt_tokens"] == 100
+    assert telem["completion_tokens"] == 20
+    assert telem["total_tokens"] == 120
+    assert telem["model_calls"] == 2
+
+
+def test_attach_usage_telemetry_preserves_on_empty_metrics():
+    telem = {"prompt_tokens": 50, "model_calls": 1}
+    attach_usage_telemetry(telem, {})
+    assert telem["prompt_tokens"] == 50
+    assert telem["model_calls"] == 1
 
 
 def test_apply_risk_adjustment_disabled(monkeypatch):

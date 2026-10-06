@@ -422,7 +422,10 @@ func _request_decision(gs: GameState) -> void:
 					% [scout_ms, scout_lines.size(), cheap_risk_ms, scout_ms + cheap_risk_ms]
 				)
 			if _reasoner_mode:
+				var reasoner_t0 := Time.get_ticks_msec()
 				var reasoner_emit := await _fetch_reasoner_emit(scout_lines, scout_stats)
+				var reasoner_wall_ms := int(Time.get_ticks_msec() - reasoner_t0)
+				_print_reasoner_cost(scout_stats, reasoner_emit, reasoner_wall_ms)
 				if gs.game_over:
 					_clear_engine_pin()
 					return
@@ -539,6 +542,36 @@ func _fetch_goal_overlay(scout_lines: Array = [], scout_stats: Dictionary = {}) 
 	if parsed is Dictionary and parsed.get("overlay", null) is Dictionary:
 		return parsed["overlay"]
 	return {}
+
+
+# Compact baseline console line: Pre-LLM (Godot) + Reasoner LLM wall/tokens.
+# Telemetry fields come from the Python /reason response when available.
+func _print_reasoner_cost(scout_stats: Dictionary, emit: Dictionary, wall_ms: int) -> void:
+	var telem: Variant = emit.get("telemetry", {})
+	if not telem is Dictionary:
+		telem = {}
+	var llm_ms := int(telem.get("reasoner_latency_ms", 0))
+	var eng_ms := int(telem.get("engine_latency_ms", 0))
+	var model_ms := int(telem.get("model_orchestration_latency_ms", 0))
+	if model_ms <= 0 and llm_ms > 0:
+		model_ms = maxi(0, llm_ms - eng_ms)
+	var pt := int(telem.get("prompt_tokens", 0))
+	var ct := int(telem.get("completion_tokens", 0))
+	var tt := int(telem.get("total_tokens", 0))
+	if tt <= 0:
+		tt = pt + ct
+	var calls := int(telem.get("model_calls", 0))
+	var expand_ms := int(telem.get("auto_expand_ms", 0))
+	var kind := str(emit.get("kind", "?"))
+	var pre_ms := int(scout_stats.get("pre_llm_godot_ms", 0))
+	print(
+		(
+			"AIPlayer Reasoner: llm=%dms wall=%dms (engine=%dms model=%dms)"
+			+ " | Pre-LLM=%dms expand=%dms"
+			+ " | tokens=%d (prompt=%d completion=%d) calls=%d | kind=%s"
+		)
+		% [llm_ms, wall_ms, eng_ms, model_ms, pre_ms, expand_ms, tt, pt, ct, calls, kind]
+	)
 
 
 # Phase-3 pre-search handshake. The response is either a verified line or a

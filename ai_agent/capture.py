@@ -561,10 +561,20 @@ def capture_reasoner_decision(
             committed=committed,
             chosen_line_complete=complete,
             rationale=rationale,
-            model_calls=metrics.get("model_calls") or metrics.get("actor_model_calls"),
-            prompt_tokens=metrics.get("prompt_tokens") or metrics.get("actor_prompt_tokens"),
+            model_calls=(
+                metrics.get("model_calls")
+                or metrics.get("reasoner_model_calls")
+                or metrics.get("actor_model_calls")
+            ),
+            prompt_tokens=(
+                metrics.get("prompt_tokens")
+                or metrics.get("reasoner_prompt_tokens")
+                or metrics.get("actor_prompt_tokens")
+            ),
             completion_tokens=(
-                metrics.get("completion_tokens") or metrics.get("actor_completion_tokens")
+                metrics.get("completion_tokens")
+                or metrics.get("reasoner_completion_tokens")
+                or metrics.get("actor_completion_tokens")
             ),
         )
     except Exception as exc:

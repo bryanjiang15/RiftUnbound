@@ -176,6 +176,11 @@ def test_generate_baseline_summary(fixture_db, fixture_log):
     assert exemptions["forced_single_move"] == 1
     assert exemptions["mulligan"] == 1
 
+    # Fixture schema has no token columns → zeros, but key must exist.
+    assert summary["token_usage"]["total_tokens"] == 0
+    assert summary["decision_latency"]["count"] == 10
+    assert summary["decision_latency"]["total_ms"] > 0
+
 
 def test_generate_markdown_summary(fixture_db, fixture_log):
     """Test markdown summary generation."""

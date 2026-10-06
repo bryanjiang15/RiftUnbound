@@ -192,14 +192,15 @@ def get_client() -> AsyncOpenAI:
 def _record_token_usage(metrics: Optional[dict], stage: str, response: Any) -> None:
     """Accumulate token usage from one chat completion into ``metrics``.
 
-    Tracks both overall totals and per-stage (``planner`` / ``actor``) totals so
-    the planner and decision agents can be reported separately. Also bumps the
-    per-stage model-call counter. Tolerates responses without a ``usage`` field
-    (e.g. test doubles) by recording nothing.
+    Tracks both overall totals and per-stage (``planner`` / ``actor`` /
+    ``reasoner``) totals so stages can be reported separately. Also bumps the
+    overall and per-stage model-call counters. Tolerates responses without a
+    ``usage`` field (e.g. test doubles) by still counting the call.
     """
     if metrics is None:
         return
     usage = getattr(response, "usage", None)
+    metrics["model_calls"] = metrics.get("model_calls", 0) + 1
     metrics[f"{stage}_model_calls"] = metrics.get(f"{stage}_model_calls", 0) + 1
     if usage is None:
         return
@@ -1475,7 +1476,13 @@ async def run_reasoner(
         budget=budget,
     )
     raw_scout = [line.model_dump() for line in (candidate_lines or [])]
-    from .risk_score import enrich_lines_with_risk, format_pre_llm_banner, risk_rank_enabled
+    from .risk_score import (
+        attach_usage_telemetry,
+        enrich_lines_with_risk,
+        format_pre_llm_banner,
+        format_reasoner_llm_banner,
+        risk_rank_enabled,
+    )
 
     enriched_scout, risk_telem = enrich_lines_with_risk(
         raw_scout,
@@ -1532,6 +1539,24 @@ async def run_reasoner(
             root_state_hash=root_state_hash,
         )
         context.telemetry["cache_hit"] = _was_cached
+        attach_usage_telemetry(context.telemetry, eval_metrics)
+        llm_banner = format_reasoner_llm_banner(
+            reasoner_ms=context.telemetry.get("reasoner_latency_ms"),
+            engine_ms=context.telemetry.get("engine_latency_ms"),
+            model_ms=context.telemetry.get("model_orchestration_latency_ms"),
+            prompt_tokens=context.telemetry.get("prompt_tokens"),
+            completion_tokens=context.telemetry.get("completion_tokens"),
+            total_tokens=context.telemetry.get("total_tokens"),
+            model_calls=context.telemetry.get("model_calls"),
+            kind=emit.kind,
+        )
+        context.telemetry["reasoner_llm_banner"] = llm_banner
+        if _LOG_INPUTS:
+            try:
+                with _SEARCH_LOG_PATH.open("a", encoding="utf-8") as f:
+                    f.write(llm_banner + "\n")
+            except OSError:
+                pass
         committed = (
             context.registry.get(emit.chosen_line_id)
             if emit.kind == "line"
@@ -1759,7 +1784,6 @@ async def choose_line(
                 temperature=0.2,
                 response_format={"type": "text"},
             )
-            metrics["model_calls"] = metrics.get("model_calls", 0) + 1
         except Exception as exc:
             logger.error("Line selector API error: %s", exc)
             break
@@ -1955,7 +1979,6 @@ async def _run_actor_loop(
                 temperature=0.3,
                 response_format={"type": "text"},
             )
-            metrics["model_calls"] += 1
         except TRANSIENT_API_ERRORS as exc:
             logger.error("OpenAI API rate-limited/unavailable after retries: %s", exc)
             return _finish(

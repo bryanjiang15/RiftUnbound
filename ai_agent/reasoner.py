@@ -762,6 +762,7 @@ async def _request_reasoning(
             ]
             selected_line = context.registry.get(emit.chosen_line_id)
             from .capture import compact_tool_trace
+            from .risk_score import attach_usage_telemetry
 
             context.telemetry.update({
                 "terminal_kind": emit.kind,
@@ -800,6 +801,7 @@ async def _request_reasoning(
                     emit.rationale if emit.kind == "base_search_fallback" else ""
                 ),
             })
+            attach_usage_telemetry(context.telemetry, metrics)
         agent_module._log_tools(
             game_id,
             brief_state,

@@ -347,3 +347,84 @@ def format_pre_llm_banner(
     if total_ms is not None:
         parts.append(f"total={int(total_ms)}ms")
     return " | ".join(parts) if len(parts) > 1 else parts[0]
+
+
+def format_reasoner_llm_banner(
+    *,
+    reasoner_ms: int | None = None,
+    engine_ms: int | None = None,
+    model_ms: int | None = None,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
+    total_tokens: int | None = None,
+    model_calls: int | None = None,
+    kind: str | None = None,
+) -> str:
+    """Compact one-liner for Reasoner wall time + token spend (baseline logs)."""
+    parts: list[str] = ["Reasoner LLM:"]
+    if reasoner_ms is not None:
+        bit = f"wall={int(reasoner_ms)}ms"
+        detail: list[str] = []
+        if engine_ms is not None:
+            detail.append(f"engine={int(engine_ms)}ms")
+        if model_ms is not None:
+            detail.append(f"model={int(model_ms)}ms")
+        if detail:
+            bit += f" ({', '.join(detail)})"
+        parts.append(bit)
+    if model_calls is not None:
+        parts.append(f"calls={int(model_calls)}")
+    if (
+        prompt_tokens is not None
+        or completion_tokens is not None
+        or total_tokens is not None
+    ):
+        pt = int(prompt_tokens or 0)
+        ct = int(completion_tokens or 0)
+        tt = int(total_tokens if total_tokens is not None else pt + ct)
+        parts.append(f"tokens={tt} (prompt={pt} completion={ct})")
+    if kind:
+        parts.append(f"kind={kind}")
+    return " | ".join(parts) if len(parts) > 1 else parts[0]
+
+
+def attach_usage_telemetry(
+    telemetry: dict[str, Any],
+    metrics: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Copy token / model-call counters from eval metrics into Reasoner telemetry.
+
+    No-ops when ``metrics`` has no usage yet (e.g. cache-hit turns) so existing
+    telemetry values are preserved.
+    """
+    if not metrics:
+        return telemetry
+    has_usage = any(
+        metrics.get(key)
+        for key in (
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+            "model_calls",
+            "reasoner_model_calls",
+            "actor_model_calls",
+            "reasoner_prompt_tokens",
+            "actor_prompt_tokens",
+        )
+    )
+    if not has_usage:
+        return telemetry
+    prompt = int(metrics.get("prompt_tokens") or 0)
+    completion = int(metrics.get("completion_tokens") or 0)
+    total = int(metrics.get("total_tokens") or (prompt + completion))
+    calls = int(
+        metrics.get("model_calls")
+        or metrics.get("reasoner_model_calls")
+        or metrics.get("actor_model_calls")
+        or 0
+    )
+    telemetry["prompt_tokens"] = prompt
+    telemetry["completion_tokens"] = completion
+    telemetry["total_tokens"] = total
+    telemetry["model_calls"] = calls
+    return telemetry
