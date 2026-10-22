@@ -682,11 +682,26 @@ async def _request_reasoning(
     started_at = time.monotonic()
     turn = int(brief_state.get("turn_number", 0))
     context = current_context()
-    rules = build_system_prompt_from_modules(
-        ["goal_and_role", "core_rules", "keywords_in_play", "goal_vocabulary"],
+    
+    # Split system prompt into static (cacheable) and dynamic parts for OpenAI
+    # prompt caching. The static prefix (~5K tokens) is identical across all model
+    # calls within the ReAct loop AND across decisions, enabling automatic cache hits
+    # on subsequent calls. This saves ~75% of input token costs on the cached prefix.
+    #
+    # Static: role, discipline, few-shot examples, core game rules (~5K tokens)
+    static_rules = build_system_prompt_from_modules(
+        ["goal_and_role", "core_rules"],
         brief_state=brief_state,
     )
-    system = f"{_ROLE}\n\n{_DISCIPLINE}\n\n{_FEW_SHOT}\n\n{rules}".strip()
+    system = f"{_ROLE}\n\n{_DISCIPLINE}\n\n{_FEW_SHOT}\n\n{static_rules}".strip()
+    
+    # Dynamic: keywords in play and goal vocabulary (vary per game state, ~0-2K tokens)
+    # Moved to user message prefix to preserve static system message for caching.
+    dynamic_context = build_system_prompt_from_modules(
+        ["keywords_in_play", "goal_vocabulary"],
+        brief_state=brief_state,
+    )
+    
     scout_block = (
         json.dumps(_render_scout_lines(known_lines), indent=2, default=str)
         if known_lines
@@ -704,7 +719,11 @@ async def _request_reasoning(
                 f"risk_adjusted_score={top.get('risk_adjusted_score')}, "
                 f"method={top.get('risk_adjustment_method')}).\n"
             )
+    
+    # Prepend dynamic context to user message
+    dynamic_prefix = f"{dynamic_context}\n\n" if dynamic_context else ""
     user = (
+        f"{dynamic_prefix}"
         f"{_TASK}\n\nRecent timeline:\n{memory_summary or '(none)'}\n\n"
         f"Current state:\n{agent_module._format_brief_state(brief_state)}\n\n"
         f"PINNED ROOT HASH: {root_state_hash or '(unavailable)'}\n\n"
