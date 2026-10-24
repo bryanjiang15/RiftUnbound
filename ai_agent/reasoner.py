@@ -11,6 +11,12 @@ from typing import Any, Callable
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 
+try:
+    import tiktoken
+    _TOKENIZER = tiktoken.encoding_for_model("gpt-4")
+except Exception:
+    _TOKENIZER = None
+
 from .investigation_metrics import (
     advisory_critic_notes,
     build_feedback_envelope,
@@ -31,6 +37,56 @@ from .tool_budget import current_budget
 logger = logging.getLogger(__name__)
 
 REASONER_MAX_TOOL_ROUNDS = 6
+
+
+def _estimate_tokens(text: str) -> int:
+    """Estimate token count using tiktoken if available, else chars/4."""
+    if _TOKENIZER is not None:
+        try:
+            return len(_TOKENIZER.encode(text))
+        except Exception:
+            pass
+    return len(text) // 4
+
+
+def _log_token_profile(
+    *,
+    decision_id: str,
+    step: int,
+    system_tokens: int,
+    state_tokens: int,
+    assistant_hist_tokens: int,
+    tool_results_by_name: dict[str, int],
+    prompt_tokens: int,
+    cached_tokens: int,
+    completion_tokens: int,
+) -> None:
+    """Log one parseable token profile line."""
+    tool_parts = " ".join(
+        f"tool:{name}={tokens}"
+        for name, tokens in sorted(tool_results_by_name.items())
+    )
+    logger.info(
+        f"token_profile decision={decision_id} step={step} "
+        f"sys={system_tokens} state={state_tokens} "
+        f"assistant_hist={assistant_hist_tokens} {tool_parts} "
+        f"prompt={prompt_tokens} cached={cached_tokens} completion={completion_tokens}"
+    )
+
+
+def _log_token_usage(
+    *,
+    stage: str,
+    prompt_tokens: int,
+    cached_tokens: int,
+    completion_tokens: int,
+) -> None:
+    """Log a simple token usage line (for backward compat or untracked calls)."""
+    logger.info(
+        f"token_usage stage={stage} prompt={prompt_tokens} "
+        f"cached={cached_tokens} completion={completion_tokens}"
+    )
+
 TERMINAL_RETRIES = 3
 REASONER_TOOL_NAMES = frozenset({
     "evaluate_position",
@@ -747,6 +803,10 @@ async def _request_reasoning(
             "novel_suffix_found": False,
         })
 
+    # Token profiling - compute base prompt segments once
+    base_system_tokens = _estimate_tokens(system)
+    base_state_tokens = _estimate_tokens(user)
+
     def finish(emit: ReasonerEmit, outcome: str) -> ReasonerEmit:
         if context is not None:
             total_latency_ms = int((time.monotonic() - started_at) * 1000)
@@ -854,6 +914,47 @@ async def _request_reasoning(
                     response_format={"type": "text"},
                 ),
             )
+
+            # Token profiling - analyze message composition for this call
+            assistant_hist_tokens = 0
+            tool_results_by_name: dict[str, int] = {}
+            for msg in messages[2:]:  # Skip system and initial user
+                role = msg.get("role", "")
+                if role == "assistant":
+                    content = msg.get("content") or ""
+                    assistant_hist_tokens += _estimate_tokens(content)
+                elif role == "tool":
+                    content_str = msg.get("content", "")
+                    try:
+                        result = json.loads(content_str) if isinstance(content_str, str) else content_str
+                        tool_name = "unknown"
+                        if isinstance(result, dict):
+                            tool_name = result.get("_tool_name", "unknown")
+                        tool_results_by_name[tool_name] = tool_results_by_name.get(tool_name, 0) + _estimate_tokens(content_str)
+                    except Exception:
+                        tool_results_by_name["unknown"] = tool_results_by_name.get("unknown", 0) + _estimate_tokens(content_str)
+
+            # Extract actual token counts from API response
+            usage = getattr(response, "usage", None)
+            prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0) if usage else 0
+            completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0) if usage else 0
+            cached_tokens = 0
+            if usage:
+                prompt_details = getattr(usage, "prompt_tokens_details", None)
+                if prompt_details:
+                    cached_tokens = int(getattr(prompt_details, "cached_tokens", 0) or 0)
+
+            _log_token_profile(
+                decision_id=game_id,
+                step=round_index,
+                system_tokens=base_system_tokens,
+                state_tokens=base_state_tokens,
+                assistant_hist_tokens=assistant_hist_tokens,
+                tool_results_by_name=tool_results_by_name,
+                prompt_tokens=prompt_tokens,
+                cached_tokens=cached_tokens,
+                completion_tokens=completion_tokens,
+            )
         except agent_module.TRANSIENT_API_ERRORS as exc:
             return finish(
                 base_search_fallback(
@@ -951,6 +1052,10 @@ async def _request_reasoning(
                     )
                     try:
                         result = json.loads(result_text)
+                        # Inject tool name for token profiling
+                        if isinstance(result, dict):
+                            result["_tool_name"] = name
+                            result_text = json.dumps(result)
                     except (json.JSONDecodeError, TypeError):
                         result = result_text
 
@@ -1147,6 +1252,22 @@ async def _format_emit(
                 response_format={"type": "text"},
             ),
         )
+
+        # Log token usage for format phase
+        usage = getattr(response, "usage", None)
+        if usage:
+            prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+            completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+            cached_tokens = 0
+            prompt_details = getattr(usage, "prompt_tokens_details", None)
+            if prompt_details:
+                cached_tokens = int(getattr(prompt_details, "cached_tokens", 0) or 0)
+            _log_token_usage(
+                stage="reasoner_format",
+                prompt_tokens=prompt_tokens,
+                cached_tokens=cached_tokens,
+                completion_tokens=completion_tokens,
+            )
     except Exception as exc:
         logger.warning("Reasoner fail-safe format phase failed: %s", exc)
         return None

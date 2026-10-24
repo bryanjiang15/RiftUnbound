@@ -5,3 +5,6 @@ pydantic>=2.7.0
 
 # Optional: only needed for `python ai_agent/report.py --charts` (PNG graphs).
 matplotlib>=3.7.0
+
+# Optional: improves token profiling accuracy (falls back to chars/4 if unavailable).
+tiktoken>=0.5.0
