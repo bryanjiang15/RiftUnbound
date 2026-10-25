@@ -110,3 +110,114 @@ Uncached input is ~78% of the bill when caching is 59% (context from PR descript
 ## Static Analysis Findings
 
 See the PR description for a code-level analysis of what grows per step and what could be trimmed.
+
+## Token Compaction Feature
+
+Starting with the compact tools PR, the Reasoner includes an optional **token compaction** mode that reduces prompt size by:
+
+1. **Compact deepen output**: Returns a summary per line (best moves, scores, key state deltas) instead of the full payload, with a hard size cap (~1500 tokens).
+2. **Stub old tool results**: Once a tool result has been sent, subsequent prompts replace it with a short stub that notes what it was. Only the latest tool result of each type stays full.
+
+### Configuration
+
+The compaction is controlled by the `RIFTBOUND_REASONER_COMPACT_TOOLS` environment variable:
+
+- **Default**: ON (`1`)
+- **Disable**: Set to `0`, `false`, `off`, or `no`
+
+```bash
+# Run with compaction enabled (default)
+python -m ai_agent.main --seed 5000 --player1 reasoner --player2 reasoner
+
+# Disable compaction to compare
+RIFTBOUND_REASONER_COMPACT_TOOLS=0 python -m ai_agent.main --seed 5000 --player1 reasoner --player2 reasoner
+```
+
+### Comparison Tool
+
+To measure the actual token savings, use `compare_trims.py`:
+
+```bash
+# Dry-run to see which scenarios would be tested
+python -m ai_agent.tools.compare_trims --dry-run
+
+# Run comparison (requires OPENAI_API_KEY)
+python -m ai_agent.tools.compare_trims
+
+# Run with 3 repeats per scenario for noise reduction
+python -m ai_agent.tools.compare_trims --repeat 3
+
+# Test with a different model
+python -m ai_agent.tools.compare_trims --model gpt-5.6-sol-medium
+```
+
+The comparison tool:
+
+- Loads a fixed set of mid/late-game scenarios from the eval corpus (or synthetic examples if corpus is unavailable)
+- Runs each scenario with `RIFTBOUND_REASONER_COMPACT_TOOLS=0` (off) and `=1` (on)
+- Reports per-scenario and aggregate:
+  - Prompt, cached, and completion token counts
+  - Estimated cost in USD
+  - Number of Reasoner steps
+  - Chosen action and whether both runs agree
+- Supports `--repeat N` to reduce noise from model non-determinism
+
+### Reading Comparison Results
+
+The report includes:
+
+- **Aggregate totals**: Total tokens and cost across all runs, off vs on
+- **Savings**: Absolute and percentage reduction in prompt tokens and cost
+- **Agreement rate**: How often the compact and full modes chose the same line (should be high; significant divergence suggests information loss)
+- **Per-scenario breakdown**: Shows token counts, steps, cost, and agreement for each test case
+
+Example output:
+
+```
+Aggregate Totals:
+  Compact OFF: 1,032,450 prompt, 610,000 cached, 8,200 completion, $5.23
+  Compact ON:  578,120 prompt, 340,000 cached, 8,100 completion, $2.47
+
+  Prompt token savings: 454,330 (44.0%)
+  Cost savings: $2.76 (52.8%)
+
+Agreement on chosen line: 11/12 (91.7%)
+```
+
+### What the Compaction Preserves
+
+The compact deepen and stub logic preserve all fields required for commit validation:
+
+- `line_id`, `expected_pre_hashes`, `root_state_hash`
+- `complete`, `terminal_reason`
+- Scores and risk-adjusted scores (if present)
+- Core state deltas (wins_game, my_score_after, opp_score_after, next_decision)
+
+The compaction drops:
+
+- Full move contexts beyond the first 6 moves per line
+- Verbose resolved_state fields (units_killed, cards_drawn, etc.)
+- Lines beyond the top 10
+- Old tool results (replaced with stubs after first use)
+
+### Risks and Caveats
+
+- **Information loss**: The compact form may drop context the model could have used. Monitor the agreement rate; if it drops below ~85%, the compaction may be too aggressive.
+- **Commit failures**: If HASH_DIVERGE or validation errors increase, the compaction may have removed a required field. File a bug with the scenario.
+- **Model dependence**: Some models (especially non-OpenAI) may be more sensitive to the compaction. Test before deploying in production.
+- **Caching interaction**: Compaction changes the prompt structure, which may reduce caching effectiveness on the first turn after enabling. This is a transient effect.
+
+### Measuring Real Savings
+
+The profiler evidence from seed-5000 shows:
+
+- Tool results: 55.9% of prompt tokens
+- `deepen` alone: 577K of ~1.03M prompt tokens
+- A single deepen was ~52K tokens and re-sent on steps 2, 3, 4
+
+Expected savings with compaction:
+
+- Deepen compaction (~1.5K cap): ~95% reduction per deepen result
+- Stub replacement: ~99% reduction on re-sent results (keeps ~100-200 token stub)
+
+Realistic aggregate savings depend on the decision mix (how many deepen calls, how many steps). Use `compare_trims.py` on your own scenarios to measure.

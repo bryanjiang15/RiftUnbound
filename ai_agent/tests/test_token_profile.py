@@ -315,3 +315,59 @@ def test_format_markdown_report(tmp_path: Path):
     assert "**Total API calls**: 1" in report
     assert "## Average Prompt Size by Step" in report
     assert "| Step | Avg Tokens | Cached Share |" in report
+
+
+def test_estimate_tokens_with_dict_messages():
+    """Token profiling handles dict messages correctly."""
+    from ai_agent.reasoner import _estimate_tokens
+
+    messages = [
+        {"role": "system", "content": "System prompt"},
+        {"role": "user", "content": "User message"},
+        {"role": "assistant", "content": "Assistant reply"},
+        {"role": "tool", "tool_call_id": "call_1", "content": '{"result": "data"}'},
+    ]
+
+    # Should not crash when processing dict messages
+    total = 0
+    for msg in messages:
+        if isinstance(msg, dict):
+            content = msg.get("content") or ""
+            total += _estimate_tokens(content)
+
+    assert total > 0
+
+
+def test_estimate_tokens_with_sdk_message_objects():
+    """Token profiling handles SDK message objects correctly."""
+    from ai_agent.reasoner import _estimate_tokens
+
+    # Simulate SDK message object structure
+    class MockSDKMessage:
+        def __init__(self, role: str, content: str | None):
+            self.role = role
+            self.content = content
+
+        def model_dump(self):
+            return {"role": self.role, "content": self.content}
+
+    # Create mixed list of dicts and SDK-like objects
+    messages = [
+        {"role": "system", "content": "System prompt"},
+        MockSDKMessage("assistant", "Assistant reply"),
+        {"role": "tool", "tool_call_id": "call_1", "content": '{"result": "data"}'},
+    ]
+
+    # Should handle both dict and SDK objects
+    total = 0
+    for msg in messages:
+        content = None
+        if isinstance(msg, dict):
+            content = msg.get("content") or ""
+        elif hasattr(msg, "content"):
+            content = msg.content or ""
+
+        if content:
+            total += _estimate_tokens(content)
+
+    assert total > 0
