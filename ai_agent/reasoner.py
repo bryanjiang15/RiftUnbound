@@ -531,15 +531,14 @@ def _render_scout_lines(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _compact_deepen_result(result: dict[str, Any]) -> dict[str, Any]:
     """Compact a deepen result to fit within MAX_COMPACT_TOOL_SIZE tokens.
 
-    Preserves all fields needed for commit validation (line_id, expected_pre_hashes,
-    root_state_hash, etc.) while summarizing candidate_lines to save space.
+    Compacts only the result_text sent to the model. The original result dict
+    is preserved for classification and gate logic.
     """
     if not isinstance(result, dict):
         return result
 
     # Preserve critical metadata
     compact: dict[str, Any] = {
-        "_tool_name": result.get("_tool_name", "deepen"),
         "source": result.get("source", ""),
         "result_status": result.get("result_status", ""),
         "seed_moves": result.get("seed_moves", []),
@@ -557,6 +556,11 @@ def _compact_deepen_result(result: dict[str, Any]) -> dict[str, Any]:
         if key in result:
             compact[key] = result[key]
 
+    # Determine score hiding rule (same as _render_scout_lines)
+    hide_scores = _hide_raw_scores()
+    from .risk_score import risk_rank_enabled
+    rank_on = risk_rank_enabled()
+
     # Compact candidate_lines: keep essential decision data
     lines = result.get("candidate_lines", [])
     if lines:
@@ -571,15 +575,16 @@ def _compact_deepen_result(result: dict[str, Any]) -> dict[str, Any]:
                 "terminal_reason": line.get("terminal_reason", ""),
                 "score_band": _score_band_label(line.get("score", 0.0), band=_score_tie_band()),
                 "root_state_hash": line.get("root_state_hash", ""),
-                "expected_pre_hashes": line.get("expected_pre_hashes", []),
             }
-            # Preserve scores and risk if available
-            if line.get("score") is not None:
-                compact_line["score"] = line["score"]
-            if line.get("risk_adjusted_score") is not None:
-                compact_line["risk_adjusted_score"] = line["risk_adjusted_score"]
-            if line.get("risk_penalty") is not None:
-                compact_line["risk_penalty"] = line["risk_penalty"]
+            # Apply same raw score hiding rule as _render_scout_lines
+            if not hide_scores or rank_on:
+                if line.get("score") is not None:
+                    compact_line["score"] = line["score"]
+            if rank_on:
+                if line.get("risk_adjusted_score") is not None:
+                    compact_line["risk_adjusted_score"] = line["risk_adjusted_score"]
+                if line.get("risk_penalty") is not None:
+                    compact_line["risk_penalty"] = line["risk_penalty"]
 
             # Compact resolved_state to key deltas only
             resolved = line.get("resolved_state", {})
@@ -597,87 +602,18 @@ def _compact_deepen_result(result: dict[str, Any]) -> dict[str, Any]:
         compact["line_count"] = len(lines)
         compact["compacted"] = True
 
+    # Enforce MAX_COMPACT_TOOL_SIZE token limit
+    compact_text = json.dumps(compact)
+    estimated = _estimate_tokens(compact_text)
+    if estimated > MAX_COMPACT_TOOL_SIZE:
+        # Further truncate: drop lines from the end until under budget
+        while len(compact_lines) > 1 and _estimate_tokens(json.dumps(compact)) > MAX_COMPACT_TOOL_SIZE:
+            compact_lines.pop()
+        compact["candidate_lines"] = compact_lines
+        compact["line_count"] = len(lines)  # Original count stays
+        compact["truncated_to_fit"] = True
+
     return compact
-
-
-def _compact_tool_result(name: str, result: Any) -> dict[str, Any]:
-    """Create a compact representation of a tool result."""
-    if name == "deepen":
-        return _compact_deepen_result(result)
-
-    # For other search tools, apply similar compaction
-    if name in SEARCH_DRIVING_TOOLS and isinstance(result, dict):
-        compact = dict(result)
-        lines = compact.get("candidate_lines", [])
-        if len(lines) > 5:
-            compact["candidate_lines"] = lines[:5]
-            compact["line_count"] = len(lines)
-            compact["compacted"] = True
-        return compact
-
-    return result
-
-
-def _create_tool_stub(name: str, original_size: int, summary: str = "") -> str:
-    """Create a short stub to replace an old tool result."""
-    stub = {
-        "_stub": True,
-        "_tool_name": name,
-        "_original_tokens": original_size,
-        "note": f"Previous {name} result ({original_size} tokens). Full result was shown earlier.",
-    }
-    if summary:
-        stub["summary"] = summary
-    return json.dumps(stub)
-
-
-def _replace_old_tool_results_with_stubs(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Replace all but the most recent tool result for each tool with a compact stub.
-
-    Only the latest result of each tool type stays full; earlier ones become stubs.
-    """
-    if not _compact_tools_enabled():
-        return messages
-
-    # Find all tool result indices by tool name
-    tool_indices: dict[str, list[int]] = {}
-    for i, msg in enumerate(messages):
-        if not isinstance(msg, dict) or msg.get("role") != "tool":
-            continue
-        content_str = msg.get("content", "")
-        try:
-            result = json.loads(content_str) if isinstance(content_str, str) else content_str
-            if isinstance(result, dict):
-                tool_name = result.get("_tool_name", "unknown")
-                tool_indices.setdefault(tool_name, []).append(i)
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-    # Replace all but the last occurrence of each tool with a stub
-    modified = list(messages)
-    for tool_name, indices in tool_indices.items():
-        if len(indices) <= 1:
-            continue  # Only one result, keep it full
-
-        # Replace all but the last
-        for idx in indices[:-1]:
-            msg = modified[idx]
-            content_str = msg.get("content", "")
-            try:
-                result = json.loads(content_str) if isinstance(content_str, str) else content_str
-                if isinstance(result, dict) and not result.get("_stub"):
-                    original_tokens = _estimate_tokens(content_str)
-                    summary = f"result_status={result.get('result_status', 'unknown')}"
-                    stub = _create_tool_stub(tool_name, original_tokens, summary)
-                    modified[idx] = {
-                        "role": "tool",
-                        "tool_call_id": msg.get("tool_call_id", ""),
-                        "content": stub,
-                    }
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-    return modified
 
 
 def _investigation_exemption(
@@ -1229,13 +1165,6 @@ async def _request_reasoning(
                     )
                     try:
                         result = json.loads(result_text)
-                        # Inject tool name for token profiling
-                        if isinstance(result, dict):
-                            result["_tool_name"] = name
-                            # Compact the result if enabled and it's a large search tool
-                            if _compact_tools_enabled() and name in SEARCH_DRIVING_TOOLS:
-                                result = _compact_tool_result(name, result)
-                            result_text = json.dumps(result)
                     except (json.JSONDecodeError, TypeError):
                         result = result_text
 
@@ -1332,6 +1261,14 @@ async def _request_reasoning(
                             envelope += (
                                 f"SUGGESTED PREFIX: {result.get('suggested_prefix')}\n"
                             )
+                        
+                        # Compact the result ONLY for the prompt, after classification
+                        if _compact_tools_enabled() and name in SEARCH_DRIVING_TOOLS:
+                            result_for_prompt = _compact_deepen_result(result) if name == "deepen" else result
+                            result_text = json.dumps(result_for_prompt)
+                        else:
+                            result_text = json.dumps(result)
+                    else:
                         result_text = json.dumps(result)
 
                     if context is not None and name in SEARCH_DRIVING_TOOLS:
@@ -1356,10 +1293,6 @@ async def _request_reasoning(
                     "role": "user",
                     "content": envelope,
                 })
-
-            # Replace old tool results with stubs to reduce prompt size
-            if _compact_tools_enabled():
-                messages = _replace_old_tool_results_with_stubs(messages)
 
             continue
 
