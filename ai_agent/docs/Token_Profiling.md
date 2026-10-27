@@ -154,3 +154,64 @@ The `other` field in the report is a residual: actual prompt tokens minus the su
 - Estimation error (tiktoken approximation vs OpenAI's real tokenizer)
 
 A healthy `other` value is 5-15% of the prompt. If `other` is negative or >20%, the estimator may be missing a source.
+
+## Tool Result Compaction
+
+To reduce prompt costs, the Reasoner includes **tool result compaction** that shrinks `deepen` output before sending it to the model. Compaction is controlled by `RIFTBOUND_REASONER_COMPACT_TOOLS` (default ON).
+
+### What Gets Compacted
+
+**Only `deepen` results** are compacted, and **only the copy sent to the model**. Classification, gate logic, and feedback envelopes use the full raw result.
+
+Compaction:
+- Caps at top 10 lines (was unlimited)
+- Truncates moves to first 6 per line
+- Keeps only key state deltas: `wins_game`, `my_score_after`, `opp_score_after`, `next_decision`
+- Drops fields the model doesn't need: `expected_pre_hashes` (commit reads from registry), verbose metadata
+- Hides raw `score` unless `RIFTBOUND_REASONER_HIDE_RAW_SCORE=0` or risk rank is on
+- Enforces hard cap at ~1500 tokens per result; truncates further if needed
+
+### Configuration
+
+```bash
+# Default: compaction enabled
+./Scripts/run_reasoner_baseline.sh --games 2 --seed 5000
+
+# Disable compaction
+RIFTBOUND_REASONER_COMPACT_TOOLS=0 ./Scripts/run_reasoner_baseline.sh --games 2 --seed 5000
+```
+
+### Measuring Savings
+
+Use `compare_trims.py` to measure token savings on a small set of eval positions:
+
+```bash
+# Requires OPENAI_API_KEY and running engine server
+python -m ai_agent.tools.compare_trims --positions 3 --repeat 1
+
+# Test more positions
+python -m ai_agent.tools.compare_trims --positions 5 --model gpt-4o
+```
+
+The tool:
+- Loads real eval positions from `Data/AI/Eval/positions/`
+- Runs each position with compaction off vs on
+- Reports projected savings (not production measurements)
+- Shows agreement rate (should be high; low agreement means information loss)
+
+**Note:** Small-sample projections may not match production savings. Run on representative game scenarios for accurate estimates.
+
+### Expected Savings (Projected)
+
+From profiled seed-5000 game analysis:
+- **Deepen results:** ~52K tokens each, re-sent on steps 2, 3, 4
+- **Compaction:** Reduces each to ~1.5K tokens (~97% per-result savings)
+- **Realistic aggregate savings:** 40-60% on prompt tokens (varies by decision mix)
+
+These are projections from static analysis, not measured production data.
+
+### Risks
+
+- **Information loss:** If agreement rate <85% in compare_trims, compaction may be too aggressive
+- **Commit validation failures:** If HASH_DIVERGE errors increase, a required field may be missing
+- **Model sensitivity:** Some models may be more sensitive to compaction; test before production

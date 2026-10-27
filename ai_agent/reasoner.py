@@ -375,6 +375,19 @@ def _score_tie_band() -> float:
         return DEFAULT_SCORE_TIE_BAND
 
 
+def _compact_tools_enabled() -> bool:
+    """Check if compact tool result mode is enabled (default ON)."""
+    return os.environ.get("RIFTBOUND_REASONER_COMPACT_TOOLS", "1").strip().lower() not in {
+        "0",
+        "false",
+        "off",
+        "no",
+    }
+
+
+MAX_COMPACT_TOOL_SIZE = 1500  # tokens
+
+
 def _hide_raw_scores() -> bool:
     return os.environ.get("RIFTBOUND_REASONER_HIDE_RAW_SCORE", "1").strip().lower() not in {
         "0",
@@ -526,6 +539,94 @@ def _render_scout_lines(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
             entry["risk"] = risk_summary
         rendered.append(entry)
     return rendered
+
+
+def _compact_deepen_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Compact a deepen result to fit within MAX_COMPACT_TOOL_SIZE tokens.
+
+    Compacts only the result_text sent to the model. The original result dict
+    is preserved for classification and gate logic.
+    """
+    if not isinstance(result, dict):
+        return result
+
+    # Preserve critical metadata
+    compact: dict[str, Any] = {
+        "source": result.get("source", ""),
+        "result_status": result.get("result_status", ""),
+        "seed_moves": result.get("seed_moves", []),
+        "extra_depth": result.get("extra_depth"),
+        "prefix_steps": result.get("prefix_steps"),
+    }
+
+    # Preserve error/budget fields
+    for key in ("legal", "error", "stopped_reason", "suggested_prefix"):
+        if key in result:
+            compact[key] = result[key]
+
+    # Preserve budget status
+    for key in ("budget_exhausted", "engine_time_ms", "node_budget_spent"):
+        if key in result:
+            compact[key] = result[key]
+
+    # Determine score hiding rule (same as _render_scout_lines)
+    hide_scores = _hide_raw_scores()
+    from .risk_score import risk_rank_enabled
+    rank_on = risk_rank_enabled()
+
+    # Compact candidate_lines: keep essential decision data
+    lines = result.get("candidate_lines", [])
+    if lines:
+        compact_lines = []
+        for line in lines[:10]:  # Cap at top 10 lines
+            if not isinstance(line, dict):
+                continue
+            compact_line = {
+                "line_id": line.get("line_id"),
+                "moves": line.get("moves", [])[:6],  # First 6 moves only
+                "complete": line.get("complete"),
+                "terminal_reason": line.get("terminal_reason", ""),
+                "score_band": _score_band_label(line.get("score", 0.0), band=_score_tie_band()),
+                "root_state_hash": line.get("root_state_hash", ""),
+            }
+            # Apply same raw score hiding rule as _render_scout_lines
+            if not hide_scores or rank_on:
+                if line.get("score") is not None:
+                    compact_line["score"] = line["score"]
+            if rank_on:
+                if line.get("risk_adjusted_score") is not None:
+                    compact_line["risk_adjusted_score"] = line["risk_adjusted_score"]
+                if line.get("risk_penalty") is not None:
+                    compact_line["risk_penalty"] = line["risk_penalty"]
+
+            # Compact resolved_state to key deltas only
+            resolved = line.get("resolved_state", {})
+            if resolved:
+                compact_resolved = {}
+                for key in ("wins_game", "my_score_after", "opp_score_after", "next_decision"):
+                    if key in resolved:
+                        compact_resolved[key] = resolved[key]
+                if compact_resolved:
+                    compact_line["resolved_state"] = compact_resolved
+
+            compact_lines.append(compact_line)
+
+        compact["candidate_lines"] = compact_lines
+        compact["line_count"] = len(lines)
+        compact["compacted"] = True
+
+    # Enforce MAX_COMPACT_TOOL_SIZE token limit
+    compact_text = json.dumps(compact)
+    estimated = _estimate_tokens(compact_text)
+    if estimated > MAX_COMPACT_TOOL_SIZE:
+        # Further truncate: drop lines from the end until under budget
+        while len(compact_lines) > 1 and _estimate_tokens(json.dumps(compact)) > MAX_COMPACT_TOOL_SIZE:
+            compact_lines.pop()
+        compact["candidate_lines"] = compact_lines
+        compact["line_count"] = len(lines)  # Original count stays
+        compact["truncated_to_fit"] = True
+
+    return compact
 
 
 def _investigation_exemption(
@@ -1236,6 +1337,14 @@ async def _request_reasoning(
                             envelope += (
                                 f"SUGGESTED PREFIX: {result.get('suggested_prefix')}\n"
                             )
+                        
+                        # Compact the result ONLY for the prompt, after classification
+                        if _compact_tools_enabled() and name in SEARCH_DRIVING_TOOLS:
+                            result_for_prompt = _compact_deepen_result(result) if name == "deepen" else result
+                            result_text = json.dumps(result_for_prompt)
+                        else:
+                            result_text = json.dumps(result)
+                    else:
                         result_text = json.dumps(result)
 
                     if context is not None and name in SEARCH_DRIVING_TOOLS:
@@ -1260,6 +1369,7 @@ async def _request_reasoning(
                     "role": "user",
                     "content": envelope,
                 })
+
             continue
 
         reasoning_text = msg.content or ""
