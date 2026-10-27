@@ -6,22 +6,32 @@ How to measure and analyze token usage in the Reasoner's LLM calls to identify c
 
 The Reasoner is a ReAct-style loop that makes multiple LLM calls per decision, accumulating context (system prompt, game state, assistant history, and tool results) on each step. This instrumentation tracks:
 
-- Token composition per call: system message, state, assistant history, and tool results
+- Token composition per call: system message, state, scout baseline, assistant history, tool results, envelopes/nudges, and residual
 - Actual API token counts and caching statistics
 - Cost breakdown and growth patterns
 
 ## Usage
 
-### 1. Run a game with token profiling enabled
+### 1. Run a Reasoner self-play game with token profiling
 
-Token profiling is **always on** in `reasoner.py`. Run any evaluation or self-play game:
+Token profiling is **always on** in `reasoner.py`. Run the Reasoner baseline flow to generate profiled games:
 
 ```bash
-# Example: run a single self-play game
-python -m ai_agent.main --seed 5000 --player1 reasoner --player2 reasoner
+# Start engine server (in Godot project)
+export RIFTBOUND_SEARCH=on
+export RIFTBOUND_ENGINE_SERVER=on
+export RIFTBOUND_ENGINE_PORT=8770
+export RIFTBOUND_LOG_INPUTS=1
 
-# Or run an eval position
-python -m ai_agent.eval run --manifest Data/AI/Eval/manifests/blocking.json
+# Start Reasoner agent (in separate terminal)
+export OPENAI_API_KEY=sk-...
+export RIFTBOUND_REASONER=on
+export RIFTBOUND_ENGINE_PORT=8770
+export RIFTBOUND_LOG_INPUTS=1
+uvicorn ai_agent.main:app --port 8765
+
+# Run self-play games (from repo root, with Godot in PATH)
+./Scripts/run_reasoner_baseline.sh --games 2 --seed 5000
 ```
 
 The Reasoner logs token profiles to `ai_agent/agent_search.log`.
@@ -45,7 +55,7 @@ The report shows:
 
 - **Total tokens and cost**: Prompt (uncached + cached), completion, estimated dollars
 - **Average prompt size by step**: Shows growth within decisions (step 0, 1, 2, ...)
-- **Prompt composition share**: Breakdown of system, state, assistant_hist, and tool results
+- **Prompt composition share**: Breakdown of system, state, scout, assistant_hist, tools, envelope, other
 - **Tool result tokens**: Total tokens per tool (search_for, deepen, etc.)
 - **Top 10 largest tool results**: Identifies the heaviest individual tool outputs
 - **Trivial decisions**: Decisions that ended in 1-2 steps (forced moves, single legal action)
@@ -105,119 +115,42 @@ Default pricing (per 1M tokens):
 - Cached input: $0.25
 - Output: $15.00
 
-Uncached input is ~78% of the bill when caching is 59% (context from PR description).
+Uncached input dominates the bill when caching is high — e.g., with 59% caching, uncached tokens are still ~78% of cost.
 
-## Static Analysis Findings
+## Static Analysis: What Grows Per Step
 
-See the PR description for a code-level analysis of what grows per step and what could be trimmed.
+Evidence from profiled games shows these sources of prompt growth:
 
-## Token Compaction Feature
+### Step 0 (initial)
+- System prompt (~1.2K tokens, flat)
+- State + scout baseline (~800 + variable tokens, flat)
+- Total: ~2-3K tokens
 
-Starting with the compact tools PR, the Reasoner includes an optional **token compaction** mode that reduces prompt size by:
+### Steps 1-N (tool rounds)
+Each tool round adds:
+- **Assistant tool-call turn** (~50-150 tokens): the model's `tool_calls` message listing which tools to invoke
+- **Tool results** (variable, largest contributor):
+  - `deepen` can be ~52K tokens per result (pre-compaction)
+  - `search_for` typically ~3-5K tokens
+  - Other tools (get_card_detail, lookup_rule): <500 tokens each
+- **Feedback envelopes** (~200-400 tokens): the investigation_metrics advisory sent back to the model after search tools
 
-1. **Compact deepen output**: Returns a summary per line (best moves, scores, key state deltas) instead of the full payload, with a hard size cap (~1500 tokens).
-2. **Stub old tool results**: Once a tool result has been sent, subsequent prompts replace it with a short stub that notes what it was. Only the latest tool result of each type stays full.
+### Growth trajectory
+A typical 4-step decision with 2 deepen calls:
+- Step 0: ~2.6K tokens
+- Step 1 (search_for): ~2.6K + 3K tool + 0.4K envelope = ~6K total
+- Step 2 (deepen): ~6K + 52K tool + 0.4K envelope = ~58K total
+- Step 3 (deepen): ~58K + 52K tool + 0.4K envelope = ~110K total
+- Step 4 (commit_line): ~110K + 0.2K rejection + nudge = ~110K total
 
-### Configuration
+**Key insight:** Tool results (especially `deepen`) and their re-transmission dominate growth. System/state/assistant history are small by comparison.
 
-The compaction is controlled by the `RIFTBOUND_REASONER_COMPACT_TOOLS` environment variable:
+## What the "other" Bucket Captures
 
-- **Default**: ON (`1`)
-- **Disable**: Set to `0`, `false`, `off`, or `no`
+The `other` field in the report is a residual: actual prompt tokens minus the sum of estimated parts (system + state + scout + assistant_hist + tools + envelope). Sources:
 
-```bash
-# Run with compaction enabled (default)
-python -m ai_agent.main --seed 5000 --player1 reasoner --player2 reasoner
+- Formatting overhead (JSON encoding, role markers, tool_call metadata)
+- Small user nudges ("Do not end in prose. Call commit_line...")
+- Estimation error (tiktoken approximation vs OpenAI's real tokenizer)
 
-# Disable compaction to compare
-RIFTBOUND_REASONER_COMPACT_TOOLS=0 python -m ai_agent.main --seed 5000 --player1 reasoner --player2 reasoner
-```
-
-### Comparison Tool
-
-To measure the actual token savings, use `compare_trims.py`:
-
-```bash
-# Dry-run to see which scenarios would be tested
-python -m ai_agent.tools.compare_trims --dry-run
-
-# Run comparison (requires OPENAI_API_KEY)
-python -m ai_agent.tools.compare_trims
-
-# Run with 3 repeats per scenario for noise reduction
-python -m ai_agent.tools.compare_trims --repeat 3
-
-# Test with a different model
-python -m ai_agent.tools.compare_trims --model gpt-5.6-sol-medium
-```
-
-The comparison tool:
-
-- Loads a fixed set of mid/late-game scenarios from the eval corpus (or synthetic examples if corpus is unavailable)
-- Runs each scenario with `RIFTBOUND_REASONER_COMPACT_TOOLS=0` (off) and `=1` (on)
-- Reports per-scenario and aggregate:
-  - Prompt, cached, and completion token counts
-  - Estimated cost in USD
-  - Number of Reasoner steps
-  - Chosen action and whether both runs agree
-- Supports `--repeat N` to reduce noise from model non-determinism
-
-### Reading Comparison Results
-
-The report includes:
-
-- **Aggregate totals**: Total tokens and cost across all runs, off vs on
-- **Savings**: Absolute and percentage reduction in prompt tokens and cost
-- **Agreement rate**: How often the compact and full modes chose the same line (should be high; significant divergence suggests information loss)
-- **Per-scenario breakdown**: Shows token counts, steps, cost, and agreement for each test case
-
-Example output:
-
-```
-Aggregate Totals:
-  Compact OFF: 1,032,450 prompt, 610,000 cached, 8,200 completion, $5.23
-  Compact ON:  578,120 prompt, 340,000 cached, 8,100 completion, $2.47
-
-  Prompt token savings: 454,330 (44.0%)
-  Cost savings: $2.76 (52.8%)
-
-Agreement on chosen line: 11/12 (91.7%)
-```
-
-### What the Compaction Preserves
-
-The compact deepen and stub logic preserve all fields required for commit validation:
-
-- `line_id`, `expected_pre_hashes`, `root_state_hash`
-- `complete`, `terminal_reason`
-- Scores and risk-adjusted scores (if present)
-- Core state deltas (wins_game, my_score_after, opp_score_after, next_decision)
-
-The compaction drops:
-
-- Full move contexts beyond the first 6 moves per line
-- Verbose resolved_state fields (units_killed, cards_drawn, etc.)
-- Lines beyond the top 10
-- Old tool results (replaced with stubs after first use)
-
-### Risks and Caveats
-
-- **Information loss**: The compact form may drop context the model could have used. Monitor the agreement rate; if it drops below ~85%, the compaction may be too aggressive.
-- **Commit failures**: If HASH_DIVERGE or validation errors increase, the compaction may have removed a required field. File a bug with the scenario.
-- **Model dependence**: Some models (especially non-OpenAI) may be more sensitive to the compaction. Test before deploying in production.
-- **Caching interaction**: Compaction changes the prompt structure, which may reduce caching effectiveness on the first turn after enabling. This is a transient effect.
-
-### Measuring Real Savings
-
-The profiler evidence from seed-5000 shows:
-
-- Tool results: 55.9% of prompt tokens
-- `deepen` alone: 577K of ~1.03M prompt tokens
-- A single deepen was ~52K tokens and re-sent on steps 2, 3, 4
-
-Expected savings with compaction:
-
-- Deepen compaction (~1.5K cap): ~95% reduction per deepen result
-- Stub replacement: ~99% reduction on re-sent results (keeps ~100-200 token stub)
-
-Realistic aggregate savings depend on the decision mix (how many deepen calls, how many steps). Use `compare_trims.py` on your own scenarios to measure.
+A healthy `other` value is 5-15% of the prompt. If `other` is negative or >20%, the estimator may be missing a source.
