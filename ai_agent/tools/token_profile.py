@@ -5,14 +5,8 @@ Usage:
     python -m ai_agent.tools.token_profile [log_path]
     python -m ai_agent.tools.token_profile --markdown [log_path]
 
-Parses `token_profile` and `token_usage` log lines from agent_search.log
-(default path: ai_agent/agent_search.log) and produces a cost breakdown:
-- Total tokens and estimated cost
-- Average prompt size by step number (to show growth within decisions)
-- Share of prompt tokens by section (system, state, assistant history, tools)
-- Top 10 largest tool results
-- Trivial decision stats (single legal action or 1-2 step decisions)
-- Cached token share per step
+Parses token_profile and token_usage log lines from agent_search.log and produces
+a cost breakdown with per-step growth and section shares.
 """
 from __future__ import annotations
 
@@ -33,8 +27,11 @@ class TokenProfile:
     step: int
     sys: int
     state: int
+    scout: int
     assistant_hist: int
     tool_results_by_name: dict[str, int]
+    envelope: int
+    other: int
     prompt: int
     cached: int
     completion: int
@@ -58,7 +55,7 @@ class TokenUsage:
         return self.prompt - self.cached
 
 
-# OpenAI GPT pricing (per 1M tokens) as of context date
+# OpenAI GPT pricing (per 1M tokens)
 PRICE_INPUT_PER_M = 2.50
 PRICE_CACHED_PER_M = 0.25
 PRICE_OUTPUT_PER_M = 15.00
@@ -71,8 +68,10 @@ def parse_token_profile_line(line: str) -> TokenProfile | None:
 
     match = re.search(
         r"token_profile decision=(\S+) step=(\d+) "
-        r"sys=(\d+) state=(\d+) assistant_hist=(\d+) "
-        r"(.*?)prompt=(\d+) cached=(\d+) completion=(\d+)",
+        r"sys=(\d+) state=(\d+) scout=(\d+) assistant_hist=(\d+) "
+        r"(.*?)"
+        r"envelope=(\d+) other=(\d+) "
+        r"prompt=(\d+) cached=(\d+) completion=(\d+)",
         line,
     )
     if not match:
@@ -82,11 +81,14 @@ def parse_token_profile_line(line: str) -> TokenProfile | None:
     step = int(match.group(2))
     sys = int(match.group(3))
     state = int(match.group(4))
-    assistant_hist = int(match.group(5))
-    tool_part = match.group(6).strip()
-    prompt = int(match.group(7))
-    cached = int(match.group(8))
-    completion = int(match.group(9))
+    scout = int(match.group(5))
+    assistant_hist = int(match.group(6))
+    tool_part = match.group(7).strip()
+    envelope = int(match.group(8))
+    other = int(match.group(9))
+    prompt = int(match.group(10))
+    cached = int(match.group(11))
+    completion = int(match.group(12))
 
     tool_results_by_name: dict[str, int] = {}
     if tool_part:
@@ -100,8 +102,11 @@ def parse_token_profile_line(line: str) -> TokenProfile | None:
         step=step,
         sys=sys,
         state=state,
+        scout=scout,
         assistant_hist=assistant_hist,
         tool_results_by_name=tool_results_by_name,
+        envelope=envelope,
+        other=other,
         prompt=prompt,
         cached=cached,
         completion=completion,
@@ -126,25 +131,6 @@ def parse_token_usage_line(line: str) -> TokenUsage | None:
         cached=int(match.group(3)),
         completion=int(match.group(4)),
     )
-
-
-def parse_log_file(log_path: Path) -> tuple[list[TokenProfile], list[TokenUsage]]:
-    """Parse all token profile and usage lines from a log file."""
-    profiles: list[TokenProfile] = []
-    usages: list[TokenUsage] = []
-
-    with log_path.open("r", encoding="utf-8", errors="replace") as f:
-        for line in f:
-            profile = parse_token_profile_line(line)
-            if profile:
-                profiles.append(profile)
-                continue
-
-            usage = parse_token_usage_line(line)
-            if usage:
-                usages.append(usage)
-
-    return profiles, usages
 
 
 def analyze_profiles(
@@ -192,7 +178,10 @@ def analyze_profiles(
     # Share of prompt tokens by section (only from profiled calls)
     total_sys = sum(p.sys for p in profiles)
     total_state = sum(p.state for p in profiles)
+    total_scout = sum(p.scout for p in profiles)
     total_assistant_hist = sum(p.assistant_hist for p in profiles)
+    total_envelope = sum(p.envelope for p in profiles)
+    total_other = sum(p.other for p in profiles)
     tool_totals: dict[str, int] = defaultdict(int)
     for p in profiles:
         for tool_name, tokens in p.tool_results_by_name.items():
@@ -204,55 +193,37 @@ def analyze_profiles(
     if profiled_prompt > 0:
         prompt_share["system"] = total_sys / profiled_prompt
         prompt_share["state"] = total_state / profiled_prompt
+        prompt_share["scout"] = total_scout / profiled_prompt
         prompt_share["assistant_hist"] = total_assistant_hist / profiled_prompt
         prompt_share["tools"] = total_tools / profiled_prompt
+        prompt_share["envelope"] = total_envelope / profiled_prompt
+        prompt_share["other"] = total_other / profiled_prompt
 
-    # Top 10 largest tool results
-    all_tool_results: list[tuple[str, str, int, int]] = []
-    for p in profiles:
-        for tool_name, tokens in p.tool_results_by_name.items():
-            all_tool_results.append((p.decision_id, tool_name, p.step, tokens))
-    top_tool_results = sorted(all_tool_results, key=lambda x: x[3], reverse=True)[:10]
-
-    # Trivial decisions (1-2 steps)
+    # Decisions by ID for trivial stats
     decisions_by_id: dict[str, list[TokenProfile]] = defaultdict(list)
     for p in profiles:
         decisions_by_id[p.decision_id].append(p)
-
-    trivial_decisions = []
-    trivial_cost_usd = 0.0
-    for decision_id, steps in decisions_by_id.items():
-        if len(steps) <= 2:
-            decision_prompt = sum(s.prompt for s in steps)
-            decision_cached = sum(s.cached for s in steps)
-            decision_uncached = sum(s.uncached_prompt for s in steps)
-            decision_completion = sum(s.completion for s in steps)
-            decision_cost = (
-                (decision_uncached / 1_000_000) * PRICE_INPUT_PER_M
-                + (decision_cached / 1_000_000) * PRICE_CACHED_PER_M
-                + (decision_completion / 1_000_000) * PRICE_OUTPUT_PER_M
-            )
-            trivial_decisions.append(
-                {
-                    "decision_id": decision_id,
-                    "steps": len(steps),
-                    "prompt": decision_prompt,
-                    "cached": decision_cached,
-                    "completion": decision_completion,
-                    "cost_usd": decision_cost,
-                }
-            )
-            trivial_cost_usd += decision_cost
+    trivial_stats = {
+        "count": sum(1 for steps in decisions_by_id.values() if len(steps) <= 2),
+        "cost": sum(
+            sum(s.uncached_prompt for s in steps) / 1_000_000 * PRICE_INPUT_PER_M
+            + sum(s.cached for s in steps) / 1_000_000 * PRICE_CACHED_PER_M
+            + sum(s.completion for s in steps) / 1_000_000 * PRICE_OUTPUT_PER_M
+            for steps in decisions_by_id.values()
+            if len(steps) <= 2
+        ),
+    }
 
     # Cached share per step
-    cached_share_by_step = {}
-    for step, prompts in prompt_by_step.items():
-        step_profiles = [p for p in profiles if p.step == step]
-        step_cached = sum(p.cached for p in step_profiles)
-        step_prompt = sum(p.prompt for p in step_profiles)
-        cached_share_by_step[step] = (
-            step_cached / step_prompt if step_prompt > 0 else 0
+    cached_share_by_step = {
+        step: (
+            sum(p.cached for p in profiles if p.step == step)
+            / sum(p.prompt for p in profiles if p.step == step)
+            if sum(p.prompt for p in profiles if p.step == step) > 0
+            else 0
         )
+        for step in prompt_by_step
+    }
 
     return {
         "total_calls": len(profiles) + len(usages),
@@ -268,164 +239,109 @@ def analyze_profiles(
         "prompt_share": prompt_share,
         "tool_totals": dict(tool_totals),
         "top_tool_results": top_tool_results,
-        "trivial_decisions": trivial_decisions,
-        "trivial_decision_count": len(trivial_decisions),
-        "trivial_cost_usd": trivial_cost_usd,
+        "trivial_decision_count": trivial_stats["count"],
+        "trivial_cost_usd": trivial_stats["cost"],
         "cached_share_by_step": cached_share_by_step,
     }
 
 
-def format_text_report(analysis: dict, out: TextIO) -> None:
-    """Write a human-readable text report."""
-    out.write("=" * 80 + "\n")
-    out.write("Reasoner Token Profile Report\n")
-    out.write("=" * 80 + "\n\n")
-
-    out.write(f"Total API calls: {analysis['total_calls']}\n")
-    out.write(f"  Profiled: {analysis['profiled_calls']}\n")
-    out.write(f"  Unprofiled: {analysis['unprofiled_calls']}\n\n")
-
-    out.write(f"Total tokens: {analysis['total_tokens']:,}\n")
-    out.write(f"  Prompt: {analysis['total_prompt']:,}\n")
-    out.write(f"    Uncached: {analysis['total_uncached_prompt']:,}\n")
-    out.write(f"    Cached: {analysis['total_cached']:,}\n")
-    out.write(
-        f"    Cache hit rate: {analysis['total_cached'] / analysis['total_prompt']:.1%}\n"
-        if analysis["total_prompt"] > 0
-        else ""
-    )
-    out.write(f"  Completion: {analysis['total_completion']:,}\n\n")
-
-    out.write(
-        f"Estimated cost: ${analysis['estimated_cost_usd']:.2f}\n"
-    )
-    out.write(
-        f"  (input ${PRICE_INPUT_PER_M}/1M, "
-        f"cached ${PRICE_CACHED_PER_M}/1M, "
-        f"output ${PRICE_OUTPUT_PER_M}/1M)\n\n"
-    )
-
-    out.write("-" * 80 + "\n")
-    out.write("Average prompt size by step (within decisions)\n")
-    out.write("-" * 80 + "\n")
-    for step, avg in sorted(analysis["avg_prompt_by_step"].items()):
-        cached_share = analysis["cached_share_by_step"].get(step, 0)
-        out.write(f"  Step {step}: {avg:,.0f} tokens (cached {cached_share:.1%})\n")
-    out.write("\n")
-
-    out.write("-" * 80 + "\n")
-    out.write("Prompt composition share (from profiled calls)\n")
-    out.write("-" * 80 + "\n")
-    for section, share in sorted(analysis["prompt_share"].items(), key=lambda x: -x[1]):
-        out.write(f"  {section:20s}: {share:6.1%}\n")
-    out.write("\n")
-
-    out.write("-" * 80 + "\n")
-    out.write("Tool result token totals\n")
-    out.write("-" * 80 + "\n")
-    for tool_name, tokens in sorted(
-        analysis["tool_totals"].items(), key=lambda x: -x[1]
-    ):
-        out.write(f"  {tool_name:30s}: {tokens:,} tokens\n")
-    out.write("\n")
-
-    out.write("-" * 80 + "\n")
-    out.write("Top 10 largest single tool results\n")
-    out.write("-" * 80 + "\n")
-    for decision_id, tool_name, step, tokens in analysis["top_tool_results"]:
-        out.write(
-            f"  {decision_id} step {step:2d} {tool_name:20s}: {tokens:,} tokens\n"
-        )
-    out.write("\n")
-
-    out.write("-" * 80 + "\n")
-    out.write("Trivial decisions (1-2 steps)\n")
-    out.write("-" * 80 + "\n")
-    out.write(f"Count: {analysis['trivial_decision_count']}\n")
-    out.write(f"Total cost: ${analysis['trivial_cost_usd']:.2f}\n")
-    if analysis["trivial_decisions"]:
-        out.write("\nExamples:\n")
-        for td in analysis["trivial_decisions"][:5]:
+def format_report(analysis: dict, out: TextIO, markdown: bool = False) -> None:
+    """Write a report in text or markdown format."""
+    if markdown:
+        out.write("# Reasoner Token Profile Report\n\n## Summary\n\n")
+        out.write(f"- **Total API calls**: {analysis['total_calls']}\n")
+        out.write(f"  - Profiled: {analysis['profiled_calls']}\n")
+        out.write(f"  - Unprofiled: {analysis['unprofiled_calls']}\n")
+        out.write(f"- **Total tokens**: {analysis['total_tokens']:,}\n")
+        out.write(f"  - Prompt: {analysis['total_prompt']:,}\n")
+        out.write(f"    - Uncached: {analysis['total_uncached_prompt']:,}\n")
+        out.write(f"    - Cached: {analysis['total_cached']:,}\n")
+        if analysis["total_prompt"] > 0:
             out.write(
-                f"  {td['decision_id']} ({td['steps']} steps): "
-                f"{td['prompt']:,} prompt, {td['completion']:,} completion, "
-                f"${td['cost_usd']:.3f}\n"
+                f"    - Cache hit rate: "
+                f"{analysis['total_cached'] / analysis['total_prompt']:.1%}\n"
             )
-    out.write("\n")
-
-
-def format_markdown_report(analysis: dict, out: TextIO) -> None:
-    """Write a markdown report."""
-    out.write("# Reasoner Token Profile Report\n\n")
-
-    out.write("## Summary\n\n")
-    out.write(f"- **Total API calls**: {analysis['total_calls']}\n")
-    out.write(f"  - Profiled: {analysis['profiled_calls']}\n")
-    out.write(f"  - Unprofiled: {analysis['unprofiled_calls']}\n")
-    out.write(f"- **Total tokens**: {analysis['total_tokens']:,}\n")
-    out.write(f"  - Prompt: {analysis['total_prompt']:,}\n")
-    out.write(f"    - Uncached: {analysis['total_uncached_prompt']:,}\n")
-    out.write(f"    - Cached: {analysis['total_cached']:,}\n")
-    if analysis["total_prompt"] > 0:
+        out.write(f"  - Completion: {analysis['total_completion']:,}\n")
+        out.write(f"- **Estimated cost**: ${analysis['estimated_cost_usd']:.2f}\n")
         out.write(
-            f"    - Cache hit rate: "
-            f"{analysis['total_cached'] / analysis['total_prompt']:.1%}\n"
+            f"  - Pricing: input ${PRICE_INPUT_PER_M}/1M, "
+            f"cached ${PRICE_CACHED_PER_M}/1M, output ${PRICE_OUTPUT_PER_M}/1M\n\n"
         )
-    out.write(f"  - Completion: {analysis['total_completion']:,}\n")
-    out.write(
-        f"- **Estimated cost**: ${analysis['estimated_cost_usd']:.2f}\n"
-    )
-    out.write(
-        f"  - Pricing: input ${PRICE_INPUT_PER_M}/1M, "
-        f"cached ${PRICE_CACHED_PER_M}/1M, "
-        f"output ${PRICE_OUTPUT_PER_M}/1M\n\n"
-    )
-
-    out.write("## Average Prompt Size by Step\n\n")
-    out.write("| Step | Avg Tokens | Cached Share |\n")
-    out.write("|-----:|-----------:|-------------:|\n")
-    for step, avg in sorted(analysis["avg_prompt_by_step"].items()):
-        cached_share = analysis["cached_share_by_step"].get(step, 0)
-        out.write(f"| {step} | {avg:,.0f} | {cached_share:.1%} |\n")
-    out.write("\n")
-
-    out.write("## Prompt Composition (Profiled Calls)\n\n")
-    out.write("| Section | Share |\n")
-    out.write("|:--------|------:|\n")
-    for section, share in sorted(analysis["prompt_share"].items(), key=lambda x: -x[1]):
-        out.write(f"| {section} | {share:.1%} |\n")
-    out.write("\n")
-
-    out.write("## Tool Result Token Totals\n\n")
-    out.write("| Tool Name | Total Tokens |\n")
-    out.write("|:----------|-------------:|\n")
-    for tool_name, tokens in sorted(
-        analysis["tool_totals"].items(), key=lambda x: -x[1]
-    ):
-        out.write(f"| `{tool_name}` | {tokens:,} |\n")
-    out.write("\n")
-
-    out.write("## Top 10 Largest Tool Results\n\n")
-    out.write("| Decision | Step | Tool | Tokens |\n")
-    out.write("|:---------|-----:|:-----|-------:|\n")
-    for decision_id, tool_name, step, tokens in analysis["top_tool_results"]:
-        out.write(f"| `{decision_id}` | {step} | `{tool_name}` | {tokens:,} |\n")
-    out.write("\n")
-
-    out.write("## Trivial Decisions (1-2 steps)\n\n")
-    out.write(f"- **Count**: {analysis['trivial_decision_count']}\n")
-    out.write(f"- **Total cost**: ${analysis['trivial_cost_usd']:.2f}\n\n")
-    if analysis["trivial_decisions"]:
-        out.write("### Examples\n\n")
-        out.write("| Decision | Steps | Prompt | Completion | Cost |\n")
-        out.write("|:---------|------:|-------:|-----------:|-----:|\n")
-        for td in analysis["trivial_decisions"][:5]:
+        out.write("## Average Prompt Size by Step\n\n")
+        out.write("| Step | Avg Tokens | Cached Share |\n")
+        out.write("|-----:|-----------:|-------------:|\n")
+        for step, avg in sorted(analysis["avg_prompt_by_step"].items()):
+            cached_share = analysis["cached_share_by_step"].get(step, 0)
+            out.write(f"| {step} | {avg:,.0f} | {cached_share:.1%} |\n")
+        out.write("\n## Prompt Composition (Profiled Calls)\n\n")
+        out.write("| Section | Share |\n")
+        out.write("|:--------|------:|\n")
+        for section, share in sorted(analysis["prompt_share"].items(), key=lambda x: -x[1]):
+            out.write(f"| {section} | {share:.1%} |\n")
+        out.write("\n## Tool Result Token Totals\n\n")
+        out.write("| Tool Name | Total Tokens |\n")
+        out.write("|:----------|-------------:|\n")
+        for tool_name, tokens in sorted(analysis["tool_totals"].items(), key=lambda x: -x[1]):
+            out.write(f"| `{tool_name}` | {tokens:,} |\n")
+        out.write("\n## Top 10 Largest Tool Results\n\n")
+        out.write("| Decision | Step | Tool | Tokens |\n")
+        out.write("|:---------|-----:|:-----|-------:|\n")
+        for decision_id, tool_name, step, tokens in analysis["top_tool_results"]:
+            out.write(f"| `{decision_id}` | {step} | `{tool_name}` | {tokens:,} |\n")
+        out.write("\n## Trivial Decisions (1-2 steps)\n\n")
+        out.write(f"- **Count**: {analysis['trivial_decision_count']}\n")
+        out.write(f"- **Total cost**: ${analysis['trivial_cost_usd']:.2f}\n\n")
+    else:
+        out.write("=" * 80 + "\n")
+        out.write("Reasoner Token Profile Report\n")
+        out.write("=" * 80 + "\n\n")
+        out.write(f"Total API calls: {analysis['total_calls']}\n")
+        out.write(f"  Profiled: {analysis['profiled_calls']}\n")
+        out.write(f"  Unprofiled: {analysis['unprofiled_calls']}\n\n")
+        out.write(f"Total tokens: {analysis['total_tokens']:,}\n")
+        out.write(f"  Prompt: {analysis['total_prompt']:,}\n")
+        out.write(f"    Uncached: {analysis['total_uncached_prompt']:,}\n")
+        out.write(f"    Cached: {analysis['total_cached']:,}\n")
+        if analysis["total_prompt"] > 0:
             out.write(
-                f"| `{td['decision_id']}` | {td['steps']} | "
-                f"{td['prompt']:,} | {td['completion']:,} | "
-                f"${td['cost_usd']:.3f} |\n"
+                f"    Cache hit rate: {analysis['total_cached'] / analysis['total_prompt']:.1%}\n"
             )
-    out.write("\n")
+        out.write(f"  Completion: {analysis['total_completion']:,}\n\n")
+        out.write(f"Estimated cost: ${analysis['estimated_cost_usd']:.2f}\n")
+        out.write(
+            f"  (input ${PRICE_INPUT_PER_M}/1M, "
+            f"cached ${PRICE_CACHED_PER_M}/1M, output ${PRICE_OUTPUT_PER_M}/1M)\n\n"
+        )
+        out.write("-" * 80 + "\n")
+        out.write("Average prompt size by step (within decisions)\n")
+        out.write("-" * 80 + "\n")
+        for step, avg in sorted(analysis["avg_prompt_by_step"].items()):
+            cached_share = analysis["cached_share_by_step"].get(step, 0)
+            out.write(f"  Step {step}: {avg:,.0f} tokens (cached {cached_share:.1%})\n")
+        out.write("\n")
+        out.write("-" * 80 + "\n")
+        out.write("Prompt composition share (from profiled calls)\n")
+        out.write("-" * 80 + "\n")
+        for section, share in sorted(analysis["prompt_share"].items(), key=lambda x: -x[1]):
+            out.write(f"  {section:20s}: {share:6.1%}\n")
+        out.write("\n")
+        out.write("-" * 80 + "\n")
+        out.write("Tool result token totals\n")
+        out.write("-" * 80 + "\n")
+        for tool_name, tokens in sorted(analysis["tool_totals"].items(), key=lambda x: -x[1]):
+            out.write(f"  {tool_name:30s}: {tokens:,} tokens\n")
+        out.write("\n")
+        out.write("-" * 80 + "\n")
+        out.write("Top 10 largest single tool results\n")
+        out.write("-" * 80 + "\n")
+        for decision_id, tool_name, step, tokens in analysis["top_tool_results"]:
+            out.write(f"  {decision_id} step {step:2d} {tool_name:20s}: {tokens:,} tokens\n")
+        out.write("\n")
+        out.write("-" * 80 + "\n")
+        out.write("Trivial decisions (1-2 steps)\n")
+        out.write("-" * 80 + "\n")
+        out.write(f"Count: {analysis['trivial_decision_count']}\n")
+        out.write(f"Total cost: ${analysis['trivial_cost_usd']:.2f}\n\n")
 
 
 def main() -> int:
@@ -452,7 +368,16 @@ def main() -> int:
         print(f"Error: log file not found: {args.log_path}", file=sys.stderr)
         return 1
 
-    profiles, usages = parse_log_file(args.log_path)
+    # Parse log file inline
+    profiles: list[TokenProfile] = []
+    usages: list[TokenUsage] = []
+
+    with args.log_path.open("r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if (profile := parse_token_profile_line(line)):
+                profiles.append(profile)
+            elif (usage := parse_token_usage_line(line)):
+                usages.append(usage)
 
     if not profiles and not usages:
         print(
@@ -463,10 +388,7 @@ def main() -> int:
 
     analysis = analyze_profiles(profiles, usages)
 
-    if args.markdown:
-        format_markdown_report(analysis, sys.stdout)
-    else:
-        format_text_report(analysis, sys.stdout)
+    format_report(analysis, sys.stdout, markdown=args.markdown)
 
     return 0
 
