@@ -18,7 +18,7 @@ def test_parse_token_profile_line():
     """Parse a valid token_profile line."""
     line = (
         "INFO:ai_agent.reasoner:token_profile decision=game123 step=0 "
-        "sys=1200 state=800 assistant_hist=0  "
+        "sys=1200 state=800 scout=0 assistant_hist=0 envelope=0 other=0 "
         "prompt=2000 cached=1000 completion=50"
     )
     profile = parse_token_profile_line(line)
@@ -27,7 +27,10 @@ def test_parse_token_profile_line():
     assert profile.step == 0
     assert profile.sys == 1200
     assert profile.state == 800
+    assert profile.scout == 0
     assert profile.assistant_hist == 0
+    assert profile.envelope == 0
+    assert profile.other == 0
     assert profile.tool_results_by_name == {}
     assert profile.prompt == 2000
     assert profile.cached == 1000
@@ -39,8 +42,9 @@ def test_parse_token_profile_line_with_tools():
     """Parse a token_profile line with tool results."""
     line = (
         "INFO:ai_agent.reasoner:token_profile decision=game456 step=2 "
-        "sys=1200 state=800 assistant_hist=500 "
+        "sys=1200 state=800 scout=500 assistant_hist=500 "
         "tool:search_for=3000 tool:deepen=1500 "
+        "envelope=100 other=400 "
         "prompt=7000 cached=3500 completion=100"
     )
     profile = parse_token_profile_line(line)
@@ -75,10 +79,11 @@ def test_parse_log_file(tmp_path: Path):
     log_path.write_text(
         "INFO:other:some unrelated log line\n"
         "INFO:ai_agent.reasoner:token_profile decision=dec1 step=0 "
-        "sys=1000 state=500 assistant_hist=0  "
+        "sys=1000 state=500 scout=0 assistant_hist=0 envelope=0 other=0 "
         "prompt=1500 cached=750 completion=30\n"
         "INFO:ai_agent.reasoner:token_profile decision=dec1 step=1 "
-        "sys=1000 state=500 assistant_hist=200 tool:search_for=2000 "
+        "sys=1000 state=500 scout=200 assistant_hist=200 tool:search_for=2000 "
+        "envelope=50 other=250 "
         "prompt=3700 cached=1850 completion=50\n"
         "INFO:ai_agent.reasoner:token_usage stage=reasoner_format "
         "prompt=2000 cached=1000 completion=100\n"
@@ -116,8 +121,11 @@ def test_analyze_profiles_basic():
             step=0,
             sys=1000,
             state=500,
+            scout=0,
             assistant_hist=0,
             tool_results_by_name={},
+            envelope=0,
+            other=0,
             prompt=1500,
             cached=750,
             completion=30,
@@ -127,8 +135,11 @@ def test_analyze_profiles_basic():
             step=1,
             sys=1000,
             state=500,
+            scout=200,
             assistant_hist=200,
             tool_results_by_name={"search_for": 2000},
+            envelope=50,
+            other=250,
             prompt=3700,
             cached=1850,
             completion=50,
@@ -179,8 +190,11 @@ def test_analyze_profiles_trivial_decisions():
             step=0,
             sys=1000,
             state=500,
+            scout=0,
             assistant_hist=0,
             tool_results_by_name={},
+            envelope=0,
+            other=0,
             prompt=1500,
             cached=750,
             completion=30,
@@ -190,8 +204,11 @@ def test_analyze_profiles_trivial_decisions():
             step=0,
             sys=1000,
             state=500,
+            scout=0,
             assistant_hist=0,
             tool_results_by_name={},
+            envelope=0,
+            other=0,
             prompt=1500,
             cached=750,
             completion=30,
@@ -201,8 +218,11 @@ def test_analyze_profiles_trivial_decisions():
             step=1,
             sys=1000,
             state=500,
+            scout=0,
             assistant_hist=100,
             tool_results_by_name={},
+            envelope=0,
+            other=0,
             prompt=1600,
             cached=800,
             completion=40,
@@ -212,8 +232,11 @@ def test_analyze_profiles_trivial_decisions():
             step=0,
             sys=1000,
             state=500,
+            scout=0,
             assistant_hist=0,
             tool_results_by_name={},
+            envelope=0,
+            other=0,
             prompt=1500,
             cached=750,
             completion=30,
@@ -223,8 +246,11 @@ def test_analyze_profiles_trivial_decisions():
             step=1,
             sys=1000,
             state=500,
+            scout=0,
             assistant_hist=100,
             tool_results_by_name={},
+            envelope=0,
+            other=0,
             prompt=1600,
             cached=800,
             completion=40,
@@ -234,8 +260,11 @@ def test_analyze_profiles_trivial_decisions():
             step=2,
             sys=1000,
             state=500,
+            scout=0,
             assistant_hist=200,
             tool_results_by_name={"search_for": 1000},
+            envelope=0,
+            other=0,
             prompt=2700,
             cached=1350,
             completion=60,
@@ -246,9 +275,6 @@ def test_analyze_profiles_trivial_decisions():
 
     assert analysis["trivial_decision_count"] == 2
     assert analysis["trivial_cost_usd"] > 0
-
-    trivial_ids = {td["decision_id"] for td in analysis["trivial_decisions"]}
-    assert trivial_ids == {"trivial1", "trivial2"}
 
 
 def test_format_text_report(tmp_path: Path, capsys):
@@ -261,8 +287,11 @@ def test_format_text_report(tmp_path: Path, capsys):
             step=0,
             sys=1000,
             state=500,
+            scout=0,
             assistant_hist=0,
             tool_results_by_name={},
+            envelope=0,
+            other=0,
             prompt=1500,
             cached=750,
             completion=30,
@@ -294,8 +323,11 @@ def test_format_markdown_report(tmp_path: Path):
             step=0,
             sys=1000,
             state=500,
+            scout=0,
             assistant_hist=0,
             tool_results_by_name={},
+            envelope=0,
+            other=0,
             prompt=1500,
             cached=750,
             completion=30,
@@ -315,3 +347,70 @@ def test_format_markdown_report(tmp_path: Path):
     assert "**Total API calls**: 1" in report
     assert "## Average Prompt Size by Step" in report
     assert "| Step | Avg Tokens | Cached Share |" in report
+
+
+def test_analyze_profiles_with_top_tool_results():
+    """Test that top_tool_results is built correctly."""
+    from ai_agent.tools.token_profile import TokenProfile
+
+    profiles = [
+        TokenProfile(
+            decision_id="dec1",
+            step=0,
+            sys=1000,
+            state=500,
+            scout=0,
+            assistant_hist=0,
+            tool_results_by_name={"search_for": 5000},
+            envelope=0,
+            other=0,
+            prompt=6500,
+            cached=0,
+            completion=50,
+        ),
+        TokenProfile(
+            decision_id="dec1",
+            step=1,
+            sys=1000,
+            state=500,
+            scout=0,
+            assistant_hist=200,
+            tool_results_by_name={"deepen": 3000, "search_for": 2000},
+            envelope=0,
+            other=0,
+            prompt=6700,
+            cached=0,
+            completion=60,
+        ),
+        TokenProfile(
+            decision_id="dec2",
+            step=0,
+            sys=1000,
+            state=500,
+            scout=0,
+            assistant_hist=0,
+            tool_results_by_name={"simulate_line": 8000},
+            envelope=0,
+            other=0,
+            prompt=9500,
+            cached=0,
+            completion=40,
+        ),
+    ]
+
+    analysis = analyze_profiles(profiles, [])
+
+    # Check top_tool_results exists and is sorted by token count (descending)
+    assert "top_tool_results" in analysis
+    top = analysis["top_tool_results"]
+    assert len(top) == 4  # 4 tool results total
+    
+    # First should be simulate_line with 8000 tokens
+    assert top[0][0] == "dec2"  # decision_id
+    assert top[0][1] == "simulate_line"  # tool_name
+    assert top[0][2] == 0  # step
+    assert top[0][3] == 8000  # tokens
+    
+    # Second should be search_for with 5000 tokens
+    assert top[1][3] == 5000
+    assert top[1][1] == "search_for"

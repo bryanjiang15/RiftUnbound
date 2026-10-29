@@ -78,13 +78,13 @@ def _log_token_profile(
         f"envelope={envelope_tokens} other={other_tokens} "
         f"prompt={prompt_tokens} cached={cached_tokens} completion={completion_tokens}\n"
     )
-    # Write to search log so token_profile.py can find it
-    search_log = Path(__file__).resolve().parent / "agent_search.log"
-    try:
-        with search_log.open("a", encoding="utf-8") as f:
-            f.write(line)
-    except Exception:
-        pass  # Don't let profiling break decisions
+    # Write to search log using agent's path and gate
+    if agent_module._LOG_INPUTS:
+        try:
+            with agent_module._SEARCH_LOG_PATH.open("a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass  # Don't let profiling break decisions
 
 
 def _log_token_usage(
@@ -819,17 +819,20 @@ async def _request_reasoning(
     # Token profiling - compute base prompt segments once
     base_system_tokens = _estimate_tokens(system)
     # Split state message into actual state vs scout baseline
-    state_only = (
-        f"{_TASK}\n\nRecent timeline:\n{memory_summary or '(none)'}\n\n"
-        f"Current state:\n{agent_module._format_brief_state(brief_state)}\n\n"
-        f"PINNED ROOT HASH: {root_state_hash or '(unavailable)'}\n\n"
-    )
+    user_parts = {
+        "task_and_timeline": f"{_TASK}\n\nRecent timeline:\n{memory_summary or '(none)'}\n\n",
+        "state_and_root": f"Current state:\n{agent_module._format_brief_state(brief_state)}\n\n"
+                         f"PINNED ROOT HASH: {root_state_hash or '(unavailable)'}\n\n",
+        "scout_header": "SCOUT BASELINE (already grounded; do not call search_turn merely to reread it):\n"
+    }
+    state_only = user_parts["task_and_timeline"] + user_parts["state_and_root"]
     base_state_tokens = _estimate_tokens(state_only)
-    base_scout_tokens = _estimate_tokens(scout_block) if known_lines else 0
+    scout_content = user_parts["scout_header"] + leader_note + scout_block
+    base_scout_tokens = _estimate_tokens(scout_content) if known_lines else 0
     # Map tool_call_id to tool name for profiling (never injected into model payload)
     tool_call_to_name: dict[str, str] = {}
-    # Track decision counter for unique decision IDs
-    decision_counter = [0]  # Use list for mutability in nested function
+    # Build decision ID once per decision (game_id + turn + root hash uniquely identifies it)
+    decision_id = f"{game_id}-t{turn}-r{root_state_hash[:8]}"
 
     def _safe_profile_messages() -> tuple[int, dict[str, int], int]:
         """Safely profile message tokens. Never raises."""
@@ -998,11 +1001,7 @@ async def _request_reasoning(
                     + sum(tool_results_by_name.values())
                     + envelope_tokens
                 )
-                other_tokens = max(0, prompt_tokens - estimated_total)
-
-                # Generate unique decision ID
-                decision_counter[0] += 1
-                decision_id = f"{game_id}-t{turn}-r{root_state_hash[:8]}-d{decision_counter[0]}"
+                other_tokens = prompt_tokens - estimated_total
 
                 _log_token_profile(
                     decision_id=decision_id,
