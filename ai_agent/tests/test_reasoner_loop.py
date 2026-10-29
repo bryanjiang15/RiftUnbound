@@ -255,7 +255,13 @@ def _assert_tool_replies_contiguous(messages: list[dict]) -> None:
         if not tool_calls:
             i += 1
             continue
-        expected_ids = [tc.id for tc in tool_calls]
+        # Handle both SDK objects and dict formats
+        expected_ids = []
+        for tc in tool_calls:
+            if isinstance(tc, dict):
+                expected_ids.append(tc["id"])
+            else:
+                expected_ids.append(tc.id)
         i += 1
         for tool_call_id in expected_ids:
             assert i < len(messages), f"missing tool reply for {tool_call_id}"
@@ -341,11 +347,25 @@ def test_parallel_deepen_defers_feedback_envelopes_until_all_tool_replies():
     _assert_tool_replies_contiguous(followup_messages)
 
     # Locate the parallel deepen turn: both tool replies, then both envelopes.
+    def get_tool_call_ids(msg):
+        """Extract tool call IDs from either SDK objects or dict format."""
+        tool_calls = getattr(msg, "tool_calls", None)
+        if isinstance(msg, dict):
+            tool_calls = msg.get("tool_calls")
+        if not tool_calls:
+            return set()
+        ids = []
+        for tc in tool_calls:
+            if isinstance(tc, dict):
+                ids.append(tc["id"])
+            else:
+                ids.append(tc.id)
+        return set(ids)
+    
     deepen_idx = next(
         i
         for i, msg in enumerate(followup_messages)
-        if getattr(msg, "tool_calls", None)
-        and {tc.id for tc in msg.tool_calls} == {deepen_a.id, deepen_b.id}
+        if get_tool_call_ids(msg) == {deepen_a.id, deepen_b.id}
     )
     after = followup_messages[deepen_idx + 1 : deepen_idx + 5]
     assert [m.get("role") for m in after] == ["tool", "tool", "user", "user"]

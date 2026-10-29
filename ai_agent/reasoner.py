@@ -66,6 +66,7 @@ def _log_token_profile(
 ) -> None:
     """Log one parseable token profile line to agent_search.log."""
     from pathlib import Path
+    from . import agent as agent_module
 
     tool_parts = " ".join(
         f"tool:{name}={tokens}"
@@ -1046,7 +1047,7 @@ async def _request_reasoning(
                 "tool_calls": [
                     {
                         "id": tc.id,
-                        "type": tc.type,
+                        "type": "function",
                         "function": {"name": tc.function.name, "arguments": tc.function.arguments},
                     }
                     for tc in msg.tool_calls
