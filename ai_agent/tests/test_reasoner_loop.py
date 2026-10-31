@@ -244,18 +244,23 @@ def test_budget_exhaustion_is_explicit_gate_exemption_for_nonempty_goals():
     assert len(emit.goal_set.goals) == 1
 
 
+def _get_tool_call_ids(msg: dict) -> list[str]:
+    """Extract tool call IDs from dict message format."""
+    tool_calls = msg.get("tool_calls")
+    if not tool_calls:
+        return []
+    return [tc["id"] for tc in tool_calls]
+
+
 def _assert_tool_replies_contiguous(messages: list[dict]) -> None:
     """OpenAI requires all tool replies immediately after an assistant tool_calls msg."""
     i = 0
     while i < len(messages):
         msg = messages[i]
-        tool_calls = getattr(msg, "tool_calls", None)
-        if isinstance(msg, dict):
-            tool_calls = msg.get("tool_calls")
-        if not tool_calls:
+        expected_ids = _get_tool_call_ids(msg)
+        if not expected_ids:
             i += 1
             continue
-        expected_ids = [tc.id for tc in tool_calls]
         i += 1
         for tool_call_id in expected_ids:
             assert i < len(messages), f"missing tool reply for {tool_call_id}"
@@ -344,8 +349,7 @@ def test_parallel_deepen_defers_feedback_envelopes_until_all_tool_replies():
     deepen_idx = next(
         i
         for i, msg in enumerate(followup_messages)
-        if getattr(msg, "tool_calls", None)
-        and {tc.id for tc in msg.tool_calls} == {deepen_a.id, deepen_b.id}
+        if set(_get_tool_call_ids(msg)) == {deepen_a.id, deepen_b.id}
     )
     after = followup_messages[deepen_idx + 1 : deepen_idx + 5]
     assert [m.get("role") for m in after] == ["tool", "tool", "user", "user"]

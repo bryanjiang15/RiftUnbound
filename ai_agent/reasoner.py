@@ -31,6 +31,64 @@ from .tool_budget import current_budget
 logger = logging.getLogger(__name__)
 
 REASONER_MAX_TOOL_ROUNDS = 6
+
+
+def _estimate_tokens(text: str) -> int:
+    """Estimate token count using chars/4 heuristic."""
+    return len(text) // 4
+
+
+def _log_token_profile(
+    *,
+    decision_id: str,
+    step: int,
+    system_tokens: int,
+    state_tokens: int,
+    scout_tokens: int,
+    assistant_hist_tokens: int,
+    tool_results_by_name: dict[str, int],
+    envelope_tokens: int,
+    other_tokens: int,
+    prompt_tokens: int,
+    cached_tokens: int,
+    completion_tokens: int,
+) -> None:
+    """Log one parseable token profile line to agent_search.log."""
+    from . import agent as agent_module
+
+    tool_parts = " ".join(
+        f"tool:{name}={tokens}"
+        for name, tokens in sorted(tool_results_by_name.items())
+    )
+    line = (
+        f"token_profile decision={decision_id} step={step} "
+        f"sys={system_tokens} state={state_tokens} scout={scout_tokens} "
+        f"assistant_hist={assistant_hist_tokens} {tool_parts} "
+        f"envelope={envelope_tokens} other={other_tokens} "
+        f"prompt={prompt_tokens} cached={cached_tokens} completion={completion_tokens}\n"
+    )
+    # Write to search log using agent's path and gate
+    if agent_module._LOG_INPUTS:
+        try:
+            with agent_module._SEARCH_LOG_PATH.open("a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            logger.warning("Token profile write failed", exc_info=True)
+
+
+def _log_token_usage(
+    *,
+    stage: str,
+    prompt_tokens: int,
+    cached_tokens: int,
+    completion_tokens: int,
+) -> None:
+    """Log a simple token usage line (for backward compat or untracked calls)."""
+    logger.info(
+        f"token_usage stage={stage} prompt={prompt_tokens} "
+        f"cached={cached_tokens} completion={completion_tokens}"
+    )
+
 TERMINAL_RETRIES = 3
 REASONER_TOOL_NAMES = frozenset({
     "evaluate_position",
@@ -704,13 +762,19 @@ async def _request_reasoning(
                 f"risk_adjusted_score={top.get('risk_adjusted_score')}, "
                 f"method={top.get('risk_adjustment_method')}).\n"
             )
+    # Token profiling - compute base prompt segments once
+    user_parts = {
+        "task_and_timeline": f"{_TASK}\n\nRecent timeline:\n{memory_summary or '(none)'}\n\n",
+        "state_and_root": f"Current state:\n{agent_module._format_brief_state(brief_state)}\n\n"
+                         f"PINNED ROOT HASH: {root_state_hash or '(unavailable)'}\n\n",
+        "scout_header": "SCOUT BASELINE (already grounded; do not call search_turn merely to reread it):\n",
+        "scout_content": leader_note + scout_block,
+    }
     user = (
-        f"{_TASK}\n\nRecent timeline:\n{memory_summary or '(none)'}\n\n"
-        f"Current state:\n{agent_module._format_brief_state(brief_state)}\n\n"
-        f"PINNED ROOT HASH: {root_state_hash or '(unavailable)'}\n\n"
-        "SCOUT BASELINE (already grounded; do not call search_turn merely to reread it):\n"
-        f"{leader_note}"
-        f"{scout_block}"
+        user_parts["task_and_timeline"] +
+        user_parts["state_and_root"] +
+        user_parts["scout_header"] +
+        user_parts["scout_content"]
     )
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system},
@@ -746,6 +810,50 @@ async def _request_reasoning(
             "local_fork_attempted": False,
             "novel_suffix_found": False,
         })
+
+    # Token profiling - compute base prompt token counts
+    base_system_tokens = _estimate_tokens(system)
+    # Split state message into actual state vs scout baseline
+    state_only = user_parts["task_and_timeline"] + user_parts["state_and_root"]
+    base_state_tokens = _estimate_tokens(state_only)
+    scout_content = user_parts["scout_header"] + user_parts["scout_content"]
+    base_scout_tokens = _estimate_tokens(scout_content) if known_lines else 0
+    # Map tool_call_id to tool name for profiling (never injected into model payload)
+    tool_call_to_name: dict[str, str] = {}
+    # Build decision ID once per decision (game_id + turn + root hash uniquely identifies it)
+    decision_id = f"{game_id}-t{turn}-r{(root_state_hash or 'none')[:8]}"
+
+    def _safe_profile_messages() -> tuple[int, dict[str, int], int]:
+        """Safely profile message tokens. Never raises."""
+        try:
+            assistant_hist_tokens = 0
+            tool_results_by_name: dict[str, int] = {}
+            envelope_tokens = 0
+
+            for msg in messages[2:]:  # Skip system and initial user
+                role = msg.get("role", "")
+                content = msg.get("content")
+
+                if not content:
+                    continue
+
+                content_str = str(content)
+                tokens = _estimate_tokens(content_str)
+
+                if role == "assistant":
+                    assistant_hist_tokens += tokens
+                elif role == "tool":
+                    tool_call_id = msg.get("tool_call_id", "")
+                    tool_name = tool_call_to_name.get(tool_call_id, "unknown")
+                    tool_results_by_name[tool_name] = tool_results_by_name.get(tool_name, 0) + tokens
+                elif role == "user":
+                    # Envelopes and nudges
+                    envelope_tokens += tokens
+
+            return assistant_hist_tokens, tool_results_by_name, envelope_tokens
+        except Exception:
+            logger.warning("Token profile message analysis failed", exc_info=True)
+            return 0, {}, 0
 
     def finish(emit: ReasonerEmit, outcome: str) -> ReasonerEmit:
         if context is not None:
@@ -854,6 +962,47 @@ async def _request_reasoning(
                     response_format={"type": "text"},
                 ),
             )
+
+            # Token profiling for this API call
+            try:
+                assistant_hist_tokens, tool_results_by_name, envelope_tokens = _safe_profile_messages()
+
+                usage = getattr(response, "usage", None)
+                prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0) if usage else 0
+                completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0) if usage else 0
+                cached_tokens = 0
+                if usage:
+                    prompt_details = getattr(usage, "prompt_tokens_details", None)
+                    if prompt_details:
+                        cached_tokens = int(getattr(prompt_details, "cached_tokens", 0) or 0)
+
+                # Compute residual (actual prompt minus estimated parts)
+                estimated_total = (
+                    base_system_tokens
+                    + base_state_tokens
+                    + base_scout_tokens
+                    + assistant_hist_tokens
+                    + sum(tool_results_by_name.values())
+                    + envelope_tokens
+                )
+                other_tokens = prompt_tokens - estimated_total
+
+                _log_token_profile(
+                    decision_id=decision_id,
+                    step=round_index,
+                    system_tokens=base_system_tokens,
+                    state_tokens=base_state_tokens,
+                    scout_tokens=base_scout_tokens,
+                    assistant_hist_tokens=assistant_hist_tokens,
+                    tool_results_by_name=tool_results_by_name,
+                    envelope_tokens=envelope_tokens,
+                    other_tokens=other_tokens,
+                    prompt_tokens=prompt_tokens,
+                    cached_tokens=cached_tokens,
+                    completion_tokens=completion_tokens,
+                )
+            except Exception:
+                logger.warning("Token profiling failed", exc_info=True)
         except agent_module.TRANSIENT_API_ERRORS as exc:
             return finish(
                 base_search_fallback(
@@ -870,7 +1019,23 @@ async def _request_reasoning(
 
         msg = response.choices[0].message
         if msg.tool_calls:
-            messages.append(msg)  # type: ignore[arg-type]
+            # Record tool_call_id to name mapping for profiling
+            for tc in msg.tool_calls:
+                tool_call_to_name[tc.id] = tc.function.name
+
+            # Convert SDK message to dict so next round's profiling doesn't crash
+            messages.append({
+                "role": "assistant",
+                "content": msg.content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                    }
+                    for tc in msg.tool_calls
+                ],
+            })
             # OpenAI requires every tool_call_id to receive a contiguous tool
             # reply before any other role. Defer feedback envelopes until all
             # tool replies for this assistant turn are appended.
@@ -911,6 +1076,8 @@ async def _request_reasoning(
                         return finish(emit, f"terminal={emit.kind}")
                     terminal_failures += 1
                     terminal_errors.append(str(error))
+                    # Record tool name for profiling (terminal rejection)
+                    tool_call_to_name[tc.id] = name
                     result: Any = {
                         "accepted": False,
                         "error": error,
@@ -940,9 +1107,13 @@ async def _request_reasoning(
                     continue
 
                 if name not in REASONER_TOOL_NAMES:
+                    # Record tool name for profiling (not-available path)
+                    tool_call_to_name[tc.id] = name
                     result = {"error": f"Tool '{name}' is not available to the Reasoner."}
                     result_text = json.dumps(result)
                 else:
+                    # Record tool name for profiling (regular path)
+                    tool_call_to_name[tc.id] = name
                     result_text = agent_module._invoke_traced_tool(
                         tool_trace,
                         round_num=round_index,
@@ -951,6 +1122,7 @@ async def _request_reasoning(
                     )
                     try:
                         result = json.loads(result_text)
+                        # Do NOT inject _tool_name - profiling uses tool_call_to_name mapping
                     except (json.JSONDecodeError, TypeError):
                         result = result_text
 
@@ -1147,6 +1319,22 @@ async def _format_emit(
                 response_format={"type": "text"},
             ),
         )
+
+        # Log token usage for format phase
+        usage = getattr(response, "usage", None)
+        if usage:
+            prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+            completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+            cached_tokens = 0
+            prompt_details = getattr(usage, "prompt_tokens_details", None)
+            if prompt_details:
+                cached_tokens = int(getattr(prompt_details, "cached_tokens", 0) or 0)
+            _log_token_usage(
+                stage="reasoner_format",
+                prompt_tokens=prompt_tokens,
+                cached_tokens=cached_tokens,
+                completion_tokens=completion_tokens,
+            )
     except Exception as exc:
         logger.warning("Reasoner fail-safe format phase failed: %s", exc)
         return None
