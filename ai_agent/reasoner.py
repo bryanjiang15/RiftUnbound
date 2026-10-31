@@ -11,12 +11,6 @@ from typing import Any, Callable
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 
-try:
-    import tiktoken
-    _TOKENIZER = tiktoken.encoding_for_model("gpt-4")
-except Exception:
-    _TOKENIZER = None
-
 from .investigation_metrics import (
     advisory_critic_notes,
     build_feedback_envelope,
@@ -40,12 +34,7 @@ REASONER_MAX_TOOL_ROUNDS = 6
 
 
 def _estimate_tokens(text: str) -> int:
-    """Estimate token count using tiktoken if available, else chars/4."""
-    if _TOKENIZER is not None:
-        try:
-            return len(_TOKENIZER.encode(text))
-        except Exception:
-            pass
+    """Estimate token count using chars/4 heuristic."""
     return len(text) // 4
 
 
@@ -832,7 +821,7 @@ async def _request_reasoning(
     # Map tool_call_id to tool name for profiling (never injected into model payload)
     tool_call_to_name: dict[str, str] = {}
     # Build decision ID once per decision (game_id + turn + root hash uniquely identifies it)
-    decision_id = f"{game_id}-t{turn}-r{root_state_hash[:8]}"
+    decision_id = f"{game_id}-t{turn}-r{(root_state_hash or 'none')[:8]}"
 
     def _safe_profile_messages() -> tuple[int, dict[str, int], int]:
         """Safely profile message tokens. Never raises."""
@@ -842,13 +831,8 @@ async def _request_reasoning(
             envelope_tokens = 0
 
             for msg in messages[2:]:  # Skip system and initial user
-                # Handle both dict and SDK message objects
-                if isinstance(msg, dict):
-                    role = msg.get("role", "")
-                    content = msg.get("content")
-                else:
-                    role = getattr(msg, "role", "")
-                    content = getattr(msg, "content", None)
+                role = msg.get("role", "")
+                content = msg.get("content")
 
                 if not content:
                     continue
@@ -859,8 +843,7 @@ async def _request_reasoning(
                 if role == "assistant":
                     assistant_hist_tokens += tokens
                 elif role == "tool":
-                    # Map tool_call_id to tool name
-                    tool_call_id = msg.get("tool_call_id", "") if isinstance(msg, dict) else getattr(msg, "tool_call_id", "")
+                    tool_call_id = msg.get("tool_call_id", "")
                     tool_name = tool_call_to_name.get(tool_call_id, "unknown")
                     tool_results_by_name[tool_name] = tool_results_by_name.get(tool_name, 0) + tokens
                 elif role == "user":
@@ -869,7 +852,8 @@ async def _request_reasoning(
 
             return assistant_hist_tokens, tool_results_by_name, envelope_tokens
         except Exception:
-            return 0, {}, 0  # Never let profiling break decisions
+            logger.warning("Token profile message analysis failed", exc_info=True)
+            return 0, {}, 0
 
     def finish(emit: ReasonerEmit, outcome: str) -> ReasonerEmit:
         if context is not None:

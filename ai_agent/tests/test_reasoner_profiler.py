@@ -180,3 +180,93 @@ async def test_profiler_survives_multiple_tool_rounds(tmp_path, monkeypatch):
 
     finally:
         reset_context(token)
+
+
+@pytest.mark.asyncio
+async def test_profiler_handles_none_root_hash(tmp_path, monkeypatch):
+    """Token profiling must not crash when root_state_hash is None (decision_id construction)."""
+    from pathlib import Path
+    from ai_agent.reasoner import _request_reasoning
+    from ai_agent.reasoner_context import ReasonerTurnContext, install_context, reset_context
+    import ai_agent.agent as agent_module
+
+    log_path = tmp_path / "agent_search.log"
+    monkeypatch.setattr(agent_module, "_SEARCH_LOG_PATH", log_path)
+    monkeypatch.setattr(agent_module, "_LOG_INPUTS", True)
+
+    brief_state = {
+        "turn_number": 1,
+        "active_player": "player",
+        "phase": "main",
+        "my_state": {"life": 20},
+        "opp_state": {"life": 20},
+        "legal_moves": ["pass"],
+    }
+
+    # No scout lines for this test - just testing profiling doesn't crash
+    known_lines = []
+
+    context = ReasonerTurnContext(
+        game_id="game-none",
+        brief_state=brief_state,
+        root_state_hash=None,
+        memory_summary="",
+        scout_lines=known_lines,
+    )
+
+    mock_client = AsyncMock()
+
+    # Single round: model immediately commits with a move (will fail validation but we don't care)
+    round_0_response = Mock()
+    round_0_response.choices = [Mock()]
+    round_0_msg = Mock()
+    round_0_msg.content = None
+    round_0_msg.tool_calls = [Mock()]
+    round_0_msg.tool_calls[0].id = "call_1"
+    round_0_msg.tool_calls[0].type = "function"
+    round_0_msg.tool_calls[0].function = Mock()
+    round_0_msg.tool_calls[0].function.name = "commit_move"
+    round_0_msg.tool_calls[0].function.arguments = '{"move": "pass", "rationale": "only option"}'
+    round_0_response.choices[0].message = round_0_msg
+    round_0_response.usage = Mock()
+    round_0_response.usage.prompt_tokens = 2000
+    round_0_response.usage.completion_tokens = 30
+    round_0_response.usage.prompt_tokens_details = Mock()
+    round_0_response.usage.prompt_tokens_details.cached_tokens = 0
+
+    mock_client.chat.completions.create = AsyncMock(side_effect=[round_0_response])
+
+    def fake_invoke_tool(tool_trace, *, round_num, name, args):
+        return json.dumps({})
+
+    token = install_context(context)
+    try:
+        with patch.object(agent_module, '_invoke_traced_tool', side_effect=fake_invoke_tool):
+            emit = await _request_reasoning(
+                client=mock_client,
+                model="gpt-4o",
+                game_id="game-none",
+                brief_state=brief_state,
+                memory_summary="",
+                known_lines=known_lines,
+                root_state_hash=None,
+            )
+
+            # We don't care if reasoner falls back - just that profiling didn't cause TypeError
+            # The key is that decision_id construction with None didn't crash
+
+            # Read the log and verify token_profile line was written (proves no crash)
+            log_lines = log_path.read_text().strip().split("\n")
+            profile_lines = [l for l in log_lines if "token_profile" in l]
+
+            assert len(profile_lines) >= 1, f"Expected at least 1 profile line, got {len(profile_lines)}"
+
+            # Decision ID should be game-none-t1-rnone (handles None hash without crashing)
+            import re
+            dec_match = re.search(r"decision=(\S+)", profile_lines[0])
+            assert dec_match is not None, "No decision ID found in profile line"
+            decision_id = dec_match.group(1)
+            assert decision_id == "game-none-t1-rnone", f"Expected game-none-t1-rnone, got {decision_id}"
+
+    finally:
+        reset_context(token)
