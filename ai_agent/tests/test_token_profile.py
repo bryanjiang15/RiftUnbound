@@ -58,6 +58,24 @@ def test_parse_token_profile_line_with_tools():
     assert profile.completion == 100
 
 
+def test_parse_token_profile_line_with_negative_other():
+    """Parse a token_profile line with negative other (underestimation)."""
+    line = (
+        "INFO:ai_agent.reasoner:token_profile decision=game789 step=1 "
+        "sys=1000 state=600 scout=300 assistant_hist=250 "
+        "tool:search_for=2500 "
+        "envelope=80 other=-120 "
+        "prompt=4500 cached=2000 completion=75"
+    )
+    profile = parse_token_profile_line(line)
+    assert profile is not None
+    assert profile.decision_id == "game789"
+    assert profile.step == 1
+    assert profile.other == -120, "Negative other should be parsed correctly"
+    assert profile.prompt == 4500
+    assert profile.cached == 2000
+
+
 def test_parse_token_usage_line():
     """Parse a valid token_usage line."""
     line = (
@@ -274,6 +292,7 @@ def test_analyze_profiles_trivial_decisions():
     analysis = analyze_profiles(profiles, [])
 
     assert analysis["trivial_decision_count"] == 2
+    assert set(analysis["trivial_ids"]) == {"trivial1", "trivial2"}
     assert analysis["trivial_cost_usd"] > 0
 
 

@@ -38,6 +38,7 @@ class TokenProfile:
     def uncached_prompt(self) -> int:
         return self.prompt - self.cached
 
+
 @dataclass
 class TokenUsage:
     """Simple token usage measurement (non-profiled calls)."""
@@ -50,10 +51,12 @@ class TokenUsage:
     def uncached_prompt(self) -> int:
         return self.prompt - self.cached
 
+
 # OpenAI GPT pricing (per 1M tokens)
 PRICE_INPUT_PER_M = 2.50
 PRICE_CACHED_PER_M = 0.25
 PRICE_OUTPUT_PER_M = 15.00
+
 
 def parse_token_profile_line(line: str) -> TokenProfile | None:
     """Parse one token_profile log line."""
@@ -63,7 +66,7 @@ def parse_token_profile_line(line: str) -> TokenProfile | None:
         r"token_profile decision=(\S+) step=(\d+) "
         r"sys=(\d+) state=(\d+) scout=(\d+) assistant_hist=(\d+) "
         r"(.*?)"
-        r"envelope=(\d+) other=(\d+) "
+        r"envelope=(\d+) other=(-?\d+) "
         r"prompt=(\d+) cached=(\d+) completion=(\d+)",
         line,
     )
@@ -102,6 +105,7 @@ def parse_token_profile_line(line: str) -> TokenProfile | None:
         completion=completion,
     )
 
+
 def parse_token_usage_line(line: str) -> TokenUsage | None:
     """Parse one token_usage log line."""
     if "token_usage" not in line:
@@ -119,6 +123,7 @@ def parse_token_usage_line(line: str) -> TokenUsage | None:
         completion=int(match.group(4)),
     )
 
+
 def parse_log_file(log_path: Path) -> tuple[list[TokenProfile], list[TokenUsage]]:
     """Parse profiles and usages from a log file."""
     profiles: list[TokenProfile] = []
@@ -130,6 +135,7 @@ def parse_log_file(log_path: Path) -> tuple[list[TokenProfile], list[TokenUsage]
             elif (usage := parse_token_usage_line(line)):
                 usages.append(usage)
     return profiles, usages
+
 
 def analyze_profiles(
     profiles: list[TokenProfile], usages: list[TokenUsage]
@@ -194,8 +200,9 @@ def analyze_profiles(
     decisions_by_id: dict[str, list[TokenProfile]] = defaultdict(list)
     for p in profiles:
         decisions_by_id[p.decision_id].append(p)
+    trivial_decision_ids = [dec_id for dec_id, steps in decisions_by_id.items() if len(steps) <= 2]
     trivial_stats = {
-        "count": sum(1 for steps in decisions_by_id.values() if len(steps) <= 2),
+        "count": len(trivial_decision_ids),
         "cost": sum(
             sum(s.uncached_prompt for s in steps) / 1_000_000 * PRICE_INPUT_PER_M
             + sum(s.cached for s in steps) / 1_000_000 * PRICE_CACHED_PER_M
@@ -237,8 +244,10 @@ def analyze_profiles(
         "top_tool_results": top_tool_results,
         "trivial_decision_count": trivial_stats["count"],
         "trivial_cost_usd": trivial_stats["cost"],
+        "trivial_ids": trivial_decision_ids,
         "cached_share_by_step": cached_share_by_step,
     }
+
 
 def format_markdown_report(analysis: dict, out: TextIO) -> None:
     """Write a report in markdown format."""
@@ -341,15 +350,6 @@ def format_text_report(analysis: dict, out: TextIO) -> None:
     out.write(f"Total cost: ${analysis['trivial_cost_usd']:.2f}\n\n")
 
 
-def format_report(analysis: dict, out: TextIO, markdown: bool = False) -> None:
-    """Write a report in text or markdown format (compatibility wrapper)."""
-    if markdown:
-        format_markdown_report(analysis, out)
-    else:
-        format_text_report(analysis, out)
-
-
-
 def main() -> int:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -374,16 +374,7 @@ def main() -> int:
         print(f"Error: log file not found: {args.log_path}", file=sys.stderr)
         return 1
 
-    # Parse log file inline
-    profiles: list[TokenProfile] = []
-    usages: list[TokenUsage] = []
-
-    with args.log_path.open("r", encoding="utf-8", errors="replace") as f:
-        for line in f:
-            if (profile := parse_token_profile_line(line)):
-                profiles.append(profile)
-            elif (usage := parse_token_usage_line(line)):
-                usages.append(usage)
+    profiles, usages = parse_log_file(args.log_path)
 
     if not profiles and not usages:
         print(
@@ -394,7 +385,10 @@ def main() -> int:
 
     analysis = analyze_profiles(profiles, usages)
 
-    format_report(analysis, sys.stdout, markdown=args.markdown)
+    if args.markdown:
+        format_markdown_report(analysis, sys.stdout)
+    else:
+        format_text_report(analysis, sys.stdout)
 
     return 0
 

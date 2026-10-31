@@ -65,7 +65,6 @@ def _log_token_profile(
     completion_tokens: int,
 ) -> None:
     """Log one parseable token profile line to agent_search.log."""
-    from pathlib import Path
     from . import agent as agent_module
 
     tool_parts = " ".join(
@@ -85,7 +84,7 @@ def _log_token_profile(
             with agent_module._SEARCH_LOG_PATH.open("a", encoding="utf-8") as f:
                 f.write(line)
         except Exception:
-            pass  # Don't let profiling break decisions
+            logger.warning("Token profile write failed", exc_info=True)
 
 
 def _log_token_usage(
@@ -774,13 +773,19 @@ async def _request_reasoning(
                 f"risk_adjusted_score={top.get('risk_adjusted_score')}, "
                 f"method={top.get('risk_adjustment_method')}).\n"
             )
+    # Token profiling - compute base prompt segments once
+    user_parts = {
+        "task_and_timeline": f"{_TASK}\n\nRecent timeline:\n{memory_summary or '(none)'}\n\n",
+        "state_and_root": f"Current state:\n{agent_module._format_brief_state(brief_state)}\n\n"
+                         f"PINNED ROOT HASH: {root_state_hash or '(unavailable)'}\n\n",
+        "scout_header": "SCOUT BASELINE (already grounded; do not call search_turn merely to reread it):\n",
+        "scout_content": leader_note + scout_block,
+    }
     user = (
-        f"{_TASK}\n\nRecent timeline:\n{memory_summary or '(none)'}\n\n"
-        f"Current state:\n{agent_module._format_brief_state(brief_state)}\n\n"
-        f"PINNED ROOT HASH: {root_state_hash or '(unavailable)'}\n\n"
-        "SCOUT BASELINE (already grounded; do not call search_turn merely to reread it):\n"
-        f"{leader_note}"
-        f"{scout_block}"
+        user_parts["task_and_timeline"] +
+        user_parts["state_and_root"] +
+        user_parts["scout_header"] +
+        user_parts["scout_content"]
     )
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system},
@@ -817,18 +822,12 @@ async def _request_reasoning(
             "novel_suffix_found": False,
         })
 
-    # Token profiling - compute base prompt segments once
+    # Token profiling - compute base prompt token counts
     base_system_tokens = _estimate_tokens(system)
     # Split state message into actual state vs scout baseline
-    user_parts = {
-        "task_and_timeline": f"{_TASK}\n\nRecent timeline:\n{memory_summary or '(none)'}\n\n",
-        "state_and_root": f"Current state:\n{agent_module._format_brief_state(brief_state)}\n\n"
-                         f"PINNED ROOT HASH: {root_state_hash or '(unavailable)'}\n\n",
-        "scout_header": "SCOUT BASELINE (already grounded; do not call search_turn merely to reread it):\n"
-    }
     state_only = user_parts["task_and_timeline"] + user_parts["state_and_root"]
     base_state_tokens = _estimate_tokens(state_only)
-    scout_content = user_parts["scout_header"] + leader_note + scout_block
+    scout_content = user_parts["scout_header"] + user_parts["scout_content"]
     base_scout_tokens = _estimate_tokens(scout_content) if known_lines else 0
     # Map tool_call_id to tool name for profiling (never injected into model payload)
     tool_call_to_name: dict[str, str] = {}
@@ -1019,7 +1018,7 @@ async def _request_reasoning(
                     completion_tokens=completion_tokens,
                 )
             except Exception:
-                pass  # Never let profiling break decisions
+                logger.warning("Token profiling failed", exc_info=True)
         except agent_module.TRANSIENT_API_ERRORS as exc:
             return finish(
                 base_search_fallback(
