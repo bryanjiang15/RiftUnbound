@@ -151,6 +151,6 @@ The `other` field in the report is a residual: actual prompt tokens minus the su
 
 - Formatting overhead (JSON encoding, role markers, tool_call metadata)
 - Small user nudges ("Do not end in prose. Call commit_line...")
-- Estimation error (tiktoken approximation vs OpenAI's real tokenizer)
+- Estimation error (chars/4 approximation vs OpenAI's real tokenizer)
 
 A healthy `other` value is 5-15% of the prompt. If `other` is negative or >20%, the estimator may be missing a source.
